@@ -1,0 +1,24 @@
+{
+  "name": "attendance-connector",
+  "version": "1.0.0",
+  "description": "Biometric device connector - runs in background, syncs to cloud",
+  "main": "index.js",
+  "bin": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "build": "pkg . --targets node18-win-x64,node18-macos-x64 --output dist/connector",
+    "build:win": "pkg . --targets node18-win-x64 --output dist/connector.exe",
+    "build:mac": "pkg . --targets node18-macos-x64 --output dist/connector-mac"
+  },
+  "pkg": {
+    "scripts": "index.js",
+    "assets": [],
+    "outputPath": "dist"
+  },
+  "dependencies": {
+    "zk-attendance-sdk": "^2.1.0"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

@@ -1,0 +1,384 @@
+import { useEffect, useState } from 'react';
+import { authFetch } from '../utils/api';
+
+function maskKey(apiKey) {
+  if (!apiKey || typeof apiKey !== 'string') return '';
+  if (apiKey.length <= 8) return apiKey;
+  const start = apiKey.slice(0, 4);
+  const end = apiKey.slice(-4);
+  return `${start}••••••••${end}`;
+}
+
+function formatLastSeen(lastSeenAt) {
+  if (!lastSeenAt) return 'Never';
+  const date = new Date(lastSeenAt);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  return date.toLocaleString();
+}
+
+export default function DevicesPage() {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [showFullKeyId, setShowFullKeyId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const loadDevices = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await authFetch('/api/device', {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        throw new Error('Unable to load devices');
+      }
+      const json = await res.json();
+      setDevices(Array.isArray(json.data) ? json.data : []);
+    } catch (err) {
+      setError(err.message || 'Unable to load devices');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadDevices();
+  }, []);
+
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    if (!newName.trim()) return;
+    try {
+      setCreating(true);
+      const res = await authFetch('/api/device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() }),
+      });
+      if (!res.ok) {
+        throw new Error('Failed to register device');
+      }
+      await loadDevices();
+      setNewName('');
+      setModalOpen(false);
+      setToast({ type: 'success', message: 'Device registered successfully' });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to register device',
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleToggleActive = async (device) => {
+    const targetPath = device.is_active ? 'deactivate' : 'activate';
+    try {
+      setBusyId(device.id);
+      const res = await authFetch(`/api/device/${device.id}/${targetPath}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        throw new Error('Failed to update device status');
+      }
+      await loadDevices();
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to update device status',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRegenerateKey = async (device) => {
+    const confirmed = window.confirm(
+      `Regenerate API key for "${device.name}"?\n\nExisting devices using the old key will stop syncing until updated.`
+    );
+    if (!confirmed) return;
+    try {
+      setBusyId(device.id);
+      const res = await authFetch(`/api/device/${device.id}/regenerate-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        throw new Error('Failed to regenerate API key');
+      }
+      const json = await res.json();
+      const updated = json.data;
+      setDevices((prev) =>
+        prev.map((d) => (d.id === updated.id ? updated : d))
+      );
+      setShowFullKeyId(updated.id);
+      setToast({
+        type: 'success',
+        message: 'API key regenerated. Remember to update your device.',
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to regenerate API key',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleCopyKey = async (device) => {
+    try {
+      await navigator.clipboard.writeText(device.api_key);
+      setToast({ type: 'success', message: 'API key copied to clipboard' });
+      setShowFullKeyId(device.id);
+    } catch {
+      setToast({
+        type: 'error',
+        message: 'Unable to copy API key. Please copy it manually.',
+      });
+    }
+  };
+
+  const closeToast = () => setToast(null);
+
+  return (
+    <div className="space-y-4">
+      {toast && (
+        <div className="fixed right-6 top-20 z-30">
+          <div
+            className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
+              toast.type === 'error'
+                ? 'border-rose-100 bg-rose-50 text-rose-700'
+                : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+            }`}
+          >
+            <span className="mt-0.5 text-sm">
+              {toast.type === 'error' ? '⚠️' : '✅'}
+            </span>
+            <div>
+              <p className="font-medium">
+                {toast.type === 'error' ? 'Something went wrong' : 'Success'}
+              </p>
+              <p className="mt-0.5">{toast.message}</p>
+            </div>
+            <button
+              type="button"
+              onClick={closeToast}
+              className="ml-2 text-[11px] text-slate-400 hover:text-slate-600"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      <header>
+        <h1 className="text-lg font-semibold text-slate-900">Devices</h1>
+        <p className="text-xs text-slate-500">
+          Register biometric or punch devices and verify that they are syncing correctly.
+        </p>
+      </header>
+
+      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+        <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-500">
+            Each device gets its own secure API key. The last sync time tells you if data is flowing.
+          </p>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+          >
+            + Register device
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+            {error}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, idx) => (
+              <div
+                // eslint-disable-next-line react/no-array-index-key
+                key={idx}
+                className="h-32 rounded-xl border border-slate-100 bg-slate-50/80 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : devices.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center">
+            <p className="text-sm text-slate-600">
+              No devices yet. Register your first biometric or punch device to start receiving attendance logs.
+            </p>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="mt-4 inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+            >
+              Add your first device
+            </button>
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {devices.map((device) => {
+              const online = Boolean(device.last_seen_at);
+              const showingFull = showFullKeyId === device.id;
+              const displayKey = showingFull
+                ? device.api_key
+                : maskKey(device.api_key);
+              return (
+                <article
+                  key={device.id}
+                  className="flex flex-col justify-between rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h2 className="text-sm font-semibold text-slate-900">
+                        {device.name}
+                      </h2>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        ID #{device.id}
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        device.is_active
+                          ? online
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                            : 'bg-amber-50 text-amber-700 border border-amber-100'
+                          : 'bg-slate-100 text-slate-500 border border-slate-200'
+                      }`}
+                    >
+                      <span className="mr-1 h-1.5 w-1.5 rounded-full bg-current" />
+                      {device.is_active
+                        ? online
+                          ? 'Online'
+                          : 'No recent sync'
+                        : 'Inactive'}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 space-y-2 text-[11px] text-slate-600">
+                    <div>
+                      <p className="font-medium text-slate-700">API key</p>
+                      <div className="mt-0.5 flex items-center justify-between gap-2 rounded-md bg-slate-900 px-2 py-1 text-[10px] text-slate-50">
+                        <span className="truncate font-mono">{displayKey}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShowFullKeyId(
+                                showingFull ? null : device.id
+                              )
+                            }
+                            className="rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-[9px]"
+                          >
+                            {showingFull ? 'Hide' : 'Reveal'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyKey(device)}
+                            className="rounded border border-slate-600 bg-slate-800 px-1.5 py-0.5 text-[9px]"
+                          >
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Last sync</span>
+                      <span className="font-medium text-slate-800">
+                        {formatLastSeen(device.last_seen_at)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2">
+                    <button
+                      type="button"
+                      disabled={busyId === device.id}
+                      onClick={() => handleToggleActive(device)}
+                      className="text-[11px] font-medium text-slate-600 hover:text-primary-700 disabled:opacity-50"
+                    >
+                      {device.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === device.id}
+                      onClick={() => handleRegenerateKey(device)}
+                      className="text-[11px] font-medium text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                    >
+                      Regenerate key
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <p className="mt-4 text-[11px] text-slate-400">
+          Once wired, adding a device will complete the &quot;Register device&quot; step, and the
+          first successful sync will complete &quot;Verify device sync&quot;.
+        </p>
+      </section>
+
+      {modalOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">
+              Register new device
+            </h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Give your biometric or punch device a friendly name so you can identify it later.
+            </p>
+            <form onSubmit={handleCreate} className="mt-3 space-y-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-slate-700">
+                  Device name
+                </label>
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  disabled={creating}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  placeholder="e.g. Main gate biometric"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={creating}
+                  onClick={() => setModalOpen(false)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || !newName.trim()}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {creating ? 'Saving…' : 'Save device'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

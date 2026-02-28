@@ -1,0 +1,211 @@
+================================================================================
+  ATTENDANCE CONNECTOR - SETUP GUIDE FOR CLIENTS
+  Install once. Runs automatically when your PC starts.
+================================================================================
+
+WHAT YOU NEED
+-------------
+- One Windows PC or Mac at your office (same network as the biometric device)
+- The connector files (given to you by your provider)
+- Your device API key (from the app: Devices → Add device → Copy key)
+- Your biometric device IP address (set in the device: Communication → Ethernet)
+
+
+================================================================================
+WINDOWS SETUP
+================================================================================
+
+STEP 1: Create a folder
+-----------------------
+- Open File Explorer
+- Go to C:\ (or any drive you prefer)
+- Create a new folder named "AttendanceConnector"
+- Example: C:\AttendanceConnector
+
+
+STEP 2: Copy all files into the folder
+--------------------------------------
+Copy these 4 files into C:\AttendanceConnector:
+
+  1. connector.exe          (the main program)
+  2. config.example.json    (configuration template)
+  3. install-windows.bat    (one-time installer)
+  4. run-windows.bat        (helper script)
+
+All 4 files must be in the SAME folder.
+
+
+STEP 3: Rename and edit the config file
+---------------------------------------
+- In the AttendanceConnector folder, find "config.example.json"
+- Right-click it → Rename → change to "config.json" (remove "example")
+- Right-click config.json → Open with → Notepad (or any text editor)
+
+You will see something like:
+
+  {
+    "deviceIp": "192.168.1.50",
+    "devicePort": 4370,
+    "deviceApiKey": "paste-your-device-api-key-from-the-app",
+    "backendUrl": "https://api.yourapp.com",
+    "pollIntervalMs": 60000
+  }
+
+CHANGE these 3 values (keep the quotes and commas):
+
+  • deviceIp
+    Replace "192.168.1.50" with YOUR biometric device's IP address.
+    You set this on the device under: Communication → Ethernet → IP Address.
+
+  • deviceApiKey
+    Replace "paste-your-device-api-key-from-the-app" with your actual API key.
+    Get it from the app: Log in → Devices → Add device → Copy the API key.
+
+  • backendUrl
+    Replace "https://api.yourapp.com" with the URL your provider gave you.
+    Example: https://api.attendancesaas.com
+    (No slash at the end)
+
+- Save the file (Ctrl+S) and close Notepad.
+
+
+STEP 4: Install (run once)
+--------------------------
+- In the AttendanceConnector folder, find "install-windows.bat"
+- RIGHT-CLICK on it
+- Click "Run as administrator"
+- Click "Yes" if Windows asks for permission
+- You should see: "SUCCESS: Connector will start automatically when Windows starts."
+- Press any key to close the window
+
+DONE! The connector is now installed.
+
+
+STEP 5: Verify (optional)
+-------------------------
+- Restart your PC. After restart, the connector runs automatically.
+- Open the AttendanceConnector folder. You should see a new file: "connector.log"
+- Open connector.log to see if it's syncing (look for "Connected" and "Pushed" lines).
+
+
+================================================================================
+MAC SETUP
+================================================================================
+
+STEP 1: Create a folder
+-----------------------
+- Open Finder
+- Create a new folder (e.g. on Desktop or in Documents) named "AttendanceConnector"
+- Example: ~/Desktop/AttendanceConnector
+
+
+STEP 2: Copy all files into the folder
+--------------------------------------
+Copy these 3 files into the AttendanceConnector folder:
+
+  1. connector-mac          (the main program - no .exe)
+  2. config.example.json    (configuration template)
+  3. install-mac.sh          (one-time installer)
+
+
+STEP 3: Rename and edit the config file
+---------------------------------------
+- Find "config.example.json" and rename it to "config.json"
+- Open config.json with TextEdit or any text editor
+
+Change these 3 values:
+
+  • deviceIp       → Your biometric device's IP address
+  • deviceApiKey   → Your API key from the app (Devices → Copy key)
+  • backendUrl     → The URL your provider gave you (e.g. https://api.yourapp.com)
+
+- Save the file.
+
+
+STEP 4: Install (run once)
+--------------------------
+- Open Terminal (Applications → Utilities → Terminal)
+- Type:  cd  (space) and then drag the AttendanceConnector folder into the Terminal window
+- Press Enter
+- Type:  chmod +x install-mac.sh
+- Press Enter
+- Type:  ./install-mac.sh
+- Press Enter
+
+You should see: "SUCCESS: Connector is now running and will start automatically on Mac login."
+
+DONE! The connector is now installed.
+
+
+STEP 5: Verify (optional)
+-------------------------
+- Check the AttendanceConnector folder for "connector.log"
+- Open it to see sync activity.
+
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Problem: "config.json not found"
+-------------------------------
+- Make sure you RENAMED config.example.json to config.json (remove "example")
+- Both must be in the same folder as connector.exe (or connector-mac)
+
+
+Problem: "Device API key is required" or "401"
+----------------------------------------------
+- Open config.json and check deviceApiKey
+- Copy the key again from the app (Devices → your device → Copy API key)
+- Make sure there are no extra spaces before or after the key
+
+
+Problem: "Socket isn't connected" or "Device read error"
+--------------------------------------------------------
+- Check deviceIp in config.json - it must match the IP set on your biometric device
+- On the device: Communication → Ethernet → note the IP address
+- Make sure the PC and device are on the SAME network (same Wi-Fi or router)
+- Try: ping 192.168.x.x (replace with your device IP) in Command Prompt / Terminal
+
+
+Problem: Connector doesn't start after restart
+----------------------------------------------
+Windows:
+- Open Task Scheduler (search in Start menu)
+- Look for "AttendanceConnector" task
+- If it exists, right-click → Run to test
+- If it failed, try running install-windows.bat again as Administrator
+
+Mac:
+- Open Terminal, run: launchctl list | grep attendancesaas
+- If empty, run install-mac.sh again
+
+
+Problem: Punches not showing in the app
+--------------------------------------
+- Make sure employee codes in the app match User IDs on the biometric device
+- In the app: Employees → each person has an "Employee code"
+- On the device: each enrolled user has a "User ID" or PIN
+- These must be EXACTLY the same (e.g. "52" or "EMP001")
+
+
+================================================================================
+LOGS
+================================================================================
+
+- connector.log is created in the same folder as the connector
+- It records each sync (Connected, Pushed, errors)
+- Share this file with your provider if you need support
+
+
+================================================================================
+TO STOP OR REMOVE
+================================================================================
+
+Windows:
+- Open Task Scheduler → find "AttendanceConnector" → Right-click → Disable (or Delete)
+
+Mac:
+- Open Terminal, run: launchctl unload ~/Library/LaunchAgents/com.attendancesaas.connector.plist
+
+================================================================================
