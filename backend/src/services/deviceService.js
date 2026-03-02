@@ -121,7 +121,43 @@ async function regenerateApiKey(companyId, id) {
 }
 
 /**
+ * Infer punch_type from order: first punch of day = IN, second = OUT, etc.
+ * Merges existing DB punches with incoming logs per (employee_id, day), sorts by time, assigns alternating IN/OUT.
+ * Mutates logs[].punchType so caller can insert with correct types.
+ */
+function inferPunchTypesFromSequence(validLogs, employeeMap, existingRows) {
+  const toDateKey = (ts) => {
+    const d = new Date(ts);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  };
+
+  const byEmployeeDay = new Map();
+  for (const row of existingRows) {
+    const eid = row.employee_id;
+    const key = `${eid}|${toDateKey(row.punch_time)}`;
+    if (!byEmployeeDay.has(key)) byEmployeeDay.set(key, []);
+    byEmployeeDay.get(key).push({ punch_time: row.punch_time, punch_type: row.punch_type });
+  }
+  for (const log of validLogs) {
+    const eid = employeeMap[log.employeeCode];
+    const punchTime = log.punchTime instanceof Date ? log.punchTime : new Date(log.punchTime);
+    const key = `${eid}|${toDateKey(punchTime)}`;
+    if (!byEmployeeDay.has(key)) byEmployeeDay.set(key, []);
+    byEmployeeDay.get(key).push({ punch_time: punchTime, punch_type: null, _log: log });
+  }
+
+  for (const list of byEmployeeDay.values()) {
+    list.sort((a, b) => new Date(a.punch_time) - new Date(b.punch_time));
+    list.forEach((entry, i) => {
+      const type = i % 2 === 0 ? 'in' : 'out';
+      if (entry._log) entry._log.punchType = type;
+    });
+  }
+}
+
+/**
  * Process attendance logs (shared by connector push and direct device webhook).
+ * IN/OUT is inferred from punch order per employee per day when not reliably provided by the device.
  * @param {string} apiKey - Device API key
  * @param {Array<{ employeeCode: string, punchTime: Date, punchType: 'in'|'out', deviceId?: string }>} logs
  * @returns {{ inserted: number, skipped_unknown_codes?: string[] }}
@@ -162,6 +198,21 @@ async function processDeviceLogs(apiKey, logs) {
     throw new AppError(`Unknown employee_code for this company: ${unknownCodes.join(', ')}`, 400);
   }
 
+  const employeeIds = [...new Set(validLogs.map((l) => employeeMap[l.employeeCode]))];
+  const times = validLogs.map((l) => (l.punchTime instanceof Date ? l.punchTime : new Date(l.punchTime)).getTime());
+  const minTime = new Date(Math.min(...times));
+  const maxTime = new Date(Math.max(...times));
+
+  const existingResult = await pool.query(
+    `SELECT employee_id, punch_time, punch_type
+     FROM attendance_logs
+     WHERE company_id = $1 AND employee_id = ANY($2::bigint[])
+       AND punch_time >= $3 AND punch_time <= $4
+     ORDER BY employee_id, punch_time`,
+    [companyId, employeeIds, minTime, maxTime]
+  );
+  inferPunchTypesFromSequence(validLogs, employeeMap, existingResult.rows);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -177,16 +228,20 @@ async function processDeviceLogs(apiKey, logs) {
         companyId,
         employeeMap[log.employeeCode],
         log.punchTime instanceof Date ? log.punchTime.toISOString() : new Date(log.punchTime).toISOString(),
-        log.punchType,
+        (log.punchType || 'in').toLowerCase(),
         log.deviceId || String(device.id)
       );
     });
 
-    await client.query(
+    const insertResult = await client.query(
       `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id)
-       VALUES ${placeholders.join(', ')}`,
+       VALUES ${placeholders.join(', ')}
+       ON CONFLICT (employee_id, punch_time) DO NOTHING
+       RETURNING id`,
       values
     );
+
+    const insertedCount = insertResult.rowCount || 0;
 
     await client.query(
       `UPDATE devices SET last_seen_at = NOW() WHERE id = $1`,
@@ -195,9 +250,9 @@ async function processDeviceLogs(apiKey, logs) {
 
     await client.query('COMMIT');
 
-    auditService.log(companyId, null, 'device.push', 'device', device.id, { logs_count: validLogs.length }).catch(() => {});
+    auditService.log(companyId, null, 'device.push', 'device', device.id, { logs_count: insertedCount }).catch(() => {});
 
-    const result = { inserted: validLogs.length };
+    const result = { inserted: insertedCount };
     if (unknownCodes.length > 0) result.skipped_unknown_codes = unknownCodes;
     return result;
   } catch (err) {

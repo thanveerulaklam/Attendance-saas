@@ -14,10 +14,27 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
   const [basicSalary, setBasicSalary] = useState('');
   const [joinDate, setJoinDate] = useState('');
   const [status, setStatus] = useState('active');
+  const [shiftId, setShiftId] = useState('');
+
+  const [shifts, setShifts] = useState([]);
+  const [shiftsLoading, setShiftsLoading] = useState(false);
 
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    if (open) {
+      setShiftsLoading(true);
+      authFetch('/api/shifts?limit=100')
+        .then((res) => res.json())
+        .then((json) => {
+          setShifts(json.data || []);
+        })
+        .catch(() => setShifts([]))
+        .finally(() => setShiftsLoading(false));
+    }
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -33,12 +50,16 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
             : ''
         );
         setStatus(employee.status || 'active');
+        setShiftId(
+          employee.shift_id != null ? String(employee.shift_id) : ''
+        );
       } else {
         setName('');
         setEmployeeCode('');
         setBasicSalary('');
         setJoinDate('');
         setStatus('active');
+        setShiftId('');
       }
       setErrors({});
       setToast(null);
@@ -92,6 +113,7 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
         basic_salary: Number(basicSalary),
         join_date: joinDate,
         status,
+        shift_id: shiftId === '' ? null : Number(shiftId),
       };
 
       const url = isEdit ? `/api/employees/${employee.id}` : '/api/employees';
@@ -274,6 +296,28 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
               )}
             </div>
           </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              Shift
+              <select
+                value={shiftId}
+                onChange={(e) => setShiftId(e.target.value)}
+                disabled={shiftsLoading}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60"
+              >
+                <option value="">No shift</option>
+                {shifts.map((shift) => (
+                  <option key={shift.id} value={shift.id}>
+                    {shift.shift_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {errors.shift_id && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.shift_id}</p>
+            )}
+          </div>
         </form>
 
         <footer className="border-t border-slate-200 px-5 py-3 flex items-center justify-between bg-slate-50/60">
@@ -289,7 +333,7 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
             formAction={handleSubmit}
             onClick={handleSubmit}
             disabled={submitting}
-            className="inline-flex items-center rounded-lg bg-primary-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-primary-700 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create employee'}
           </button>

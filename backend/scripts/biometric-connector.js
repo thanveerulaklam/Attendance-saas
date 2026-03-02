@@ -36,8 +36,12 @@ function log(msg) {
   console.log(`[${ts}] ${msg}`);
 }
 
+/** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
+const MIN_BREAK_MINUTES = 30;
+
 /**
  * Infer punch_type when device doesn't provide it: first punch of day = in, second = out, etc.
+ * Removes OUT→IN pairs where gap < 30 min (short breaks/double-taps).
  */
 function assignInOut(logs) {
   const byUserAndDay = new Map();
@@ -46,13 +50,36 @@ function assignInOut(logs) {
     if (!byUserAndDay.has(key)) byUserAndDay.set(key, []);
     byUserAndDay.get(key).push(log);
   }
+
+  const result = [];
+  const minBreakMs = MIN_BREAK_MINUTES * 60 * 1000;
+
   for (const list of byUserAndDay.values()) {
     list.sort((a, b) => new Date(a.punch_time) - new Date(b.punch_time));
-    list.forEach((l, i) => {
+
+    let filtered = [];
+    for (let i = 0; i < list.length; i++) {
+      const curr = list[i];
+      const next = list[i + 1];
+      const currType = i % 2 === 0 ? 'in' : 'out';
+      const nextType = (i + 1) % 2 === 0 ? 'in' : 'out';
+
+      if (currType === 'out' && next && nextType === 'in') {
+        const gapMs = new Date(next.punch_time) - new Date(curr.punch_time);
+        if (gapMs < minBreakMs) {
+          i++;
+          continue;
+        }
+      }
+      filtered.push(curr);
+    }
+
+    filtered.forEach((l, i) => {
       l.punch_type = i % 2 === 0 ? 'in' : 'out';
+      result.push(l);
     });
   }
-  return logs;
+  return result;
 }
 
 async function fetchAndPush() {
@@ -67,11 +94,25 @@ async function fetchAndPush() {
     await client.createSocket();
     log(`Connected to device at ${DEVICE_IP}:${DEVICE_PORT}`);
 
+    let size = 0;
+    try {
+      size = await client.getAttendanceSize();
+    } catch (_) {}
+
+    if (size === 0) {
+      log('No attendance records on device.');
+      try {
+        await client.disconnect();
+      } catch (_) {}
+      return;
+    }
+
     let result;
     try {
       result = await client.getAttendances();
     } catch (sdkErr) {
-      log(`Device read error (will retry): ${sdkErr.message}`);
+      const errMsg = (sdkErr && (sdkErr.message || String(sdkErr))) || 'Unknown error';
+      log(`Device read error (will retry): ${errMsg}`);
       return;
     } finally {
       try {
@@ -99,10 +140,10 @@ async function fetchAndPush() {
       return;
     }
 
-    assignInOut(logs);
+    const logsToSend = assignInOut(logs);
 
     const payload = {
-      logs: logs.map((l) => ({
+      logs: logsToSend.map((l) => ({
         employee_code: l.employee_code,
         punch_time: l.punch_time,
         punch_type: l.punch_type,
@@ -123,7 +164,7 @@ async function fetchAndPush() {
       log(`Push failed ${res.status}: ${body.message || res.statusText}`);
       return;
     }
-    log(`Pushed ${body.data?.inserted ?? logs.length} logs to backend.`);
+    log(`Pushed ${body.data?.inserted ?? logsToSend.length} logs to backend.`);
 
     // Clear device logs after successful push (reconnect to do it)
     const clearClient = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);

@@ -90,7 +90,72 @@ export default function DashboardPage() {
             ))}
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <section className="grid gap-5 lg:grid-cols-2">
+        <article className="rounded-xl bg-white shadow-soft px-5 py-4 border border-slate-100 flex flex-col transition-all duration-200 hover:shadow-md">
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold text-slate-900">Currently on lunch break</h2>
+            <p className="mt-1 text-xs text-slate-500">Punched out for lunch, not yet back</p>
+          </div>
+          {loading ? (
+            <div className="mt-4 h-24 rounded-lg bg-slate-50 animate-pulse" />
+          ) : (summary?.todayOnLunch?.length ?? 0) > 0 ? (
+            <ul className="mt-2 space-y-2 max-h-40 overflow-y-auto">
+              {summary.todayOnLunch.map((emp) => {
+                const outAt = emp.punched_out_at
+                  ? new Date(emp.punched_out_at).toLocaleTimeString('en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: true,
+                    })
+                  : '';
+                return (
+                  <li
+                    key={emp.name + (emp.employee_code || '')}
+                    className="flex items-center gap-2 text-sm text-slate-700 py-1.5 px-2 rounded-lg bg-sky-50 border border-sky-100"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-sky-500 flex-shrink-0" />
+                    <span className="font-medium">{emp.name}</span>
+                    {emp.employee_code && (
+                      <span className="text-xs text-slate-500">({emp.employee_code})</span>
+                    )}
+                    {outAt && (
+                      <span className="text-xs text-slate-500 ml-auto">Out {outAt}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500 italic">No one on lunch break right now</p>
+          )}
+        </article>
+
+        <article className="rounded-xl bg-white shadow-soft px-5 py-4 border border-slate-100 flex flex-col transition-all duration-200 hover:shadow-md">
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold text-slate-900">Today&apos;s absent</h2>
+            <p className="mt-1 text-xs text-slate-500">Employees who have not marked attendance today</p>
+          </div>
+          {loading ? (
+            <div className="mt-4 h-24 rounded-lg bg-slate-50 animate-pulse" />
+          ) : (summary?.todayAbsent?.length ?? 0) > 0 ? (
+            <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto">
+              {summary.todayAbsent.map((name) => (
+                <li
+                  key={name}
+                  className="flex items-center gap-2 text-sm text-slate-700 py-1.5 px-2 rounded-lg bg-amber-50 border border-amber-100"
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
+                  {name}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-sm text-slate-500 italic">Everyone is present today</p>
+          )}
+        </article>
+      </section>
+
+      <section>
         <article className="rounded-xl bg-white shadow-soft px-5 py-4 border border-slate-100 flex flex-col transition-all duration-200 hover:shadow-md">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -151,30 +216,6 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-        </article>
-
-        <article className="rounded-xl bg-white shadow-soft px-5 py-4 border border-slate-100 flex flex-col transition-all duration-200 hover:shadow-md">
-          <div className="mb-4">
-            <h2 className="text-sm font-semibold text-slate-900">Today&apos;s absent</h2>
-            <p className="mt-1 text-xs text-slate-500">Employees who have not marked attendance today</p>
-          </div>
-          {loading ? (
-            <div className="mt-4 h-24 rounded-lg bg-slate-50 animate-pulse" />
-          ) : (summary?.todayAbsent?.length ?? 0) > 0 ? (
-            <ul className="mt-2 space-y-2 max-h-48 overflow-y-auto">
-              {summary.todayAbsent.map((name) => (
-                <li
-                  key={name}
-                  className="flex items-center gap-2 text-sm text-slate-700 py-1.5 px-2 rounded-lg bg-amber-50 border border-amber-100"
-                >
-                  <span className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0" />
-                  {name}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-2 text-sm text-slate-500 italic">Everyone is present today</p>
-          )}
         </article>
       </section>
     </div>

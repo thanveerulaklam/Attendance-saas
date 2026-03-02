@@ -1,17 +1,27 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { authFetch } from '../utils/api';
-import EmployeeCard from '../components/employees/EmployeeCard';
 import EmployeeFormModal from '../components/employees/EmployeeFormModal';
 import EmployeeFilters from '../components/employees/EmployeeFilters';
 
-const PAGE_SIZE = 9;
+const PAGE_SIZE = 15;
+
+function formatINR(num) {
+  if (num == null || Number.isNaN(Number(num))) return '—';
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+    minimumFractionDigits: 0,
+  }).format(Number(num));
+}
 
 export default function EmployeesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const openFromOnboarding = searchParams.get('onboarding') === 'open_employee_modal';
 
   const [employees, setEmployees] = useState([]);
+  const [shifts, setShifts] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -19,7 +29,12 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(openFromOnboarding);
+  const [editingEmployee, setEditingEmployee] = useState(null);
   const [toast, setToast] = useState(null);
+
+  const shiftNameById = Object.fromEntries(
+    (shifts || []).map((s) => [String(s.id), s.shift_name])
+  );
 
   useEffect(() => {
     if (!openFromOnboarding) return;
@@ -73,6 +88,13 @@ export default function EmployeesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, search, statusFilter]);
 
+  useEffect(() => {
+    authFetch('/api/shifts?limit=500')
+      .then((res) => res.json())
+      .then((json) => setShifts(json.data || []))
+      .catch(() => setShifts([]));
+  }, []);
+
   const handleSearchChange = (value) => {
     setPage(1);
     setSearch(value);
@@ -85,6 +107,7 @@ export default function EmployeesPage() {
 
   const handleEmployeeCreated = (employee) => {
     setShowModal(false);
+    setEditingEmployee(null);
     setPage(1);
     fetchEmployees();
     setToast({
@@ -95,6 +118,39 @@ export default function EmployeesPage() {
     });
   };
 
+  const handleEdit = (employee) => {
+    setEditingEmployee(employee);
+    setShowModal(true);
+  };
+
+  const handleDeactivate = async (employee) => {
+    if (!employee?.id) return;
+    const confirmed = window.confirm(
+      `Deactivate "${employee.name}"? They will no longer appear in active lists.`
+    );
+    if (!confirmed) return;
+    try {
+      const res = await authFetch(`/api/employees/${employee.id}/deactivate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.message || 'Failed to deactivate employee');
+      }
+      fetchEmployees();
+      setToast({
+        type: 'success',
+        message: `"${employee.name}" has been deactivated.`,
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to deactivate employee',
+      });
+    }
+  };
+
   const canPrev = page > 1;
   const canNext = page < totalPages;
 
@@ -102,7 +158,7 @@ export default function EmployeesPage() {
     <div className="space-y-6">
       {/* Toast */}
       {toast && (
-        <div className="fixed right-6 top-20 z-30">
+        <div className="fixed left-[58%] top-24 z-30 -translate-x-1/2">
           <div
             className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
               toast.type === 'error'
@@ -135,12 +191,15 @@ export default function EmployeesPage() {
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Employees</h1>
           <p className="text-xs text-slate-500">
-            Manage your workforce with a modern, card-based overview.
+            Manage your workforce—view all details and options in one place.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setShowModal(true)}
+          onClick={() => {
+            setEditingEmployee(null);
+            setShowModal(true);
+          }}
           className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50"
         >
           <span className="mr-1 text-base">＋</span>
@@ -165,14 +224,39 @@ export default function EmployeesPage() {
         )}
 
         {loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: PAGE_SIZE }).map((_, idx) => (
-              <div
-                // eslint-disable-next-line react/no-array-index-key
-                key={idx}
-                className="h-40 rounded-xl border border-slate-100 bg-slate-50/80 animate-pulse"
-              />
-            ))}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500">
+                  <th className="pb-3 pr-4 font-medium">Name</th>
+                  <th className="pb-3 pr-4 font-medium">Employee code</th>
+                  <th className="pb-3 pr-4 font-medium">Basic salary</th>
+                  <th className="pb-3 pr-4 font-medium">Join date</th>
+                  <th className="pb-3 pr-4 font-medium">Status</th>
+                  <th className="pb-3 pr-4 font-medium">Shift</th>
+                  <th className="pb-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }).map((_, idx) => (
+                  <tr
+                    // eslint-disable-next-line react/no-array-index-key
+                    key={idx}
+                    className="border-b border-slate-100"
+                  >
+                    {Array.from({ length: 7 }).map((_, i) => (
+                      <td
+                        // eslint-disable-next-line react/no-array-index-key
+                        key={i}
+                        className="py-3 pr-4"
+                      >
+                        <span className="inline-block h-4 w-24 rounded bg-slate-100 animate-pulse" />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : employees.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -185,7 +269,10 @@ export default function EmployeesPage() {
             </p>
             <button
               type="button"
-              onClick={() => setShowModal(true)}
+              onClick={() => {
+                setEditingEmployee(null);
+                setShowModal(true);
+              }}
               className="mt-4 inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-primary-200 hover:text-primary-700"
             >
               Add employee
@@ -193,10 +280,84 @@ export default function EmployeesPage() {
           </div>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {employees.map((employee) => (
-                <EmployeeCard key={employee.id} employee={employee} />
-              ))}
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="pb-3 pr-4 font-medium">Name</th>
+                    <th className="pb-3 pr-4 font-medium">Employee code</th>
+                    <th className="pb-3 pr-4 font-medium">Basic salary</th>
+                    <th className="pb-3 pr-4 font-medium">Join date</th>
+                    <th className="pb-3 pr-4 font-medium">Status</th>
+                    <th className="pb-3 pr-4 font-medium">Shift</th>
+                    <th className="pb-3 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {employees.map((employee) => {
+                    const isActive = employee.status === 'active';
+                    const joinDate = employee.join_date
+                      ? new Date(employee.join_date).toLocaleDateString(
+                          'en-IN',
+                          { year: 'numeric', month: 'short', day: 'numeric' }
+                        )
+                      : '—';
+                    const shiftName = employee.shift_id != null
+                      ? shiftNameById[String(employee.shift_id)] ?? `#${employee.shift_id}`
+                      : '—';
+                    return (
+                      <tr
+                        key={employee.id}
+                        className="border-b border-slate-100 hover:bg-slate-50/50"
+                      >
+                        <td className="py-3 pr-4 font-medium text-slate-900">
+                          {employee.name || '—'}
+                        </td>
+                        <td className="py-3 pr-4 text-slate-600">
+                          {employee.employee_code || '—'}
+                        </td>
+                        <td className="py-3 pr-4 tabular-nums text-slate-700">
+                          {formatINR(employee.basic_salary)}
+                        </td>
+                        <td className="py-3 pr-4 text-slate-600">{joinDate}</td>
+                        <td className="py-3 pr-4">
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                              isActive
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            {isActive ? 'Active' : (employee.status || 'Inactive')}
+                          </span>
+                        </td>
+                        <td className="py-3 pr-4 text-slate-600">
+                          {shiftName}
+                        </td>
+                        <td className="py-3 text-right">
+                          <span className="inline-flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleEdit(employee)}
+                              className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:text-primary-700"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => isActive && handleDeactivate(employee)}
+                              disabled={!isActive}
+                              className="text-[11px] font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isActive ? 'Deactivate' : 'Deactivated'}
+                            </button>
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
             {/* Pagination */}
@@ -239,7 +400,11 @@ export default function EmployeesPage() {
       {showModal && (
         <EmployeeFormModal
           open={showModal}
-          onClose={() => setShowModal(false)}
+          employee={editingEmployee}
+          onClose={() => {
+            setShowModal(false);
+            setEditingEmployee(null);
+          }}
           onCreated={handleEmployeeCreated}
         />
       )}

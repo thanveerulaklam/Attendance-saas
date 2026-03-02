@@ -1,19 +1,30 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 
+const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const emptyForm = () => ({
+  shift_name: '',
+  start_time: '09:00',
+  end_time: '18:00',
+  grace_minutes: 0,
+  lunch_minutes: 60,
+  weekly_off_days: [],
+  late_deduction_minutes: 0,
+  late_deduction_amount: 0,
+  lunch_over_deduction_minutes: 0,
+  lunch_over_deduction_amount: 0,
+});
+
 export default function ShiftsPage() {
   const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({
-    shift_name: '',
-    start_time: '09:00',
-    end_time: '18:00',
-    grace_minutes: 0,
-    late_deduction_minutes: 0,
-    late_deduction_amount: 0,
-  });
+  const [editingShift, setEditingShift] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [form, setForm] = useState(emptyForm());
 
   const loadShifts = async () => {
     try {
@@ -36,8 +47,16 @@ export default function ShiftsPage() {
     loadShifts();
   }, []);
 
+  const toggleFormWeeklyOff = (dayNum) => {
+    const current = form.weekly_off_days || [];
+    const next = current.includes(dayNum)
+      ? current.filter((d) => d !== dayNum)
+      : [...current, dayNum].sort((a, b) => a - b);
+    setForm((prev) => ({ ...prev, weekly_off_days: next }));
+  };
+
   const handleChange = (field) => (event) => {
-    const numericFields = ['grace_minutes', 'late_deduction_minutes', 'late_deduction_amount'];
+    const numericFields = ['grace_minutes', 'lunch_minutes', 'late_deduction_minutes', 'late_deduction_amount', 'lunch_over_deduction_minutes', 'lunch_over_deduction_amount'];
     const value = numericFields.includes(field) ? Number(event.target.value || 0) : event.target.value;
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -54,19 +73,72 @@ export default function ShiftsPage() {
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error('Failed to create shift');
-      setForm({
-        shift_name: '',
-        start_time: '09:00',
-        end_time: '18:00',
-        grace_minutes: 0,
-        late_deduction_minutes: 0,
-        late_deduction_amount: 0,
-      });
+      setForm(emptyForm());
       await loadShifts();
     } catch (err) {
       setError(err.message || 'Failed to create shift');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const startEdit = (shift) => {
+    setForm({
+      shift_name: shift.shift_name || '',
+      start_time: (shift.start_time || '09:00').slice(0, 5),
+      end_time: (shift.end_time || '18:00').slice(0, 5),
+      grace_minutes: shift.grace_minutes ?? 0,
+      lunch_minutes: shift.lunch_minutes ?? 60,
+      weekly_off_days: Array.isArray(shift.weekly_off_days) ? [...shift.weekly_off_days] : [],
+      late_deduction_minutes: shift.late_deduction_minutes ?? 0,
+      late_deduction_amount: shift.late_deduction_amount ?? 0,
+      lunch_over_deduction_minutes: shift.lunch_over_deduction_minutes ?? 0,
+      lunch_over_deduction_amount: shift.lunch_over_deduction_amount ?? 0,
+    });
+    setEditingShift(shift);
+    setError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingShift(null);
+    setForm(emptyForm());
+  };
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!editingShift || !form.shift_name.trim()) return;
+    try {
+      setSavingEdit(true);
+      setError(null);
+      const res = await authFetch(`/api/shifts/${editingShift.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error('Failed to update shift');
+      setEditingShift(null);
+      setForm(emptyForm());
+      await loadShifts();
+    } catch (err) {
+      setError(err.message || 'Failed to update shift');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDelete = async (shift) => {
+    if (!window.confirm(`Delete shift "${shift.shift_name}"? This cannot be undone.`)) return;
+    try {
+      setDeletingId(shift.id);
+      setError(null);
+      const res = await authFetch(`/api/shifts/${shift.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to delete shift');
+      await loadShifts();
+      if (editingShift?.id === shift.id) cancelEdit();
+    } catch (err) {
+      setError(err.message || 'Failed to delete shift');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -127,18 +199,61 @@ export default function ShiftsPage() {
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[11px] font-medium text-slate-700">
-                  Grace minutes (optional)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={form.grace_minutes}
-                  onChange={handleChange('grace_minutes')}
-                  disabled={creating}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Grace minutes (optional)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.grace_minutes}
+                    onChange={handleChange('grace_minutes')}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Lunch minutes (allotted)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.lunch_minutes}
+                    onChange={handleChange('lunch_minutes')}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="60"
+                    title="Max minutes staff can take for lunch break"
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">
+                  Holidays (weekly off) — paid, no loss of pay
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Select which weekdays are off for this shift (e.g. Sunday).
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {WEEKDAY_LABELS.map((label, dayNum) => (
+                    <label
+                      key={dayNum}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 cursor-pointer hover:border-primary-200 hover:bg-primary-50/50 has-[:checked]:border-primary-300 has-[:checked]:bg-primary-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={(form.weekly_off_days || []).includes(dayNum)}
+                        onChange={() => toggleFormWeeklyOff(dayNum)}
+                        disabled={creating}
+                        className="rounded border-slate-300 text-primary-600 focus:ring-primary-300"
+                      />
+                      <span className="text-[11px] font-medium text-slate-700">{label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
 
               <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
@@ -146,37 +261,35 @@ export default function ShiftsPage() {
                   Late arrival deduction (optional)
                 </p>
                 <p className="text-[10px] text-slate-500">
-                  If staff are late by more than the grace minutes, deduct this amount for every late
-                  block of minutes you define below.
+                  If staff punch IN late (after grace), deduct this amount per block of minutes below.
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">
-                      Late minutes
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={form.late_deduction_minutes}
-                      onChange={handleChange('late_deduction_minutes')}
-                      disabled={creating}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                      placeholder="e.g. 15"
-                    />
+                    <label className="text-[11px] font-medium text-slate-700">Late minutes</label>
+                    <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">
-                      Deduction amount
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={form.late_deduction_amount}
-                      onChange={handleChange('late_deduction_amount')}
-                      disabled={creating}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                      placeholder="e.g. 50"
-                    />
+                    <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
+                    <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">
+                  Lunch over deduction (optional)
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  If staff take more than allotted lunch minutes, deduct this amount per block of minutes below.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">Lunch over minutes</label>
+                    <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
+                    <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
                   </div>
                 </div>
               </div>
@@ -220,7 +333,32 @@ export default function ShiftsPage() {
                     key={shift.id}
                     className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 transition-all duration-200 hover:border-primary-100 hover:shadow-sm"
                   >
-                    <h3 className="text-sm font-semibold text-slate-900">{shift.shift_name}</h3>
+                    <div className="flex items-start justify-between gap-2">
+                      <h3 className="text-sm font-semibold text-slate-900">{shift.shift_name}</h3>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => startEdit(shift)}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-200 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-primary-200"
+                          title="Edit shift"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(shift)}
+                          disabled={deletingId === shift.id}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-100 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-200 disabled:opacity-50"
+                          title="Delete shift"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                     <dl className="mt-2 space-y-1 text-[11px]">
                       <div className="flex justify-between">
                         <dt className="text-slate-500">Start</dt>
@@ -236,12 +374,35 @@ export default function ShiftsPage() {
                           {shift.grace_minutes != null ? shift.grace_minutes : 0} min
                         </dd>
                       </div>
+                      <div className="flex justify-between">
+                        <dt className="text-slate-500">Lunch allotted</dt>
+                        <dd className="font-medium text-slate-800">
+                          {shift.lunch_minutes != null ? shift.lunch_minutes : 60} min
+                        </dd>
+                      </div>
+                      {Array.isArray(shift.weekly_off_days) && shift.weekly_off_days.length > 0 ? (
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-slate-500">Weekly off</dt>
+                          <dd className="font-medium text-slate-800 text-right">
+                            {shift.weekly_off_days.filter((d) => d >= 0 && d <= 6).map((d) => WEEKDAY_LABELS[d]).join(', ')}
+                          </dd>
+                        </div>
+                      ) : null}
                       {(shift.late_deduction_minutes != null && shift.late_deduction_minutes > 0) ||
                       (shift.late_deduction_amount != null && shift.late_deduction_amount > 0) ? (
                         <div className="flex justify-between">
                           <dt className="text-slate-500">Late deduction</dt>
                           <dd className="font-medium text-slate-800">
                             {shift.late_deduction_minutes ?? 0} min → {shift.late_deduction_amount ?? 0}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {(shift.lunch_over_deduction_minutes != null && shift.lunch_over_deduction_minutes > 0) ||
+                      (shift.lunch_over_deduction_amount != null && shift.lunch_over_deduction_amount > 0) ? (
+                        <div className="flex justify-between">
+                          <dt className="text-slate-500">Lunch over deduction</dt>
+                          <dd className="font-medium text-slate-800">
+                            {shift.lunch_over_deduction_minutes ?? 0} min → {shift.lunch_over_deduction_amount ?? 0}
                           </dd>
                         </div>
                       ) : null}
@@ -253,6 +414,95 @@ export default function ShiftsPage() {
           </div>
         </div>
       </section>
+
+      {editingShift && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true" aria-labelledby="edit-shift-title">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3 flex items-center justify-between">
+              <h2 id="edit-shift-title" className="text-sm font-semibold text-slate-900">Edit shift</h2>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                aria-label="Close"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <form onSubmit={handleUpdate} className="p-5 space-y-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-slate-700">Name</label>
+                <input
+                  value={form.shift_name}
+                  onChange={handleChange('shift_name')}
+                  disabled={savingEdit}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  placeholder="General shift"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Start time</label>
+                  <input type="time" value={form.start_time} onChange={handleChange('start_time')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">End time</label>
+                  <input type="time" value={form.end_time} onChange={handleChange('end_time')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Grace min</label>
+                  <input type="number" min={0} value={form.grace_minutes} onChange={handleChange('grace_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Lunch min</label>
+                  <input type="number" min={0} value={form.lunch_minutes} onChange={handleChange('lunch_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">Holidays (weekly off)</p>
+                <div className="flex flex-wrap gap-2">
+                  {WEEKDAY_LABELS.map((label, dayNum) => (
+                    <label key={dayNum} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 cursor-pointer hover:border-primary-200 has-[:checked]:border-primary-300 has-[:checked]:bg-primary-50">
+                      <input type="checkbox" checked={(form.weekly_off_days || []).includes(dayNum)} onChange={() => toggleFormWeeklyOff(dayNum)} disabled={savingEdit} className="rounded border-slate-300 text-primary-600" />
+                      <span className="text-[11px] font-medium text-slate-700">{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Late min</label>
+                  <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Late deduction amt</label>
+                  <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Lunch over min</label>
+                  <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Lunch over deduction amt</label>
+                  <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="button" onClick={cancelEdit} disabled={savingEdit} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingEdit} className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                  {savingEdit ? 'Saving...' : 'Save changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

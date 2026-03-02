@@ -52,15 +52,33 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'shift_id')) {
+    if (payload.shift_id == null || payload.shift_id === '') {
+      // optional: allow null/empty
+    } else {
+      const sid = Number(payload.shift_id);
+      if (Number.isNaN(sid) || sid < 1) {
+        errors.shift_id = 'Shift must be a valid positive id.';
+      }
+    }
+  }
+
   ensureNoErrors(errors);
 
-  return {
+  const result = {
     name: payload.name.trim(),
     employee_code: payload.employee_code.trim(),
     basic_salary: Number(payload.basic_salary),
     join_date: new Date(payload.join_date),
     status: payload.status || 'active',
   };
+  if (Object.prototype.hasOwnProperty.call(payload, 'shift_id')) {
+    result.shift_id =
+      payload.shift_id == null || payload.shift_id === ''
+        ? null
+        : Number(payload.shift_id);
+  }
+  return result;
 };
 
 const validateUpdateEmployee = (payload = {}) => {
@@ -120,6 +138,19 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.status = `Status must be one of: ${STATUS_VALUES.join(', ')}.`;
     } else {
       clean.status = payload.status;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'shift_id')) {
+    if (payload.shift_id == null || payload.shift_id === '') {
+      clean.shift_id = null;
+    } else {
+      const sid = Number(payload.shift_id);
+      if (Number.isNaN(sid) || sid < 1) {
+        errors.shift_id = 'Shift must be a valid positive id.';
+      } else {
+        clean.shift_id = sid;
+      }
     }
   }
 

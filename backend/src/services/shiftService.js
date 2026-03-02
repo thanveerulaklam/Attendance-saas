@@ -19,8 +19,12 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        start_time,
        end_time,
        grace_minutes,
+       lunch_minutes,
+       weekly_off_days,
        late_deduction_minutes,
        late_deduction_amount,
+       lunch_over_deduction_minutes,
+       lunch_over_deduction_amount,
        created_at
      FROM shifts
      WHERE company_id = $1
@@ -33,18 +37,8 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
 }
 
 async function createShift(companyId, data) {
-  const name = String(data.shift_name || '').trim();
-  const startTime = String(data.start_time || '').trim();
-  const endTime = String(data.end_time || '').trim();
-  const graceMinutes = Number.isFinite(Number(data.grace_minutes))
-    ? Number(data.grace_minutes)
-    : 0;
-  const lateDeductionMinutes = Number.isFinite(Number(data.late_deduction_minutes))
-    ? Number(data.late_deduction_minutes)
-    : 0;
-  const lateDeductionAmount = Number.isFinite(Number(data.late_deduction_amount))
-    ? Number(data.late_deduction_amount)
-    : 0;
+  const parsed = parseShiftData(data);
+  const { name, startTime, endTime, graceMinutes, lunchMinutes, uniqueWeeklyOff, lateDeductionMinutes, lateDeductionAmount, lunchOverDeductionMinutes, lunchOverDeductionAmount } = parsed;
 
   if (!name || !startTime || !endTime) {
     const error = new Error('shift_name, start_time and end_time are required');
@@ -59,10 +53,14 @@ async function createShift(companyId, data) {
        start_time,
        end_time,
        grace_minutes,
+       lunch_minutes,
+       weekly_off_days,
        late_deduction_minutes,
-       late_deduction_amount
+       late_deduction_amount,
+       lunch_over_deduction_minutes,
+       lunch_over_deduction_amount
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING
        id,
        company_id,
@@ -70,17 +68,135 @@ async function createShift(companyId, data) {
        start_time,
        end_time,
        grace_minutes,
+       lunch_minutes,
+       weekly_off_days,
        late_deduction_minutes,
        late_deduction_amount,
+       lunch_over_deduction_minutes,
+       lunch_over_deduction_amount,
        created_at`,
-    [companyId, name, startTime, endTime, graceMinutes, lateDeductionMinutes, lateDeductionAmount]
+    [companyId, name, startTime, endTime, graceMinutes, lunchMinutes, uniqueWeeklyOff, lateDeductionMinutes, lateDeductionAmount, lunchOverDeductionMinutes, lunchOverDeductionAmount]
   );
 
   return result.rows[0];
 }
 
+function parseShiftData(data) {
+  const name = String(data.shift_name || '').trim();
+  const startTime = String(data.start_time || '').trim();
+  const endTime = String(data.end_time || '').trim();
+  const graceMinutes = Number.isFinite(Number(data.grace_minutes))
+    ? Number(data.grace_minutes)
+    : 0;
+  const lunchMinutes = Number.isFinite(Number(data.lunch_minutes)) && Number(data.lunch_minutes) >= 0
+    ? Number(data.lunch_minutes)
+    : 60;
+  const lateDeductionMinutes = Number.isFinite(Number(data.late_deduction_minutes))
+    ? Number(data.late_deduction_minutes)
+    : 0;
+  const lateDeductionAmount = Number.isFinite(Number(data.late_deduction_amount))
+    ? Number(data.late_deduction_amount)
+    : 0;
+  const lunchOverDeductionMinutes = Number.isFinite(Number(data.lunch_over_deduction_minutes))
+    ? Number(data.lunch_over_deduction_minutes)
+    : 0;
+  const lunchOverDeductionAmount = Number.isFinite(Number(data.lunch_over_deduction_amount))
+    ? Number(data.lunch_over_deduction_amount)
+    : 0;
+  const weeklyOffDays = Array.isArray(data.weekly_off_days)
+    ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    : [];
+  const uniqueWeeklyOff = [...new Set(weeklyOffDays)];
+  return {
+    name,
+    startTime,
+    endTime,
+    graceMinutes,
+    lunchMinutes,
+    uniqueWeeklyOff,
+    lateDeductionMinutes,
+    lateDeductionAmount,
+    lunchOverDeductionMinutes,
+    lunchOverDeductionAmount,
+  };
+}
+
+async function updateShift(companyId, shiftId, data) {
+  const parsed = parseShiftData(data);
+  if (!parsed.name || !parsed.startTime || !parsed.endTime) {
+    const error = new Error('shift_name, start_time and end_time are required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await pool.query(
+    `UPDATE shifts SET
+       shift_name = $2,
+       start_time = $3,
+       end_time = $4,
+       grace_minutes = $5,
+       lunch_minutes = $6,
+       weekly_off_days = $7,
+       late_deduction_minutes = $8,
+       late_deduction_amount = $9,
+       lunch_over_deduction_minutes = $10,
+       lunch_over_deduction_amount = $11
+     WHERE company_id = $1 AND id = $12
+     RETURNING
+       id,
+       company_id,
+       shift_name,
+       start_time,
+       end_time,
+       grace_minutes,
+       lunch_minutes,
+       weekly_off_days,
+       late_deduction_minutes,
+       late_deduction_amount,
+       lunch_over_deduction_minutes,
+       lunch_over_deduction_amount,
+       created_at`,
+    [
+      companyId,
+      parsed.name,
+      parsed.startTime,
+      parsed.endTime,
+      parsed.graceMinutes,
+      parsed.lunchMinutes,
+      parsed.uniqueWeeklyOff,
+      parsed.lateDeductionMinutes,
+      parsed.lateDeductionAmount,
+      parsed.lunchOverDeductionMinutes,
+      parsed.lunchOverDeductionAmount,
+      shiftId,
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    const error = new Error('Shift not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  return result.rows[0];
+}
+
+async function deleteShift(companyId, shiftId) {
+  const result = await pool.query(
+    'DELETE FROM shifts WHERE company_id = $1 AND id = $2 RETURNING id',
+    [companyId, shiftId]
+  );
+  if (result.rowCount === 0) {
+    const error = new Error('Shift not found');
+    error.statusCode = 404;
+    throw error;
+  }
+  return { deleted: true, id: shiftId };
+}
+
 module.exports = {
   listShifts,
   createShift,
+  updateShift,
+  deleteShift,
 };
 

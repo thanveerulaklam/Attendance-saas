@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { getHolidayDatesForMonth } = require('./holidayService');
 
 function getMonthBounds(year, month) {
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
@@ -15,8 +16,11 @@ async function getDefaultShiftForCompany(client, companyId) {
        start_time,
        end_time,
        grace_minutes,
+       lunch_minutes,
        late_deduction_minutes,
-       late_deduction_amount
+       late_deduction_amount,
+       lunch_over_deduction_minutes,
+       lunch_over_deduction_amount
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -35,6 +39,7 @@ async function getDefaultShiftForCompany(client, companyId) {
   const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
   const shiftMs = shiftMinutes * 60 * 1000;
   const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
+  const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
 
   return {
     id: row.id,
@@ -42,19 +47,30 @@ async function getDefaultShiftForCompany(client, companyId) {
     startMinute,
     shiftMs,
     graceMs,
+    lunchMinutesAllotted,
     lateDeductionMinutes: Number(row.late_deduction_minutes || 0),
     lateDeductionAmount: Number(row.late_deduction_amount || 0),
+    lunchOverDeductionMinutes: Number(row.lunch_over_deduction_minutes || 0),
+    lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
   };
 }
 
-async function getAttendanceSummary(companyId, employeeId, year, month) {
+/** Add or subtract days from YYYY-MM-DD, return YYYY-MM-DD. */
+function addDays(isoDateStr, delta) {
+  const d = new Date(isoDateStr + 'T12:00:00.000Z');
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+async function getAttendanceSummary(companyId, employeeId, year, month, options = {}) {
+  const { treatHolidayAdjacentAbsenceAsWorking = false } = options;
   const client = await pool.connect();
   try {
     const { start, end, daysInMonth } = getMonthBounds(year, month);
 
     const shift = await getDefaultShiftForCompany(client, companyId);
 
-    const [logsResult, holidaysResult] = await Promise.all([
+    const [logsResult, holidaySet] = await Promise.all([
       client.query(
         `SELECT punch_time, punch_type
          FROM attendance_logs
@@ -65,20 +81,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month) {
          ORDER BY punch_time ASC`,
         [companyId, employeeId, start.toISOString(), end.toISOString()]
       ),
-      client.query(
-        `SELECT holiday_date
-         FROM company_holidays
-         WHERE company_id = $1
-           AND holiday_date >= $2::date
-           AND holiday_date < $3::date`,
-        [companyId, start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)]
-      ),
+      getHolidayDatesForMonth(companyId, year, month),
     ]);
 
-    const holidaySet = new Set(
-      holidaysResult.rows.map((r) => r.holiday_date.toISOString().slice(0, 10))
-    );
     const workingDays = daysInMonth - holidaySet.size;
+    const firstDayStr = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDayStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
     const logsByDay = new Map();
 
@@ -94,29 +102,40 @@ async function getAttendanceSummary(companyId, employeeId, year, month) {
       });
     }
 
+    /** Days where employee actually worked (workedMs > 0). */
+    const presentDayKeys = new Set();
     let presentDays = 0;
     let presentWorkingDays = 0;
     let totalOvertimeMs = 0;
     let totalLateMs = 0;
+    let totalLunchOverMs = 0;
+
+    const allottedLunchMs = (shift.lunchMinutesAllotted ?? 60) * 60 * 1000;
 
     for (const [dayKey, dayLogs] of logsByDay.entries()) {
       if (!dayLogs.length) continue;
 
+      const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
       let workedMs = 0;
       let lastIn = null;
       let firstInTime = null;
+      let lunchStartTime = null;
+      let lunchEndTime = null;
 
-      for (const log of dayLogs) {
+      for (const log of sorted) {
         if (log.punchType === 'in') {
           if (!firstInTime) firstInTime = log.punchTime;
+          if (lunchStartTime != null && lunchEndTime == null) lunchEndTime = log.punchTime;
           lastIn = log.punchTime;
         } else if (log.punchType === 'out' && lastIn) {
           workedMs += Math.max(0, log.punchTime - lastIn);
+          if (lunchStartTime == null) lunchStartTime = log.punchTime;
           lastIn = null;
         }
       }
 
       if (workedMs > 0) {
+        presentDayKeys.add(dayKey);
         const isHoliday = holidaySet.has(dayKey);
 
         presentDays += 1;
@@ -139,11 +158,36 @@ async function getAttendanceSummary(companyId, employeeId, year, month) {
             totalLateMs += firstInTime.getTime() - allowedStartMs;
           }
         }
+
+        if (lunchStartTime != null && lunchEndTime != null) {
+          const lunchMs = lunchEndTime - lunchStartTime;
+          if (lunchMs > allottedLunchMs) {
+            totalLunchOverMs += lunchMs - allottedLunchMs;
+          }
+        }
       }
     }
 
+    let effectiveWorkingDays = workingDays;
+    if (treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0) {
+      let holidaysCountedAsWorking = 0;
+      for (const holidayKey of holidaySet) {
+        const prevKey = addDays(holidayKey, -1);
+        const nextKey = addDays(holidayKey, 1);
+        const absentPrev = prevKey >= firstDayStr && prevKey <= lastDayStr && !presentDayKeys.has(prevKey);
+        const absentNext = nextKey >= firstDayStr && nextKey <= lastDayStr && !presentDayKeys.has(nextKey);
+        if (absentPrev || absentNext) {
+          holidaysCountedAsWorking += 1;
+        }
+      }
+      effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
+    }
+
+    const absenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
+
     const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
     const lateMinutes = totalLateMs / (60 * 1000);
+    const lunchOverMinutes = totalLunchOverMs / (60 * 1000);
 
     return {
       daysInMonth,
@@ -151,16 +195,25 @@ async function getAttendanceSummary(companyId, employeeId, year, month) {
       presentDays,
       overtimeHours,
       lateMinutes,
+      lunchOverMinutes,
       lateDeductionMinutes: shift.lateDeductionMinutes,
       lateDeductionAmount: shift.lateDeductionAmount,
-      absenceDays: Math.max(0, workingDays - presentWorkingDays),
+      lunchOverDeductionMinutes: shift.lunchOverDeductionMinutes,
+      lunchOverDeductionAmount: shift.lunchOverDeductionAmount,
+      absenceDays,
     };
   } finally {
     client.release();
   }
 }
 
-async function generateMonthlyPayroll(companyId, employeeId, year, month) {
+/**
+ * @param {Object} [payrollOptions]
+ * @param {boolean} [payrollOptions.includeOvertime=true] - If false, overtime is not added to gross.
+ * @param {boolean} [payrollOptions.treatHolidayAdjacentAbsenceAsWorking=false] - If true, holidays adjacent to an absent day count as working (extra absence).
+ */
+async function generateMonthlyPayroll(companyId, employeeId, year, month, payrollOptions = {}) {
+  const { includeOvertime = true, treatHolidayAdjacentAbsenceAsWorking = false } = payrollOptions;
   const client = await pool.connect();
 
   try {
@@ -183,19 +236,21 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month) {
       throw new AppError('Cannot generate payroll for inactive employee', 400);
     }
 
-    const summary = await getAttendanceSummary(companyId, employeeId, year, month);
+    const summary = await getAttendanceSummary(companyId, employeeId, year, month, {
+      treatHolidayAdjacentAbsenceAsWorking,
+    });
 
     const basicSalary = Number(employee.basic_salary || 0);
     const workingDays = summary.workingDays || summary.daysInMonth || 30;
     const dailyRate = workingDays > 0 ? basicSalary / workingDays : 0;
     const hourlyRate = dailyRate / 8;
 
-    const overtimePay = summary.overtimeHours * hourlyRate;
+    const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
     const absenceDeduction = summary.absenceDays * dailyRate;
 
     let lateDeduction = 0;
     if (
-      summary.lateMinutes > 0 &&
+      (summary.lateMinutes || 0) > 0 &&
       summary.lateDeductionMinutes > 0 &&
       summary.lateDeductionAmount > 0
     ) {
@@ -207,8 +262,22 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month) {
       }
     }
 
+    let lunchOverDeduction = 0;
+    if (
+      (summary.lunchOverMinutes || 0) > 0 &&
+      summary.lunchOverDeductionMinutes > 0 &&
+      summary.lunchOverDeductionAmount > 0
+    ) {
+      const blocks = Math.floor(
+        summary.lunchOverMinutes / summary.lunchOverDeductionMinutes
+      );
+      if (blocks > 0) {
+        lunchOverDeduction = blocks * summary.lunchOverDeductionAmount;
+      }
+    }
+
     const grossSalary = basicSalary + overtimePay;
-    const deductions = absenceDeduction + lateDeduction;
+    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction;
     const salaryAdvance = 0;
     const netSalary = grossSalary - deductions - salaryAdvance;
 
@@ -339,9 +408,50 @@ async function listPayrollRecords(companyId, { year, month, page = 1, limit = 20
   };
 }
 
+/**
+ * Generate payroll for all active employees for a given year/month.
+ * @param {Object} [payrollOptions] - Same as generateMonthlyPayroll (includeOvertime, treatHolidayAdjacentAbsenceAsWorking).
+ * @returns { Promise<{ generated: number, failed: number, results: Array, errors: Array }> }
+ */
+async function generateMonthlyPayrollForAllActive(companyId, year, month, payrollOptions = {}) {
+  const client = await pool.connect();
+  let employeeIds = [];
+  try {
+    const result = await client.query(
+      `SELECT id FROM employees WHERE company_id = $1 AND status = 'active' ORDER BY id`,
+      [companyId]
+    );
+    employeeIds = result.rows.map((r) => r.id);
+  } finally {
+    client.release();
+  }
+
+  const results = [];
+  const errors = [];
+  for (const employeeId of employeeIds) {
+    try {
+      const result = await generateMonthlyPayroll(companyId, employeeId, year, month, payrollOptions);
+      results.push({ employee_id: employeeId, payroll_id: result.payroll?.id });
+    } catch (err) {
+      errors.push({
+        employee_id: employeeId,
+        message: err.message || 'Failed to generate payroll',
+      });
+    }
+  }
+
+  return {
+    generated: results.length,
+    failed: errors.length,
+    results,
+    errors,
+  };
+}
+
 module.exports = {
   getAttendanceSummary,
   generateMonthlyPayroll,
+  generateMonthlyPayrollForAllActive,
   listPayrollRecords,
 };
 

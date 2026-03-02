@@ -12,6 +12,8 @@ const {
 async function createEmployee(companyId, data) {
   const payload = validateCreateEmployee(data);
 
+  const shiftId = payload.shift_id != null ? payload.shift_id : null;
+
   try {
     const result = await pool.query(
       `INSERT INTO employees (
@@ -20,10 +22,11 @@ async function createEmployee(companyId, data) {
         employee_code,
         basic_salary,
         join_date,
-        status
+        status,
+        shift_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, created_at`,
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, created_at`,
       [
         companyId,
         payload.name,
@@ -31,6 +34,7 @@ async function createEmployee(companyId, data) {
         payload.basic_salary,
         payload.join_date,
         payload.status,
+        shiftId,
       ]
     );
 
@@ -82,6 +86,7 @@ async function getEmployees(companyId, { page = 1, limit = 10, search } = {}) {
         basic_salary,
         join_date,
         status,
+        shift_id,
         created_at
      FROM employees
      ${whereClause}
@@ -112,6 +117,7 @@ async function getEmployeeById(companyId, id) {
         basic_salary,
         join_date,
         status,
+        shift_id,
         created_at
      FROM employees
      WHERE company_id = $1 AND id = $2`,
@@ -156,7 +162,7 @@ async function updateEmployee(companyId, id, data) {
       UPDATE employees
       SET ${fields.join(', ')}
       WHERE company_id = $1 AND id = $2
-      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, created_at
+      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, created_at
     `;
 
     const result = await client.query(query, values);
@@ -186,7 +192,7 @@ async function deactivateEmployee(companyId, id) {
     `UPDATE employees
      SET status = 'inactive'
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, created_at`,
+     RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, created_at`,
     [companyId, id]
   );
 

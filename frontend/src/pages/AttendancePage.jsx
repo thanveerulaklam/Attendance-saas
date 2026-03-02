@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { authFetch } from '../utils/api';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -6,6 +6,12 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 function todayStr() {
   const d = new Date();
   return d.toISOString().slice(0, 10);
+}
+
+function formatTimeForInput(d) {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 function getMonthYear(offset = 0) {
@@ -23,9 +29,27 @@ export default function AttendancePage() {
   const [loading, setLoading] = useState(false);
   const [dailyLoading, setDailyLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualError, setManualError] = useState(null);
+  const [manualSuccess, setManualSuccess] = useState(null);
+  const [manualForm, setManualForm] = useState({
+    employee_id: '',
+    date: todayStr(),
+    time: formatTimeForInput(new Date()),
+    punch_type: 'in',
+    mode: 'full_day', // 'full_day' | 'single'
+    bulk: false,
+    selected_ids: [],
+  });
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const { year, month } = monthYear;
   const dateStr = todayStr();
+
+  const refreshAfterManual = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -72,7 +96,7 @@ export default function AttendancePage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [year, month, employeeId]);
+  }, [year, month, employeeId, refreshKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -94,18 +118,22 @@ export default function AttendancePage() {
         if (isMounted) setDailyLoading(false);
       });
     return () => { isMounted = false; };
-  }, [dateStr]);
+  }, [dateStr, refreshKey]);
 
   const todaySummary = useMemo(() => {
     if (!dailyData || dailyData.length === 0) {
-      return { present: 0, absent: 0, late: 0, total: 0 };
+      return { present: 0, absent: 0, late: 0, fullDay: 0, leftDuringLunch: 0, total: 0 };
     }
     const present = dailyData.filter((r) => r.present).length;
     const late = dailyData.filter((r) => r.late).length;
+    const fullDay = dailyData.filter((r) => r.full_day).length;
+    const leftDuringLunch = dailyData.filter((r) => r.left_during_lunch).length;
     return {
       present,
       absent: dailyData.length - present,
       late,
+      fullDay,
+      leftDuringLunch,
       total: dailyData.length,
     };
   }, [dailyData]);
@@ -155,6 +183,105 @@ export default function AttendancePage() {
   const goPrev = () => setMonthYear((m) => getMonthYear(-1));
   const goNext = () => setMonthYear((m) => getMonthYear(1));
 
+  const handleManualSubmit = (e) => {
+    e.preventDefault();
+    const isBulk = manualForm.mode === 'full_day' && manualForm.bulk;
+    const selectedIds = isBulk ? (manualForm.selected_ids || []) : [];
+
+    if (isBulk) {
+      if (!selectedIds.length) {
+        setManualError('Please select at least one employee');
+        return;
+      }
+    } else if (!manualForm.employee_id) {
+      setManualError('Please select an employee');
+      return;
+    }
+
+    setManualError(null);
+    setManualSuccess(null);
+    setManualSubmitting(true);
+
+    if (isBulk) {
+      authFetch('/api/attendance/manual-full-day-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employee_ids: selectedIds, date: manualForm.date }),
+      })
+        .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
+        .then(({ ok, json }) => {
+          if (ok) {
+            setManualSuccess(json.message || 'Attendance recorded');
+            refreshAfterManual();
+            setManualForm((f) => ({ ...f, selected_ids: [] }));
+          } else {
+            setManualError(json.message || json.error || 'Failed to record attendance');
+          }
+        })
+        .catch(() => setManualError('Network error'))
+        .finally(() => setManualSubmitting(false));
+      return;
+    }
+
+    const url = manualForm.mode === 'full_day'
+      ? '/api/attendance/manual-full-day'
+      : '/api/attendance/manual-punch';
+    const body = manualForm.mode === 'full_day'
+      ? { employee_id: Number(manualForm.employee_id), date: manualForm.date }
+      : {
+          employee_id: Number(manualForm.employee_id),
+          date: manualForm.date,
+          time: manualForm.time,
+          punch_type: manualForm.punch_type,
+        };
+    authFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then((res) => res.json().then((json) => ({ ok: res.ok, json })))
+      .then(({ ok, json }) => {
+        if (ok) {
+          setManualSuccess(json.message || 'Attendance recorded');
+          refreshAfterManual();
+          setManualForm((f) => ({ ...f, employee_id: '' }));
+        } else {
+          setManualError(json.message || json.error || 'Failed to record attendance');
+        }
+      })
+      .catch(() => setManualError('Network error'))
+      .finally(() => setManualSubmitting(false));
+  };
+
+  const toggleEmployee = (id) => {
+    setManualForm((f) => {
+      const ids = new Set(f.selected_ids || []);
+      if (ids.has(id)) ids.delete(id);
+      else ids.add(id);
+      return { ...f, selected_ids: Array.from(ids) };
+    });
+  };
+
+  const selectAllEmployees = () => {
+    setManualForm((f) => ({ ...f, selected_ids: employees.map((e) => e.id) }));
+  };
+
+  const clearAllEmployees = () => {
+    setManualForm((f) => ({ ...f, selected_ids: [] }));
+  };
+
+  const openManualModal = () => {
+    setManualError(null);
+    setManualSuccess(null);
+    setManualForm((f) => ({
+      ...f,
+      date: todayStr(),
+      time: formatTimeForInput(new Date()),
+      selected_ids: [],
+    }));
+    setManualModalOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       <header>
@@ -166,12 +293,23 @@ export default function AttendancePage() {
 
       {/* Today summary card */}
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
-        <h2 className="text-sm font-semibold text-slate-900">Today&apos;s summary</h2>
-        <p className="text-[11px] text-slate-500 mt-0.5">{dateStr}</p>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Today&apos;s summary</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">{dateStr}</p>
+          </div>
+          <button
+            type="button"
+            onClick={openManualModal}
+            className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
+          >
+            Mark manual attendance
+          </button>
+        </div>
         {dailyLoading ? (
           <div className="mt-3 h-16 rounded-lg bg-slate-50 animate-pulse" />
         ) : (
-          <div className="mt-3 grid grid-cols-3 gap-3">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
               <p className="text-[10px] font-medium text-emerald-700">Present</p>
               <p className="text-lg font-semibold text-emerald-800">{todaySummary.present}</p>
@@ -184,11 +322,95 @@ export default function AttendancePage() {
               <p className="text-[10px] font-medium text-amber-700">Late</p>
               <p className="text-lg font-semibold text-amber-800">{todaySummary.late}</p>
             </div>
+            <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
+              <p className="text-[10px] font-medium text-blue-700">Full day</p>
+              <p className="text-lg font-semibold text-blue-800">{todaySummary.fullDay}</p>
+            </div>
+            <div className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
+              <p className="text-[10px] font-medium text-rose-700">Left at lunch</p>
+              <p className="text-lg font-semibold text-rose-800">{todaySummary.leftDuringLunch}</p>
+            </div>
           </div>
         )}
         <p className="mt-2 text-[11px] text-slate-400">
           {todaySummary.total} active employees
         </p>
+
+        {/* Today's punch timings */}
+        {!dailyLoading && dailyData && dailyData.length > 0 && (
+          <div className="mt-4 border-t border-slate-100 pt-4">
+            <h3 className="text-xs font-semibold text-slate-700 mb-2">Punch timings today</h3>
+            <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-100">
+              <table className="w-full text-[11px]">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="text-left py-2 px-2 font-medium text-slate-600">Employee</th>
+                    <th className="text-left py-2 px-2 font-medium text-slate-600">Code</th>
+                    <th className="text-left py-2 px-2 font-medium text-slate-600">Timings</th>
+                    <th className="text-left py-2 px-2 font-medium text-slate-600">Day status</th>
+                    <th className="text-left py-2 px-2 font-medium text-slate-600">Lunch</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyData.map((row) => {
+                    const punches = row.punches || [];
+                    const timingsStr = punches.length
+                      ? punches
+                          .map((p) => {
+                            const t = new Date(p.punch_time);
+                            const timeStr = t.toLocaleTimeString('en-US', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true,
+                            });
+                            return `${timeStr} ${(p.punch_type || '').toUpperCase()}`;
+                          })
+                          .join(', ')
+                      : '—';
+                    let dayStatus = 'Absent';
+                    if (row.present) {
+                      if (row.full_day) dayStatus = 'Full day';
+                      else if (row.left_during_lunch) dayStatus = 'Left at lunch';
+                      else dayStatus = 'Present';
+                    }
+                    if (row.late && (dayStatus === 'Present' || dayStatus === 'Full day')) {
+                      dayStatus += ' (late)';
+                    }
+                    const statusCls =
+                      dayStatus.startsWith('Full day')
+                        ? 'text-blue-600'
+                        : dayStatus.startsWith('Left')
+                          ? 'text-rose-600'
+                          : row.present
+                            ? 'text-emerald-600'
+                            : 'text-slate-500';
+                    const lunch =
+                      row.left_during_lunch
+                        ? '—'
+                        : row.lunch_minutes != null
+                          ? row.lunch_over_minutes != null && row.lunch_over_minutes > 0
+                            ? `${row.lunch_minutes}m (+${row.lunch_over_minutes} over)`
+                            : `${row.lunch_minutes}m`
+                          : '—';
+                    const lunchCls =
+                      row.lunch_over_minutes != null && row.lunch_over_minutes > 0
+                        ? 'text-amber-600'
+                        : 'text-slate-600';
+                    return (
+                      <tr key={row.employee_id} className="border-t border-slate-100 hover:bg-slate-50/50">
+                        <td className="py-1.5 px-2 font-medium text-slate-800">{row.name}</td>
+                        <td className="py-1.5 px-2 text-slate-600">{row.employee_code || '—'}</td>
+                        <td className="py-1.5 px-2 text-slate-600">{timingsStr}</td>
+                        <td className={`py-1.5 px-2 font-medium ${statusCls}`}>{dayStatus}</td>
+                        <td className={`py-1.5 px-2 ${lunchCls}`}>{lunch}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Monthly calendar */}
@@ -321,6 +543,204 @@ export default function AttendancePage() {
           </div>
         )}
       </section>
+
+      {/* Manual attendance modal */}
+      {manualModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setManualModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-md max-h-[90vh] flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Mark manual attendance</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Use when the biometric device is broken or unavailable
+              </p>
+            </div>
+            <form onSubmit={handleManualSubmit} className="flex flex-1 flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+              {manualError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+                  {manualError}
+                </div>
+              )}
+              {manualSuccess && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+                  {manualSuccess}
+                </div>
+              )}
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-2">Mode</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="manual_mode"
+                      checked={manualForm.mode === 'full_day'}
+                      onChange={() => setManualForm((f) => ({ ...f, mode: 'full_day' }))}
+                      className="text-primary-600"
+                    />
+                    <span className="text-[12px] text-slate-700">Mark full day</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="manual_mode"
+                      checked={manualForm.mode === 'single'}
+                      onChange={() => setManualForm((f) => ({ ...f, mode: 'single' }))}
+                      className="text-primary-600"
+                    />
+                    <span className="text-[12px] text-slate-700">Single punch</span>
+                  </label>
+                </div>
+              </div>
+              {manualForm.mode === 'full_day' && (
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-2">Bulk (multiple staff)</label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={manualForm.bulk}
+                      onChange={(e) => setManualForm((f) => ({ ...f, bulk: e.target.checked, selected_ids: [] }))}
+                      className="rounded border-slate-300 text-primary-600"
+                    />
+                    <span className="text-[12px] text-slate-700">Mark multiple employees at once</span>
+                  </label>
+                </div>
+              )}
+              {manualForm.bulk && manualForm.mode === 'full_day' ? (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-[11px] font-medium text-slate-600">Select employees</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={selectAllEmployees}
+                        className="text-[10px] text-blue-600 hover:underline"
+                      >
+                        Select all
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={clearAllEmployees}
+                        className="text-[10px] text-slate-500 hover:underline"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 p-2 space-y-1">
+                    {employees.map((emp) => (
+                      <label
+                        key={emp.id}
+                        className="flex items-center gap-2 py-1 px-2 rounded hover:bg-slate-100 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={(manualForm.selected_ids || []).includes(emp.id)}
+                          onChange={() => toggleEmployee(emp.id)}
+                          className="rounded border-slate-300 text-primary-600"
+                        />
+                        <span className="text-[12px] text-slate-700">{emp.name}</span>
+                        <span className="text-[10px] text-slate-400">({emp.employee_code})</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    {(manualForm.selected_ids || []).length} selected
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-600 mb-1">Employee</label>
+                  <select
+                    value={manualForm.employee_id}
+                    onChange={(e) => setManualForm((f) => ({ ...f, employee_id: e.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    required={!manualForm.bulk}
+                  >
+                    <option value="">Select employee</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.employee_code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={manualForm.date}
+                  onChange={(e) => setManualForm((f) => ({ ...f, date: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  required
+                />
+              </div>
+              {manualForm.mode === 'full_day' && !manualForm.bulk && (
+                <p className="text-[10px] text-slate-400">
+                  Full day adds IN at shift start and OUT at shift end (with lunch).
+                </p>
+              )}
+              {manualForm.mode === 'single' && (
+                <p className="text-[10px] text-slate-400">
+                  Single punch adds one IN or OUT at the specified time.
+                </p>
+              )}
+              {manualForm.mode === 'single' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Time</label>
+                    <input
+                      type="time"
+                      value={manualForm.time}
+                      onChange={(e) => setManualForm((f) => ({ ...f, time: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-600 mb-1">Punch type</label>
+                    <select
+                      value={manualForm.punch_type}
+                      onChange={(e) => setManualForm((f) => ({ ...f, punch_type: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    >
+                      <option value="in">IN</option>
+                      <option value="out">OUT</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+              </div>
+              <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setManualModalOpen(false)}
+                  className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={manualSubmitting}
+                  className="flex-1 rounded-lg border-2 border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 hover:border-blue-700 disabled:opacity-60"
+                >
+                  {manualSubmitting
+                    ? 'Saving…'
+                    : manualForm.bulk && manualForm.mode === 'full_day'
+                      ? `Mark ${(manualForm.selected_ids || []).length} employees`
+                      : 'Mark attendance'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

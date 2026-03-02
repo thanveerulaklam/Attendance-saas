@@ -47,6 +47,9 @@ function log(msg) {
   } catch (_) {}
 }
 
+/** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
+const MIN_BREAK_MINUTES = 30;
+
 function assignInOut(logs) {
   const byUserAndDay = new Map();
   for (const log of logs) {
@@ -54,13 +57,38 @@ function assignInOut(logs) {
     if (!byUserAndDay.has(key)) byUserAndDay.set(key, []);
     byUserAndDay.get(key).push(log);
   }
+
+  const result = [];
+  const minBreakMs = MIN_BREAK_MINUTES * 60 * 1000;
+
   for (const list of byUserAndDay.values()) {
     list.sort((a, b) => new Date(a.punch_time) - new Date(b.punch_time));
-    list.forEach((l, i) => {
+
+    // Remove OUT→IN pairs where gap < 30 min (short breaks / double-taps)
+    let filtered = [];
+    for (let i = 0; i < list.length; i++) {
+      const curr = list[i];
+      const next = list[i + 1];
+      const currType = i % 2 === 0 ? 'in' : 'out';
+      const nextType = (i + 1) % 2 === 0 ? 'in' : 'out';
+
+      if (currType === 'out' && next && nextType === 'in') {
+        const gapMs = new Date(next.punch_time) - new Date(curr.punch_time);
+        if (gapMs < minBreakMs) {
+          i++; // skip both curr and next
+          continue;
+        }
+      }
+      filtered.push(curr);
+    }
+
+    // Re-apply zigzag on remaining punches
+    filtered.forEach((l, i) => {
       l.punch_type = i % 2 === 0 ? 'in' : 'out';
+      result.push(l);
     });
   }
-  return logs;
+  return result;
 }
 
 async function fetchAndPush() {
@@ -76,16 +104,34 @@ async function fetchAndPush() {
     await client.createSocket();
     log(`Connected to device at ${DEVICE_IP}:${DEVICE_PORT}`);
 
+    let size = 0;
+    let sizeCheckFailed = false;
+    try {
+      size = await client.getAttendanceSize();
+    } catch (sizeErr) {
+      const msg = sizeErr?.message || sizeErr?.msg || (typeof sizeErr === 'string' ? sizeErr : (sizeErr && typeof sizeErr === 'object' ? (sizeErr.toString?.() !== '[object Object]' ? sizeErr.toString() : JSON.stringify(sizeErr)) : String(sizeErr)));
+      log(`Size check failed (will try to fetch anyway): ${msg}`);
+      sizeCheckFailed = true;
+      size = 1; // so we don't exit early; try getAttendances() once
+    }
+
+    if (size === 0) {
+      log('No attendance records on device.');
+      try { await client.disconnect(); } catch (_) {}
+      return;
+    }
+
     let result;
     try {
       result = await client.getAttendances();
     } catch (sdkErr) {
-      log(`Device read error (will retry): ${sdkErr.message}`);
+      const errMsg = sdkErr?.toast?.() || sdkErr?.err?.message || sdkErr?.message || sdkErr?.msg
+        || (typeof sdkErr === 'string' ? sdkErr : (sdkErr?.toString?.() !== '[object Object]' ? sdkErr?.toString?.() : 'Device communication failed'));
+      log(`Device read error (will retry): ${errMsg}`);
+      try { await client.disconnect(); } catch (_) {}
       return;
     } finally {
-      try {
-        await client.disconnect();
-      } catch (_) {}
+      try { await client.disconnect(); } catch (_) {}
     }
 
     const rawRecords = result?.data || [];
@@ -107,31 +153,39 @@ async function fetchAndPush() {
       return;
     }
 
-    assignInOut(logs);
+    const logsToSend = assignInOut(logs);
 
     const payload = {
-      logs: logs.map((l) => ({
+      logs: logsToSend.map((l) => ({
         employee_code: l.employee_code,
         punch_time: l.punch_time,
         punch_type: l.punch_type,
       })),
     };
 
-    const res = await fetch(`${BACKEND_URL}/api/device/push`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-device-key': DEVICE_API_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
+    const pushUrl = `${BACKEND_URL.replace(/\/$/, '')}/api/device/push`;
+    let res;
+    try {
+      res = await fetch(pushUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-key': DEVICE_API_KEY,
+        },
+        body: JSON.stringify(payload),
+      });
+    } catch (fetchErr) {
+      const cause = fetchErr?.cause?.message || fetchErr?.cause?.code || fetchErr?.code;
+      log(`Backend unreachable: ${fetchErr.message}${cause ? ` (${cause})` : ''}. Check backendUrl in config.json.`);
+      return;
+    }
 
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       log(`Push failed ${res.status}: ${body.message || res.statusText}`);
       return;
     }
-    log(`Pushed ${body.data?.inserted ?? logs.length} logs to backend.`);
+    log(`Pushed ${body.data?.inserted ?? logsToSend.length} logs to backend.`);
 
     const clearClient = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);
     try {
@@ -146,7 +200,9 @@ async function fetchAndPush() {
       } catch (_) {}
     }
   } catch (err) {
-    log(`Error: ${err.message}`);
+    const cause = err?.cause?.message || err?.cause?.code || err?.code;
+    const detail = cause ? `${err.message} (${cause})` : err.message;
+    log(`Error: ${detail}`);
     try {
       await client.disconnect();
     } catch (_) {}

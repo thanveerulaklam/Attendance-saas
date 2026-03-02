@@ -11,6 +11,23 @@ const STEP_ROUTES = {
   payroll: '/payroll',
 };
 
+const DISMISS_STORAGE_KEY = 'attendance_saas_onboarding_dismissed';
+
+function getDismissed() {
+  try {
+    return localStorage.getItem(DISMISS_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function setDismissed(value) {
+  try {
+    if (value) localStorage.setItem(DISMISS_STORAGE_KEY, 'true');
+    else localStorage.removeItem(DISMISS_STORAGE_KEY);
+  } catch {}
+}
+
 function StepIcon({ completed }) {
   return (
     <div
@@ -36,7 +53,13 @@ export default function OnboardingChecklist() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [celebrate, setCelebrate] = useState(false);
+  const [dismissed, setDismissedState] = useState(() => getDismissed());
   const navigate = useNavigate();
+
+  const handleDismiss = () => {
+    setDismissed(true);
+    setDismissedState(true);
+  };
 
   const progress = useMemo(() => {
     if (!status) return 0;
@@ -121,8 +144,8 @@ export default function OnboardingChecklist() {
     );
   }
 
-  if (error || !status || status.isCompleted) {
-    // Hide widget on error or when fully completed
+  if (dismissed || error || !status || status.isCompleted) {
+    // Hide widget when dismissed, on error, or when fully completed
     return null;
   }
 
@@ -133,10 +156,23 @@ export default function OnboardingChecklist() {
       <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-primary-500 via-indigo-500 to-emerald-500" />
 
       <div className="flex flex-col gap-4 px-5 py-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-slate-900">
-            Let&apos;s set up your company
-          </h2>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">
+              Let&apos;s set up your company
+            </h2>
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="flex-shrink-0 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-primary-200"
+              title="Dismiss this section"
+              aria-label="Dismiss"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <p className="mt-1 text-xs text-slate-500">
             Complete these steps to start managing attendance with confidence.
           </p>

@@ -1,5 +1,5 @@
 const express = require('express');
-const { getShifts, createShiftHandler } = require('../controllers/shiftController');
+const { getShifts, createShiftHandler, updateShiftHandler, deleteShiftHandler } = require('../controllers/shiftController');
 const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
 
 const router = express.Router();
@@ -11,6 +11,12 @@ router.get('/', withShiftAuth, getShifts);
 
 // POST /api/shifts
 router.post('/', withShiftAuth, createShiftHandler);
+
+// PUT /api/shifts/:id
+router.put('/:id', withShiftAuth, updateShiftHandler);
+
+// DELETE /api/shifts/:id
+router.delete('/:id', withShiftAuth, deleteShiftHandler);
 
 module.exports = router;
 

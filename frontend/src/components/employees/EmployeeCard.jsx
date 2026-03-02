@@ -1,4 +1,4 @@
-export default function EmployeeCard({ employee }) {
+export default function EmployeeCard({ employee, onEdit, onDeactivate }) {
   if (!employee) return null;
 
   const {
@@ -17,7 +17,14 @@ export default function EmployeeCard({ employee }) {
     .join('');
 
   const formattedSalary =
-    basicSalary != null ? new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(basicSalary) : '-';
+    basicSalary != null
+      ? new Intl.NumberFormat('en-IN', {
+          style: 'currency',
+          currency: 'INR',
+          maximumFractionDigits: 0,
+          minimumFractionDigits: 0,
+        }).format(basicSalary)
+      : '—';
 
   const formattedJoinDate = joinDate
     ? new Date(joinDate).toLocaleDateString(undefined, {
@@ -81,6 +88,7 @@ export default function EmployeeCard({ employee }) {
       <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
         <button
           type="button"
+          onClick={() => onEdit?.(employee)}
           className="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:text-primary-700"
         >
           <span className="mr-1 text-xs">✏️</span>
@@ -88,9 +96,11 @@ export default function EmployeeCard({ employee }) {
         </button>
         <button
           type="button"
-          className="text-[11px] font-medium text-rose-600 hover:text-rose-700"
+          onClick={() => isActive && onDeactivate?.(employee)}
+          disabled={!isActive}
+          className="text-[11px] font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Deactivate
+          {isActive ? 'Deactivate' : 'Deactivated'}
         </button>
       </div>
     </article>

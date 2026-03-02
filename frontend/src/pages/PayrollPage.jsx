@@ -36,9 +36,10 @@ export default function PayrollPage() {
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [generateForm, setGenerateForm] = useState({
-    employee_id: '',
     year: currentYear(),
     month: String(new Date().getMonth() + 1),
+    includeOvertime: true,
+    treatHolidayAdjacentAbsenceAsWorking: false,
   });
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState(null);
@@ -108,28 +109,31 @@ export default function PayrollPage() {
     return () => { isMounted = false; };
   }, [year, month, page, employeeId]);
 
-  const handleGenerate = async (e) => {
+  const activeCount = employees.filter((e) => e.status === 'active').length;
+
+  const handleGenerateAll = async (e) => {
     e.preventDefault();
-    const { employee_id: eid, year: y, month: m } = generateForm;
-    if (!eid || !y || !m) {
-      setToast({ type: 'error', message: 'Select employee, year and month' });
+    const { year: y, month: m } = generateForm;
+    if (!y || !m) {
+      setToast({ type: 'error', message: 'Select year and month' });
       return;
     }
     const confirmed = window.confirm(
-      `Generate payroll for ${employees.find((emp) => emp.id === Number(eid))?.name ?? 'this employee'} for ${m}/${y}? This will create or update the record from current attendance.`
+      `Generate payroll for all ${activeCount} active employees for ${new Date(2000, Number(m) - 1, 1).toLocaleString('default', { month: 'long' })} ${y}? This will create or update records from current attendance.`
     );
     if (!confirmed) return;
 
     try {
       setGenerating(true);
       setToast(null);
-      const res = await authFetch('/api/payroll/generate', {
+      const res = await authFetch('/api/payroll/generate-all', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          employee_id: Number(eid),
           year: Number(y),
           month: Number(m),
+          include_overtime: generateForm.includeOvertime !== false,
+          treat_holiday_adjacent_absence_as_working: generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
         }),
       });
       if (!res.ok) {
@@ -137,13 +141,20 @@ export default function PayrollPage() {
         const msg = errData.code === 'SUBSCRIPTION_EXPIRED' ? errData.message : (errData.message || 'Failed to generate payroll');
         throw new Error(msg);
       }
+      const json = await res.json();
+      const data = json.data || {};
+      const generated = data.generated ?? 0;
+      const failed = data.failed ?? 0;
       setModalOpen(false);
-      setToast({ type: 'success', message: 'Payroll generated successfully' });
+      const successMsg =
+        failed > 0
+          ? `Payroll generated for ${generated} employees. ${failed} failed.`
+          : `Payroll generated for ${generated} employee${generated !== 1 ? 's' : ''}.`;
+      setToast({ type: 'success', message: successMsg });
       setPage(1);
       setYear(Number(y));
       setMonth(m);
       setEmployeeId('');
-      // Refetch is triggered by useEffect when year/month/page/employeeId change
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed to generate payroll' });
     } finally {
@@ -154,7 +165,7 @@ export default function PayrollPage() {
   return (
     <div className="space-y-6">
       {toast && (
-        <div className="fixed right-6 top-20 z-30">
+        <div className="fixed top-20 z-30" style={{ right: '20%' }}>
           <div
             className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
               toast.type === 'error'
@@ -342,25 +353,13 @@ export default function PayrollPage() {
       {modalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40">
           <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
-            <h2 className="text-sm font-semibold text-slate-900">Generate payroll</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Generate payroll for all</h2>
             <p className="mt-1 text-[11px] text-slate-500">
-              Create or update payroll for one employee for a given month. Uses current attendance data.
+              {activeCount > 0
+                ? `Create or update payroll for all ${activeCount} active employees for the selected month. Uses current attendance data.`
+                : 'No active employees. Add active employees to generate payroll.'}
             </p>
-            <form onSubmit={handleGenerate} className="mt-4 space-y-3">
-              <div>
-                <label className="text-[11px] font-medium text-slate-700">Employee</label>
-                <select
-                  value={generateForm.employee_id}
-                  onChange={(e) => setGenerateForm((f) => ({ ...f, employee_id: e.target.value }))}
-                  required
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
-                >
-                  <option value="">Select employee</option>
-                  {employees.filter((e) => e.status === 'active').map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_code})</option>
-                  ))}
-                </select>
-              </div>
+            <form onSubmit={handleGenerateAll} className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-medium text-slate-700">Year</label>
@@ -387,6 +386,29 @@ export default function PayrollPage() {
                   </select>
                 </div>
               </div>
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={generateForm.includeOvertime}
+                    onChange={(e) => setGenerateForm((f) => ({ ...f, includeOvertime: e.target.checked }))}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-[11px] text-slate-700">Include overtime in pay</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={generateForm.treatHolidayAdjacentAbsenceAsWorking}
+                    onChange={(e) => setGenerateForm((f) => ({ ...f, treatHolidayAdjacentAbsenceAsWorking: e.target.checked }))}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-[11px] text-slate-700">Treat holiday as working day when adjacent day is absent</span>
+                </label>
+                <p className="text-[10px] text-slate-500">
+                  If enabled, e.g. Sunday is holiday and staff is absent Monday, both Sunday and Monday count as absent (2 days).
+                </p>
+              </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -398,10 +420,10 @@ export default function PayrollPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={generating}
-                  className="rounded-lg bg-primary-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm hover:bg-primary-700 disabled:opacity-50"
+                  disabled={generating || activeCount === 0}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {generating ? 'Generating...' : 'Generate'}
+                  {generating ? 'Generating...' : 'Generate for all'}
                 </button>
               </div>
             </form>

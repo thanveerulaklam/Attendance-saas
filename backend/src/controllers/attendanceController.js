@@ -1,4 +1,10 @@
-const { getDailyAttendance, getMonthlyAttendance } = require('../services/attendanceService');
+const {
+  getDailyAttendance,
+  getMonthlyAttendance,
+  addManualPunch,
+  addManualFullDay,
+  addManualFullDayBulk,
+} = require('../services/attendanceService');
 
 /**
  * GET /api/attendance/daily?date=YYYY-MM-DD&employee_id=
@@ -70,7 +76,99 @@ async function getMonthly(req, res, next) {
   }
 }
 
+/**
+ * POST /api/attendance/manual-punch
+ * Body: { employee_id, date (YYYY-MM-DD), time (HH:mm), punch_type ('in'|'out') }
+ */
+async function createManualPunch(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { employee_id: employeeId, date, time, punch_type: punchType } = req.body || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const result = await addManualPunch(companyId, {
+      employeeId,
+      date,
+      time,
+      punchType,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: result,
+      message: 'Manual punch recorded',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/attendance/manual-full-day
+ * Body: { employee_id, date (YYYY-MM-DD) }
+ */
+async function createManualFullDay(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { employee_id: employeeId, date } = req.body || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const result = await addManualFullDay(companyId, { employeeId, date });
+
+    return res.status(201).json({
+      success: true,
+      data: result,
+      message: `Manual full-day attendance recorded (${result.inserted} punches)`,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/attendance/manual-full-day-bulk
+ * Body: { employee_ids: number[], date (YYYY-MM-DD) }
+ */
+async function createManualFullDayBulk(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { employee_ids: employeeIds, date } = req.body || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const result = await addManualFullDayBulk(companyId, { employeeIds, date });
+
+    return res.status(201).json({
+      success: true,
+      data: result,
+      message: `Marked ${result.processed} employee(s), ${result.inserted} punches recorded`,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getDaily,
   getMonthly,
+  createManualPunch,
+  createManualFullDay,
+  createManualFullDayBulk,
 };

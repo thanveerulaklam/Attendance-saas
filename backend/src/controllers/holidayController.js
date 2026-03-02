@@ -1,4 +1,10 @@
-const { listHolidays, createHoliday, deleteHoliday } = require('../services/holidayService');
+const {
+  listHolidays,
+  createHoliday,
+  deleteHoliday,
+  getWeeklyOffs,
+  setWeeklyOffs,
+} = require('../services/holidayService');
 
 async function getHolidays(req, res, next) {
   try {
@@ -63,9 +69,44 @@ async function deleteHolidayHandler(req, res, next) {
   }
 }
 
+async function getWeeklyOffHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+    const days = await getWeeklyOffs(companyId);
+    return res.json({ success: true, data: { days } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function putWeeklyOffHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+    const days = (req.body && req.body.days) || [];
+    const updated = await setWeeklyOffs(companyId, days);
+    return res.json({ success: true, data: { days: updated } });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getHolidays,
   createHolidayHandler,
   deleteHolidayHandler,
+  getWeeklyOffHandler,
+  putWeeklyOffHandler,
 };
 

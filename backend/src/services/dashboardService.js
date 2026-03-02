@@ -16,6 +16,22 @@ async function getDashboardSummary(companyId) {
     .map((r) => r.name)
     .sort();
 
+  // Currently on lunch = have exactly 2 punches today (IN, OUT) — out for lunch, not yet back
+  const todayOnLunch = (dailyResult || [])
+    .filter(
+      (r) =>
+        r.punches &&
+        r.punches.length === 2 &&
+        (r.punches[0].punch_type || '').toLowerCase() === 'in' &&
+        (r.punches[1].punch_type || '').toLowerCase() === 'out'
+    )
+    .map((r) => ({
+      name: r.name,
+      employee_code: r.employee_code || '',
+      punched_out_at: r.punches[1].punch_time,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const trendDays = [];
   for (let i = 6; i >= 0; i -= 1) {
     const d = new Date(today);
@@ -42,6 +58,7 @@ async function getDashboardSummary(companyId) {
     todayTotal,
     todayPct: todayTotal > 0 ? Math.round((todayPresent / todayTotal) * 100) : 0,
     todayAbsent,
+    todayOnLunch,
     attendanceTrend: trend,
   };
 }

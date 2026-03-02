@@ -1,5 +1,5 @@
 const express = require('express');
-const { list, generate } = require('../controllers/payrollController');
+const { list, generate, generateAll } = require('../controllers/payrollController');
 const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
 const { requireActiveSubscription } = require('../middleware/subscription');
 
@@ -11,6 +11,8 @@ router.get('/', withAuth, list);
 
 // Generate or regenerate payroll (blocked if subscription expired)
 router.post('/generate', withAuth, requireActiveSubscription, generate);
+// Generate payroll for all active employees for a given month
+router.post('/generate-all', withAuth, requireActiveSubscription, generateAll);
 
 module.exports = router;
 
