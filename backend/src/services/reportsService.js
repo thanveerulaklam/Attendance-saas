@@ -82,6 +82,7 @@ async function getPayrollReportCsv(companyId, year, month) {
         p.gross_salary,
         p.deductions,
         p.salary_advance,
+        p.no_leave_incentive,
         p.net_salary,
         e.name AS employee_name,
         e.employee_code
@@ -102,6 +103,7 @@ async function getPayrollReportCsv(companyId, year, month) {
     'Overtime Hours',
     'Gross Salary',
     'Deductions',
+    'No Leave Incentive',
     'Net Salary',
   ];
   const rows = result.rows.map((row) => [
@@ -114,6 +116,7 @@ async function getPayrollReportCsv(companyId, year, month) {
     row.overtime_hours,
     row.gross_salary,
     row.deductions,
+    row.no_leave_incentive ?? 0,
     row.net_salary,
   ]);
   return toCsv(header, rows);

@@ -8,6 +8,7 @@ import CompanySettingsPage from './pages/CompanySettingsPage';
 import ShiftsPage from './pages/ShiftsPage';
 import DevicesPage from './pages/DevicesPage';
 import PayrollPage from './pages/PayrollPage';
+import AdvancesPage from './pages/AdvancesPage';
 import AttendancePage from './pages/AttendancePage';
 import ReportsPage from './pages/ReportsPage';
 import AuditPage from './pages/AuditPage';
@@ -46,6 +47,7 @@ function App() {
             <Route path="/shifts" element={<ShiftsPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/payroll" element={<PayrollPage />} />
+            <Route path="/advances" element={<AdvancesPage />} />
           </Route>
         </Routes>
       </AuthProvider>

@@ -1,15 +1,26 @@
 #!/bin/bash
-# Run this ONCE to make the connector start automatically when Mac starts.
+# Run this ONCE per folder to make the connector start automatically when Mac starts.
 # Put this file in the SAME folder as the connector binary and config.json.
+#
+# For multiple devices: use a separate folder per device, each with its own config.json.
+#   Device 1: ./install-mac.sh
+#   Device 2: in another folder, ./install-mac.sh 2
+#   Device 3: in another folder, ./install-mac.sh 3
+# (Instance number is optional; default is 1.)
 
 set -e
 
+INSTANCE="${1:-1}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONNECTOR_BIN="$SCRIPT_DIR/connector-mac"
-PLIST_NAME="com.attendancesaas.connector"
+if [ "$INSTANCE" = "1" ]; then
+  PLIST_NAME="com.attendancesaas.connector"
+else
+  PLIST_NAME="com.attendancesaas.connector${INSTANCE}"
+fi
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_NAME}.plist"
 
-echo "Installing Attendance Connector to run at Mac login..."
+echo "Installing Attendance Connector (instance ${INSTANCE}) to run at Mac login..."
 
 if [ ! -f "$CONNECTOR_BIN" ]; then
     echo "ERROR: connector-mac not found in $SCRIPT_DIR"
@@ -57,10 +68,10 @@ launchctl unload "$PLIST_PATH" 2>/dev/null || true
 launchctl load "$PLIST_PATH"
 
 echo ""
-echo "SUCCESS: Connector is now running and will start automatically on Mac login."
+echo "SUCCESS: Connector (instance ${INSTANCE}) is now running and will start automatically on Mac login."
 echo "Log file: $SCRIPT_DIR/connector.log"
 echo ""
 echo "Commands:"
-echo "  Stop:  launchctl unload $PLIST_PATH"
-echo "  Start: launchctl load $PLIST_PATH"
+echo "  Stop:   launchctl unload $PLIST_PATH"
+echo "  Start:  launchctl load $PLIST_PATH"
 echo "  Status: launchctl list | grep $PLIST_NAME"

@@ -1,4 +1,4 @@
-const { generateMonthlyPayroll, generateMonthlyPayrollForAllActive, listPayrollRecords } = require('../services/payrollService');
+const { generateMonthlyPayroll, generateMonthlyPayrollForAllActive, listPayrollRecords, getPayrollBreakdown } = require('../services/payrollService');
 const auditService = require('../services/auditService');
 
 /**
@@ -48,6 +48,7 @@ async function generate(req, res, next) {
       month: monthRaw,
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
+      no_leave_incentive: noLeaveIncentiveRaw,
     } = req.body || {};
 
     const employeeId = Number(employeeIdRaw);
@@ -55,6 +56,7 @@ async function generate(req, res, next) {
     const month = Number(monthRaw);
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
+    const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
 
     if (!companyId || !employeeId || !year || !month) {
       return res.status(400).json({
@@ -66,6 +68,7 @@ async function generate(req, res, next) {
     const result = await generateMonthlyPayroll(companyId, employeeId, year, month, {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
+      noLeaveIncentive,
     });
 
     auditService.log(companyId, req.user?.user_id, 'payroll.generate', 'payroll', result.payroll?.id, { employee_id: employeeId, year, month }).catch(() => {});
@@ -92,12 +95,14 @@ async function generateAll(req, res, next) {
       month: monthRaw,
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
+      no_leave_incentive: noLeaveIncentiveRaw,
     } = req.body || {};
 
     const year = Number(yearRaw);
     const month = Number(monthRaw);
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
+    const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
 
     if (!companyId || !year || !month || month < 1 || month > 12) {
       return res.status(400).json({
@@ -109,6 +114,7 @@ async function generateAll(req, res, next) {
     const result = await generateMonthlyPayrollForAllActive(companyId, year, month, {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
+      noLeaveIncentive,
     });
 
     auditService.log(companyId, req.user?.user_id, 'payroll.generate_all', 'payroll', null, {
@@ -127,5 +133,37 @@ async function generateAll(req, res, next) {
   }
 }
 
-module.exports = { list, generate, generateAll };
+/**
+ * GET /api/payroll/breakdown
+ * Query: employee_id, year, month
+ * Returns full payroll detail for one employee (attendance, deductions, advance, net) for the detail modal.
+ */
+async function breakdown(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { employee_id: employeeIdRaw, year: yearRaw, month: monthRaw } = req.query || {};
+
+    const employeeId = Number(employeeIdRaw);
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+
+    if (!companyId || !employeeId || !year || !month || month < 1 || month > 12) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token), employee_id, year and month (1–12) are required',
+      });
+    }
+
+    const data = await getPayrollBreakdown(companyId, employeeId, year, month);
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { list, generate, generateAll, breakdown };
 

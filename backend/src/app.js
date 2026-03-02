@@ -18,6 +18,7 @@ const reportsRouter = require('./routes/reports');
 const auditRouter = require('./routes/audit');
 const dashboardRouter = require('./routes/dashboard');
 const adminRouter = require('./routes/admin');
+const advancesRouter = require('./routes/advances');
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/advances', advancesRouter);
 
 // 404
 app.use((_req, res) => {

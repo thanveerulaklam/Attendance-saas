@@ -10,6 +10,7 @@ const navItems = [
   { to: '/employees', label: 'Employees' },
   { to: '/attendance', label: 'Attendance' },
   { to: '/payroll', label: 'Payroll' },
+  { to: '/advances', label: 'Advances' },
   { to: '/reports', label: 'Reports' },
   { to: '/audit', label: 'Audit log' },
   { to: '/shifts', label: 'Shifts' },
