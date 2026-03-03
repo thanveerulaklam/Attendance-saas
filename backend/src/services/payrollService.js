@@ -21,7 +21,8 @@ async function getDefaultShiftForCompany(client, companyId) {
        late_deduction_minutes,
        late_deduction_amount,
        lunch_over_deduction_minutes,
-       lunch_over_deduction_amount
+       lunch_over_deduction_amount,
+       no_leave_incentive
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -53,6 +54,7 @@ async function getDefaultShiftForCompany(client, companyId) {
     lateDeductionAmount: Number(row.late_deduction_amount || 0),
     lunchOverDeductionMinutes: Number(row.lunch_over_deduction_minutes || 0),
     lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
+    noLeaveIncentive: Number(row.no_leave_incentive || 0),
   };
 }
 
@@ -136,6 +138,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     let totalOvertimeMs = 0;
     let totalLateMs = 0;
     let totalLunchOverMs = 0;
+    /** Number of days employee was late (for fixed deduction per late day). */
+    let lateDays = 0;
+    /** Number of days employee went over allotted lunch (for fixed deduction per day). */
+    let lunchOverDays = 0;
 
     const allottedLunchMs = (shift.lunchMinutesAllotted ?? 60) * 60 * 1000;
 
@@ -183,6 +189,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           const allowedStartMs = shiftStartMs + shift.graceMs;
           if (firstInTime.getTime() > allowedStartMs) {
             totalLateMs += firstInTime.getTime() - allowedStartMs;
+            lateDays += 1;
           }
         }
 
@@ -190,6 +197,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           const lunchMs = lunchEndTime - lunchStartTime;
           if (lunchMs > allottedLunchMs) {
             totalLunchOverMs += lunchMs - allottedLunchMs;
+            lunchOverDays += 1;
           }
         }
       }
@@ -226,10 +234,13 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       overtimeHours,
       lateMinutes,
       lunchOverMinutes,
+      lateDays,
+      lunchOverDays,
       lateDeductionMinutes: shift.lateDeductionMinutes,
       lateDeductionAmount: shift.lateDeductionAmount,
       lunchOverDeductionMinutes: shift.lunchOverDeductionMinutes,
       lunchOverDeductionAmount: shift.lunchOverDeductionAmount,
+      noLeaveIncentiveFromShift: shift.noLeaveIncentive,
       absenceDays,
     };
   } finally {
@@ -295,38 +306,34 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     let lateDeduction = 0;
     if (
-      (summary.lateMinutes || 0) > 0 &&
+      (summary.lateDays || 0) > 0 &&
       summary.lateDeductionMinutes > 0 &&
       summary.lateDeductionAmount > 0
     ) {
-      const blocks = Math.floor(
-        summary.lateMinutes / summary.lateDeductionMinutes
-      );
-      if (blocks > 0) {
-        lateDeduction = blocks * summary.lateDeductionAmount;
-      }
+      // Fixed amount per late day: e.g. late 5 days → 5 × amount
+      lateDeduction = summary.lateDays * summary.lateDeductionAmount;
     }
 
     let lunchOverDeduction = 0;
     if (
-      (summary.lunchOverMinutes || 0) > 0 &&
+      (summary.lunchOverDays || 0) > 0 &&
       summary.lunchOverDeductionMinutes > 0 &&
       summary.lunchOverDeductionAmount > 0
     ) {
-      const blocks = Math.floor(
-        summary.lunchOverMinutes / summary.lunchOverDeductionMinutes
-      );
-      if (blocks > 0) {
-        lunchOverDeduction = blocks * summary.lunchOverDeductionAmount;
-      }
+      // Fixed amount per day they went over lunch: e.g. 3 days over → 3 × amount
+      lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
     }
 
     const grossSalary = earnedBasic + overtimePay;
     const deductions = absenceDeduction + lateDeduction + lunchOverDeduction;
     const salaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
-    const noLeaveIncentiveAmount = (Number(noLeaveIncentive) > 0 && summary.absenceDays === 0 && isMonthComplete)
-      ? Number(noLeaveIncentive)
-      : 0;
+    const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
+    const globalIncentive = Number(noLeaveIncentive) || 0;
+    const effectiveNoLeaveIncentive = shiftIncentive > 0 ? shiftIncentive : globalIncentive;
+    const noLeaveIncentiveAmount =
+      effectiveNoLeaveIncentive > 0 && summary.absenceDays === 0 && isMonthComplete
+        ? effectiveNoLeaveIncentive
+        : 0;
     const netSalary = grossSalary - deductions - salaryAdvance + noLeaveIncentiveAmount;
 
     const result = await client.query(
@@ -436,22 +443,22 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   let lateDeduction = 0;
   if (
-    (summary.lateMinutes || 0) > 0 &&
+    (summary.lateDays || 0) > 0 &&
     summary.lateDeductionMinutes > 0 &&
     summary.lateDeductionAmount > 0
   ) {
-    const blocks = Math.floor(summary.lateMinutes / summary.lateDeductionMinutes);
-    if (blocks > 0) lateDeduction = blocks * summary.lateDeductionAmount;
+    // Fixed amount per late day: e.g. late 5 days → 5 × amount
+    lateDeduction = summary.lateDays * summary.lateDeductionAmount;
   }
 
   let lunchOverDeduction = 0;
   if (
-    (summary.lunchOverMinutes || 0) > 0 &&
+    (summary.lunchOverDays || 0) > 0 &&
     summary.lunchOverDeductionMinutes > 0 &&
     summary.lunchOverDeductionAmount > 0
   ) {
-    const blocks = Math.floor(summary.lunchOverMinutes / summary.lunchOverDeductionMinutes);
-    if (blocks > 0) lunchOverDeduction = blocks * summary.lunchOverDeductionAmount;
+    // Fixed amount per day they went over lunch: e.g. 3 days over → 3 × amount
+    lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
   }
 
   const grossSalary = earnedBasic + overtimePay;
@@ -485,6 +492,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       overtimeHours: summary.overtimeHours,
       lateMinutes: summary.lateMinutes,
       lunchOverMinutes: summary.lunchOverMinutes,
+      lateDays: summary.lateDays,
+      lunchOverDays: summary.lunchOverDays,
     },
     breakdown: {
       isMonthComplete,

@@ -24,6 +24,73 @@ async function listPendingCompanies(req, res, next) {
 }
 
 /**
+ * GET /api/admin/overview
+ * High level overview for super admin:
+ * - total companies
+ * - counts by status
+ * - per-company staff counts and subscription period.
+ */
+async function getAdminOverview(req, res, next) {
+  try {
+    const totalsPromise = pool.query(
+      `SELECT
+         COUNT(*) AS total_companies,
+         COUNT(*) FILTER (WHERE status = 'active')   AS active_companies,
+         COUNT(*) FILTER (WHERE status = 'pending')  AS pending_companies,
+         COUNT(*) FILTER (WHERE status = 'declined') AS declined_companies
+       FROM companies`
+    );
+
+    const companiesPromise = pool.query(
+      `SELECT
+         c.id,
+         c.name,
+         c.email,
+         c.status,
+         c.created_at,
+         c.subscription_start_date,
+         c.subscription_end_date,
+         c.is_active,
+         COUNT(e.id) AS total_staff,
+         COUNT(e.id) FILTER (WHERE e.status = 'active') AS active_staff
+       FROM companies c
+       LEFT JOIN employees e ON e.company_id = c.id
+       GROUP BY c.id
+       ORDER BY c.created_at DESC`
+    );
+
+    const [totalsResult, companiesResult] = await Promise.all([totalsPromise, companiesPromise]);
+    const totalsRow = totalsResult.rows[0] || {};
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totals: {
+          totalCompanies: Number(totalsRow.total_companies || 0),
+          activeCompanies: Number(totalsRow.active_companies || 0),
+          pendingCompanies: Number(totalsRow.pending_companies || 0),
+          declinedCompanies: Number(totalsRow.declined_companies || 0),
+        },
+        companies: companiesResult.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          status: row.status,
+          created_at: row.created_at,
+          subscription_start_date: row.subscription_start_date,
+          subscription_end_date: row.subscription_end_date,
+          is_active: row.is_active,
+          total_staff: Number(row.total_staff || 0),
+          active_staff: Number(row.active_staff || 0),
+        })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/admin/approve-company
  * Body: { company_id }
  * Sets company status to 'active' so they can log in.
@@ -93,4 +160,4 @@ async function declineCompany(req, res, next) {
   }
 }
 
-module.exports = { listPendingCompanies, approveCompany, declineCompany };
+module.exports = { listPendingCompanies, getAdminOverview, approveCompany, declineCompany };

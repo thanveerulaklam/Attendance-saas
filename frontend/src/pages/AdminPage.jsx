@@ -16,7 +16,9 @@ export default function AdminPage() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [keyInput, setKeyInput] = useState('');
   const [pending, setPending] = useState([]);
+  const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(() => !!sessionStorage.getItem(ADMIN_KEY_STORAGE));
+  const [overviewLoading, setOverviewLoading] = useState(false);
   const [keyError, setKeyError] = useState('');
   const [toast, setToast] = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -51,9 +53,39 @@ export default function AdminPage() {
     }
   }, [adminKey]);
 
+  const loadOverview = useCallback(async () => {
+    if (!adminKey) return;
+    setOverviewLoading(true);
+    try {
+      const res = await adminFetch('/overview', {}, adminKey);
+      if (res.status === 401) {
+        setKeyError('Invalid admin key');
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+        setAdminKey('');
+        setOverview(null);
+        return;
+      }
+      if (res.status === 503) {
+        setKeyError('Server: set ADMIN_APPROVAL_SECRET in backend .env and restart the API.');
+        setOverview(null);
+        return;
+      }
+      if (!res.ok) throw new Error('Failed to load overview');
+      const json = await res.json();
+      setOverview(json.data || null);
+    } catch {
+      setOverview(null);
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, [adminKey]);
+
   useEffect(() => {
-    if (adminKey) loadPending();
-  }, [adminKey, loadPending]);
+    if (adminKey) {
+      loadPending();
+      loadOverview();
+    }
+  }, [adminKey, loadPending, loadOverview]);
 
   const handleKeySubmit = (e) => {
     e.preventDefault();
@@ -81,6 +113,7 @@ export default function AdminPage() {
       if (!res.ok) throw new Error(json.message || 'Approve failed');
       setToast({ type: 'success', message: json.message || 'Company approved.' });
       loadPending();
+      loadOverview();
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed to approve' });
     } finally {
@@ -106,6 +139,7 @@ export default function AdminPage() {
       if (!res.ok) throw new Error(json.message || 'Decline failed');
       setToast({ type: 'success', message: json.message || 'Registration declined.' });
       loadPending();
+      loadOverview();
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed to decline' });
     } finally {
@@ -118,6 +152,7 @@ export default function AdminPage() {
     setAdminKey('');
     setKeyInput('');
     setPending([]);
+    setOverview(null);
     setKeyError('');
   };
 
@@ -174,14 +209,18 @@ export default function AdminPage() {
 
   // Main view: list of pending companies
   const list = Array.isArray(pending) ? pending : [];
+  const totals = overview?.totals || {};
+  const companies = Array.isArray(overview?.companies) ? overview.companies : [];
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8">
       <div className="max-w-4xl mx-auto">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">Pending registrations</h1>
-            <p className="text-sm text-slate-500">Approve after payment, or decline.</p>
+            <h1 className="text-xl font-semibold text-slate-900">Super admin dashboard</h1>
+            <p className="text-sm text-slate-500">
+              See all companies, subscriptions, and pending registrations.
+            </p>
           </div>
           <button
             type="button"
@@ -197,6 +236,138 @@ export default function AdminPage() {
             {keyError}
           </div>
         )}
+
+        {/* High-level overview cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+          {['totalCompanies', 'activeCompanies', 'pendingCompanies', 'declinedCompanies'].map((key) => {
+            const labelMap = {
+              totalCompanies: 'Total companies',
+              activeCompanies: 'Approved (active)',
+              pendingCompanies: 'Pending approval',
+              declinedCompanies: 'Declined',
+            };
+            const colorMap = {
+              totalCompanies: 'bg-slate-900',
+              activeCompanies: 'bg-emerald-600',
+              pendingCompanies: 'bg-amber-500',
+              declinedCompanies: 'bg-rose-500',
+            };
+            const value = totals[key] ?? 0;
+            return (
+              <article
+                key={key}
+                className="rounded-xl bg-white shadow-sm border border-slate-200 px-4 py-3 flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                    {labelMap[key]}
+                  </p>
+                  <span
+                    className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs text-white ${colorMap[key]}`}
+                  >
+                    {key === 'totalCompanies' ? 'Σ' : key === 'activeCompanies' ? 'A' : key === 'pendingCompanies' ? 'P' : 'D'}
+                  </span>
+                </div>
+                <p className="text-2xl font-semibold text-slate-900">
+                  {overviewLoading && !overview ? '…' : value}
+                </p>
+              </article>
+            );
+          })}
+        </div>
+
+        {/* Companies list with staff & subscription info */}
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-8">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">All companies</h2>
+              <p className="text-xs text-slate-500">
+                Staff counts and subscription period for each company.
+              </p>
+            </div>
+            {overviewLoading && (
+              <span className="text-xs text-slate-500">Refreshing…</span>
+            )}
+          </div>
+          {overviewLoading && !overview ? (
+            <div className="p-6 text-sm text-slate-500">Loading overview…</div>
+          ) : companies.length === 0 ? (
+            <div className="p-6 text-sm text-slate-500">
+              No companies found yet. Once someone registers, they will appear here.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-slate-900">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Company</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Email</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Status</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Staff</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Subscription</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Created</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {companies.map((c) => {
+                    const subStart = c.subscription_start_date
+                      ? new Date(c.subscription_start_date).toLocaleDateString()
+                      : null;
+                    const subEnd = c.subscription_end_date
+                      ? new Date(c.subscription_end_date).toLocaleDateString()
+                      : null;
+                    const createdAt = c.created_at
+                      ? new Date(c.created_at).toLocaleDateString()
+                      : null;
+                    const statusPillClasses =
+                      c.status === 'active'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                        : c.status === 'pending'
+                          ? 'bg-amber-50 text-amber-700 border-amber-100'
+                          : 'bg-rose-50 text-rose-700 border-rose-100';
+                    return (
+                      <tr key={c.id} className="hover:bg-slate-50/60">
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium text-slate-900">{c.name || '—'}</div>
+                          <div className="text-xs text-slate-500">ID: {c.id}</div>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-600">{c.email || '—'}</td>
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusPillClasses}`}
+                          >
+                            {c.status || 'unknown'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-700">
+                          {c.active_staff} active
+                          <span className="text-slate-400 text-xs">
+                            {` of ${c.total_staff} total`}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-700">
+                          {subStart && subEnd ? (
+                            <div className="flex flex-col">
+                              <span className="text-xs text-slate-500">
+                                {subStart} → {subEnd}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {c.is_active === false ? 'Inactive' : 'Active/within grace'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-500 italic">Not set</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-600">{createdAt || '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {toast && (
           <div

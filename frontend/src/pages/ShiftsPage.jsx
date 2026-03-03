@@ -14,6 +14,7 @@ const emptyForm = () => ({
   late_deduction_amount: 0,
   lunch_over_deduction_minutes: 0,
   lunch_over_deduction_amount: 0,
+  no_leave_incentive: 0,
 });
 
 export default function ShiftsPage() {
@@ -56,7 +57,7 @@ export default function ShiftsPage() {
   };
 
   const handleChange = (field) => (event) => {
-    const numericFields = ['grace_minutes', 'lunch_minutes', 'late_deduction_minutes', 'late_deduction_amount', 'lunch_over_deduction_minutes', 'lunch_over_deduction_amount'];
+    const numericFields = ['grace_minutes', 'lunch_minutes', 'late_deduction_minutes', 'late_deduction_amount', 'lunch_over_deduction_minutes', 'lunch_over_deduction_amount', 'no_leave_incentive'];
     const value = numericFields.includes(field) ? Number(event.target.value || 0) : event.target.value;
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -94,6 +95,7 @@ export default function ShiftsPage() {
       late_deduction_amount: shift.late_deduction_amount ?? 0,
       lunch_over_deduction_minutes: shift.lunch_over_deduction_minutes ?? 0,
       lunch_over_deduction_amount: shift.lunch_over_deduction_amount ?? 0,
+      no_leave_incentive: shift.no_leave_incentive ?? 0,
     });
     setEditingShift(shift);
     setError(null);
@@ -261,7 +263,7 @@ export default function ShiftsPage() {
                   Late arrival deduction (optional)
                 </p>
                 <p className="text-[10px] text-slate-500">
-                  If staff punch IN late (after grace), deduct this amount per block of minutes below.
+                  If staff punch IN late (after grace), deduct this fixed amount per late day (e.g. late 5 days = 5 × amount).
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -275,12 +277,33 @@ export default function ShiftsPage() {
                 </div>
               </div>
 
+              <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">
+                  No-leave incentive (optional)
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Fixed incentive amount for staff who have zero absences in this shift for the month.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Incentive amount</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.no_leave_incentive}
+                    onChange={handleChange('no_leave_incentive')}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="e.g. 500"
+                  />
+                </div>
+              </div>
+
               <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">
                   Lunch over deduction (optional)
                 </p>
                 <p className="text-[10px] text-slate-500">
-                  If staff take more than allotted lunch minutes, deduct this amount per block of minutes below.
+                  If staff take more than allotted lunch minutes, deduct this fixed amount per day (e.g. 3 days over = 3 × amount).
                 </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -385,6 +408,14 @@ export default function ShiftsPage() {
                           <dt className="text-slate-500">Weekly off</dt>
                           <dd className="font-medium text-slate-800 text-right">
                             {shift.weekly_off_days.filter((d) => d >= 0 && d <= 6).map((d) => WEEKDAY_LABELS[d]).join(', ')}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {shift.no_leave_incentive != null && Number(shift.no_leave_incentive) > 0 ? (
+                        <div className="flex justify-between">
+                          <dt className="text-slate-500">No-leave incentive</dt>
+                          <dd className="font-medium text-emerald-700">
+                            {shift.no_leave_incentive}
                           </dd>
                         </div>
                       ) : null}
