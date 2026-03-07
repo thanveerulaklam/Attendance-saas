@@ -25,8 +25,9 @@ if not exist "%CONNECTOR_DIR%config.json" (
 REM Remove existing task if any
 schtasks /delete /tn "%TASK_NAME%" /f 2>nul
 
-REM Create task: run when user logs in; run-windows.bat restarts connector if it crashes
-schtasks /create /tn "%TASK_NAME%" /tr "\"%RUN_SCRIPT%\"" /sc onlogon /rl highest /f
+REM Create task: run at system startup (when PC boots); run-windows.bat does "cd /d %~dp0" so it uses the connector folder
+REM Use "Run whether user is logged on or not" in task Properties so it runs at boot without anyone logging in
+schtasks /create /tn "%TASK_NAME%" /tr "\"%RUN_SCRIPT%\"" /sc onstart /rl highest /f
 
 if %errorlevel% equ 0 (
     echo.

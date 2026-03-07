@@ -33,6 +33,11 @@ export default function AttendancePage() {
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualError, setManualError] = useState(null);
   const [manualSuccess, setManualSuccess] = useState(null);
+  const [editPunchOpen, setEditPunchOpen] = useState(false);
+  const [editPunchSubmitting, setEditPunchSubmitting] = useState(false);
+  const [editPunchError, setEditPunchError] = useState(null);
+  const [editPunchData, setEditPunchData] = useState(null); // { employeeName, date, punches: [{ id, punch_time, punch_type }] }
+  const [editPunchEdits, setEditPunchEdits] = useState([]); // [{ id, time, punch_type }] for form
   const [manualForm, setManualForm] = useState({
     employee_id: '',
     date: todayStr(),
@@ -230,8 +235,7 @@ export default function AttendancePage() {
       ? { employee_id: Number(manualForm.employee_id), date: manualForm.date }
       : {
           employee_id: Number(manualForm.employee_id),
-          date: manualForm.date,
-          time: manualForm.time,
+          punch_time: new Date(`${manualForm.date}T${manualForm.time}:00`).toISOString(),
           punch_type: manualForm.punch_type,
         };
     authFetch(url, {
@@ -349,6 +353,7 @@ export default function AttendancePage() {
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Timings</th>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Day status</th>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Lunch</th>
+                    <th className="text-right py-2 px-2 font-medium text-slate-600">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -403,6 +408,39 @@ export default function AttendancePage() {
                         <td className="py-1.5 px-2 text-slate-600">{timingsStr}</td>
                         <td className={`py-1.5 px-2 font-medium ${statusCls}`}>{dayStatus}</td>
                         <td className={`py-1.5 px-2 ${lunchCls}`}>{lunch}</td>
+                        <td className="py-1.5 px-2 text-right">
+                          {punches.length > 0 && punches.some((p) => p.id) ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const punchesList = punches.map((p) => ({
+                                  id: p.id,
+                                  punch_time: p.punch_time,
+                                  punch_type: (p.punch_type || 'in').toLowerCase(),
+                                }));
+                                setEditPunchData({
+                                  employeeName: row.name,
+                                  date: dateStr,
+                                  punches: punchesList,
+                                });
+                                setEditPunchEdits(
+                                  punchesList.map((p) => ({
+                                    id: p.id,
+                                    time: formatTimeForInput(new Date(p.punch_time)),
+                                    punch_type: (p.punch_type || 'in').toLowerCase(),
+                                  }))
+                                );
+                                setEditPunchError(null);
+                                setEditPunchOpen(true);
+                              }}
+                              className="text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              Edit timings
+                            </button>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -499,12 +537,7 @@ export default function AttendancePage() {
                       if (isToday) {
                         bg += ' ring-2 ring-primary-400 ring-offset-1';
                       }
-                      const label =
-                        calendarGrid.isSingleEmployee
-                          ? dayNum
-                          : info?.total
-                            ? `${info.presentCount ?? 0}/${info.total}`
-                            : dayNum;
+                      const showSummary = !calendarGrid.isSingleEmployee && info?.total != null && info.total > 0;
                       return (
                         <td key={colIdx} className="p-1">
                           <div
@@ -515,7 +548,12 @@ export default function AttendancePage() {
                                 : ''
                             }
                           >
-                            {label}
+                            <span>{dayNum}</span>
+                            {showSummary && (
+                              <span className="block text-[10px] opacity-90 leading-tight mt-0.5">
+                                {info.presentCount ?? 0}/{info.total}
+                              </span>
+                            )}
                           </div>
                         </td>
                       );
@@ -543,6 +581,103 @@ export default function AttendancePage() {
           </div>
         )}
       </section>
+
+      {/* Edit punch timings modal */}
+      {editPunchOpen && editPunchData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => !editPunchSubmitting && setEditPunchOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-md flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Edit punch timings</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {editPunchData.employeeName} — {editPunchData.date}
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {editPunchError && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+                  {editPunchError}
+                </div>
+              )}
+              {editPunchEdits.map((edit, idx) => (
+                <div key={edit.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                  <span className="text-[11px] font-medium text-slate-500 w-16">Punch {idx + 1}</span>
+                  <input
+                    type="time"
+                    value={edit.time}
+                    onChange={(e) => {
+                      setEditPunchEdits((prev) =>
+                        prev.map((p) => (p.id === edit.id ? { ...p, time: e.target.value } : p))
+                      );
+                    }}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-800 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  />
+                  <select
+                    value={edit.punch_type}
+                    onChange={(e) => {
+                      setEditPunchEdits((prev) =>
+                        prev.map((p) => (p.id === edit.id ? { ...p, punch_type: e.target.value } : p))
+                      );
+                    }}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-800 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  >
+                    <option value="in">IN</option>
+                    <option value="out">OUT</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => !editPunchSubmitting && setEditPunchOpen(false)}
+                className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={editPunchSubmitting}
+                onClick={async () => {
+                  setEditPunchSubmitting(true);
+                  setEditPunchError(null);
+                  try {
+                    for (const edit of editPunchEdits) {
+                      const punchTime = new Date(`${editPunchData.date}T${edit.time}`).toISOString();
+                      const res = await authFetch(`/api/attendance/logs/${edit.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          punch_time: punchTime,
+                          punch_type: edit.punch_type,
+                        }),
+                      });
+                      if (!res.ok) {
+                        const j = await res.json().catch(() => ({}));
+                        throw new Error(j?.message || 'Failed to update punch');
+                      }
+                    }
+                    refreshAfterManual();
+                    setEditPunchOpen(false);
+                  } catch (err) {
+                    setEditPunchError(err.message || 'Failed to save');
+                  } finally {
+                    setEditPunchSubmitting(false);
+                  }
+                }}
+                className="flex-1 rounded-lg border-2 border-blue-600 bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+              >
+                {editPunchSubmitting ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Manual attendance modal */}
       {manualModalOpen && (

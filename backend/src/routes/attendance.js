@@ -5,6 +5,7 @@ const {
   createManualPunch,
   createManualFullDay,
   createManualFullDayBulk,
+  updatePunchById,
 } = require('../controllers/attendanceController');
 const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
 
@@ -17,5 +18,6 @@ router.get('/monthly', withAuth, getMonthly);
 router.post('/manual-punch', withAuth, createManualPunch);
 router.post('/manual-full-day', withAuth, createManualFullDay);
 router.post('/manual-full-day-bulk', withAuth, createManualFullDayBulk);
+router.patch('/logs/:id', withAuth, updatePunchById);
 
 module.exports = router;

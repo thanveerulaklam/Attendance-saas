@@ -587,6 +587,12 @@ export default function PayrollPage() {
                         <span className="text-slate-600">Overtime pay</span>
                         <span className="font-medium text-emerald-600">+{formatMoney(breakdown.breakdown?.overtimePay)}</span>
                       </li>
+                      {Number(breakdown.breakdown?.travelAllowance) > 0 && (
+                        <li className="flex justify-between">
+                          <span className="text-slate-600">Travel allowance ({breakdown.breakdown?.presentWorkingDays ?? 0} working days)</span>
+                          <span className="font-medium text-emerald-600">+{formatMoney(breakdown.breakdown?.travelAllowance)}</span>
+                        </li>
+                      )}
                       <li className="flex justify-between border-t border-slate-100 pt-1.5">
                         <span className="text-slate-700 font-medium">Gross salary</span>
                         <span className="font-semibold text-slate-900">{formatMoney(breakdown.breakdown?.grossSalary)}</span>
@@ -609,6 +615,12 @@ export default function PayrollPage() {
                         <span className="text-slate-600">Lunch over fine</span>
                         <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.lunchOverDeduction)}</span>
                       </li>
+                      {Number(breakdown.breakdown?.esiDeduction) > 0 && (
+                        <li className="flex justify-between">
+                          <span className="text-slate-600">ESI</span>
+                          <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.esiDeduction)}</span>
+                        </li>
+                      )}
                       <li className="flex justify-between border-t border-slate-100 pt-1.5">
                         <span className="text-slate-700 font-medium">Total deductions</span>
                         <span className="font-semibold text-amber-700">−{formatMoney(breakdown.breakdown?.totalDeductions)}</span>

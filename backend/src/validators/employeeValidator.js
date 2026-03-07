@@ -63,6 +63,24 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'daily_travel_allowance')) {
+    const v = payload.daily_travel_allowance;
+    if (v == null || v === '') {
+      // optional: treat as 0
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.daily_travel_allowance = 'Daily travel allowance must be a non-negative number.';
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
+    const v = payload.esi_amount;
+    if (v == null || v === '') {
+      // optional: treat as 0
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.esi_amount = 'ESI amount must be a non-negative number.';
+    }
+  }
+
   ensureNoErrors(errors);
 
   const result = {
@@ -77,6 +95,16 @@ const validateCreateEmployee = (payload = {}) => {
       payload.shift_id == null || payload.shift_id === ''
         ? null
         : Number(payload.shift_id);
+  }
+  result.daily_travel_allowance = 0;
+  if (Object.prototype.hasOwnProperty.call(payload, 'daily_travel_allowance')) {
+    const v = payload.daily_travel_allowance;
+    result.daily_travel_allowance = v == null || v === '' ? 0 : Number(v);
+  }
+  result.esi_amount = 0;
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
+    const v = payload.esi_amount;
+    result.esi_amount = v == null || v === '' ? 0 : Number(v);
   }
   return result;
 };
@@ -151,6 +179,28 @@ const validateUpdateEmployee = (payload = {}) => {
       } else {
         clean.shift_id = sid;
       }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'daily_travel_allowance')) {
+    const v = payload.daily_travel_allowance;
+    if (v == null || v === '') {
+      clean.daily_travel_allowance = 0;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.daily_travel_allowance = 'Daily travel allowance must be a non-negative number.';
+    } else {
+      clean.daily_travel_allowance = Number(v);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
+    const v = payload.esi_amount;
+    if (v == null || v === '') {
+      clean.esi_amount = 0;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.esi_amount = 'ESI amount must be a non-negative number.';
+    } else {
+      clean.esi_amount = Number(v);
     }
   }
 

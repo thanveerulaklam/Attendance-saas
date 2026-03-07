@@ -12,6 +12,8 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
   const [name, setName] = useState('');
   const [employeeCode, setEmployeeCode] = useState('');
   const [basicSalary, setBasicSalary] = useState('');
+  const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
+  const [esiAmount, setEsiAmount] = useState('');
   const [joinDate, setJoinDate] = useState('');
   const [status, setStatus] = useState('active');
   const [shiftId, setShiftId] = useState('');
@@ -44,6 +46,12 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
         setBasicSalary(
           employee.basic_salary != null ? String(employee.basic_salary) : ''
         );
+        setDailyTravelAllowance(
+          employee.daily_travel_allowance != null ? String(employee.daily_travel_allowance) : ''
+        );
+        setEsiAmount(
+          employee.esi_amount != null ? String(employee.esi_amount) : ''
+        );
         setJoinDate(
           employee.join_date
             ? new Date(employee.join_date).toISOString().slice(0, 10)
@@ -57,6 +65,8 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
         setName('');
         setEmployeeCode('');
         setBasicSalary('');
+        setDailyTravelAllowance('');
+        setEsiAmount('');
         setJoinDate('');
         setStatus('active');
         setShiftId('');
@@ -87,6 +97,14 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
       nextErrors.basicSalary = 'Basic salary must be a positive number';
     }
 
+    if (dailyTravelAllowance.trim() !== '' && (Number.isNaN(Number(dailyTravelAllowance)) || Number(dailyTravelAllowance) < 0)) {
+      nextErrors.dailyTravelAllowance = 'Daily travel allowance must be 0 or more';
+    }
+
+    if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
+      nextErrors.esiAmount = 'ESI amount must be 0 or more';
+    }
+
     if (!joinDate) {
       nextErrors.joinDate = 'Join date is required';
     }
@@ -111,6 +129,8 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
         name: name.trim(),
         employee_code: employeeCode.trim(),
         basic_salary: Number(basicSalary),
+        daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
+        esi_amount: esiAmount.trim() === '' ? 0 : Number(esiAmount),
         join_date: joinDate,
         status,
         shift_id: shiftId === '' ? null : Number(shiftId),
@@ -258,6 +278,48 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
                 <p className="mt-1 text-[11px] text-rose-600">{errors.basicSalary}</p>
               )}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              Daily travel allowance (₹)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={dailyTravelAllowance}
+                onChange={(e) => setDailyTravelAllowance(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                placeholder="0 — paid per working day present (not on holidays)"
+              />
+            </label>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Added only for working days when the employee is present; holidays are excluded.
+            </p>
+            {errors.dailyTravelAllowance && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.dailyTravelAllowance}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              ESI (monthly deduction) (₹)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={esiAmount}
+                onChange={(e) => setEsiAmount(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                placeholder="0 — deducted every month from salary"
+              />
+            </label>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              This amount is deducted from the employee’s salary every month.
+            </p>
+            {errors.esiAmount && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.esiAmount}</p>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

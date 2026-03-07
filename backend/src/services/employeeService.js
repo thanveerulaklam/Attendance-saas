@@ -14,6 +14,9 @@ async function createEmployee(companyId, data) {
 
   const shiftId = payload.shift_id != null ? payload.shift_id : null;
 
+  const dailyTravelAllowance = payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
+  const esiAmount = payload.esi_amount != null ? payload.esi_amount : 0;
+
   try {
     const result = await pool.query(
       `INSERT INTO employees (
@@ -23,10 +26,12 @@ async function createEmployee(companyId, data) {
         basic_salary,
         join_date,
         status,
-        shift_id
+        shift_id,
+        daily_travel_allowance,
+        esi_amount
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, created_at`,
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at`,
       [
         companyId,
         payload.name,
@@ -35,6 +40,8 @@ async function createEmployee(companyId, data) {
         payload.join_date,
         payload.status,
         shiftId,
+        dailyTravelAllowance,
+        esiAmount,
       ]
     );
 
@@ -87,6 +94,8 @@ async function getEmployees(companyId, { page = 1, limit = 10, search } = {}) {
         join_date,
         status,
         shift_id,
+        daily_travel_allowance,
+        esi_amount,
         created_at
      FROM employees
      ${whereClause}
@@ -118,6 +127,8 @@ async function getEmployeeById(companyId, id) {
         join_date,
         status,
         shift_id,
+        daily_travel_allowance,
+        esi_amount,
         created_at
      FROM employees
      WHERE company_id = $1 AND id = $2`,
@@ -162,7 +173,7 @@ async function updateEmployee(companyId, id, data) {
       UPDATE employees
       SET ${fields.join(', ')}
       WHERE company_id = $1 AND id = $2
-      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, created_at
+      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at
     `;
 
     const result = await client.query(query, values);
@@ -192,7 +203,7 @@ async function deactivateEmployee(companyId, id) {
     `UPDATE employees
      SET status = 'inactive'
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, created_at`,
+     RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at`,
     [companyId, id]
   );
 

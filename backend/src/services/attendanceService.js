@@ -123,9 +123,18 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
     lunchOverMinutes = Math.max(0, lunchMinutes - allotted);
   }
 
-  const shiftStartMs =
-    dayStart.getTime() +
-    (shiftConfig.startHour * 60 + shiftConfig.startMinute) * 60 * 1000;
+  // Build shift start on the same calendar day as the first punch, in server local time,
+  // so "9:00" is 9 AM local (e.g. IST), not 9:00 UTC. Otherwise late is wrong when company TZ != UTC.
+  let shiftStartMs;
+  if (firstInTime != null) {
+    const d = new Date(firstInTime);
+    const localMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
+    shiftStartMs =
+      localMidnight.getTime() +
+      (shiftConfig.startHour * 60 + shiftConfig.startMinute) * 60 * 1000;
+  } else {
+    shiftStartMs = dayStart.getTime() + (shiftConfig.startHour * 60 + shiftConfig.startMinute) * 60 * 1000;
+  }
   const late =
     present &&
     firstInTime != null &&
@@ -199,7 +208,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
     const ids = employees.map((e) => e.id);
 
     const logsResult = await client.query(
-      `SELECT employee_id, punch_time, punch_type
+      `SELECT id, employee_id, punch_time, punch_type
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
@@ -216,6 +225,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
         logsByEmployee.set(eid, []);
       }
       logsByEmployee.get(eid).push({
+        id: row.id,
         punch_time: row.punch_time,
         punch_type: row.punch_type,
       });
@@ -226,6 +236,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
       const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
       const status = computeDayStatus(dayLogs, shiftConfig, dayStart);
       const punches = dayLogs.map((l) => ({
+        id: l.id,
         punch_time: l.punch_time,
         punch_type: (l.punch_type || '').toLowerCase(),
       }));
@@ -368,16 +379,12 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
 
 /**
  * Add a manual attendance punch (when device is broken/unavailable).
+ * Prefer punch_time (ISO string from frontend = user's local time converted to UTC).
  * @param {number} companyId
- * @param {object} params - { employeeId, date (YYYY-MM-DD), time (HH:mm), punchType ('in'|'out') }
+ * @param {object} params - { employeeId, punch_time? (ISO), date? (YYYY-MM-DD), time? (HH:mm), punchType ('in'|'out') }
  * @returns {Promise<{ inserted: number, punch: object }>}
  */
-async function addManualPunch(companyId, { employeeId, date, time, punchType }) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
-  if (!match) {
-    throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
-  }
-
+async function addManualPunch(companyId, { employeeId, punch_time: punchTimeParam, date, time, punchType }) {
   const punchTypeNorm = String(punchType || '').toLowerCase();
   if (punchTypeNorm !== 'in' && punchTypeNorm !== 'out') {
     throw new AppError('punch_type must be "in" or "out"', 400);
@@ -388,17 +395,28 @@ async function addManualPunch(companyId, { employeeId, date, time, punchType }) 
     throw new AppError('Valid employee_id is required', 400);
   }
 
-  // Parse time HH:mm or HH:mm:ss
-  const timeMatch = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(time || '').trim());
-  if (!timeMatch) {
-    throw new AppError('Invalid time format. Use HH:mm (e.g. 09:00)', 400);
-  }
-  const [, h, m, s = '0'] = timeMatch;
-  const punchTime = new Date(
-    `${match[1]}-${match[2]}-${match[3]}T${h.padStart(2, '0')}:${m}:${s.padStart(2, '0')}`
-  );
-  if (isNaN(punchTime.getTime())) {
-    throw new AppError('Invalid date/time', 400);
+  let punchTime;
+  if (punchTimeParam != null && String(punchTimeParam).trim() !== '') {
+    punchTime = new Date(punchTimeParam);
+    if (Number.isNaN(punchTime.getTime())) {
+      throw new AppError('Invalid punch_time', 400);
+    }
+  } else {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
+    if (!match) {
+      throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
+    }
+    const timeMatch = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(time || '').trim());
+    if (!timeMatch) {
+      throw new AppError('Invalid time format. Use HH:mm (e.g. 09:00)', 400);
+    }
+    const [, h, m, s = '0'] = timeMatch;
+    punchTime = new Date(
+      `${match[1]}-${match[2]}-${match[3]}T${h.padStart(2, '0')}:${m}:${s.padStart(2, '0')}`
+    );
+    if (Number.isNaN(punchTime.getTime())) {
+      throw new AppError('Invalid date/time', 400);
+    }
   }
 
   const client = await pool.connect();
@@ -545,10 +563,81 @@ async function addManualFullDayBulk(companyId, { employeeIds, date }) {
   };
 }
 
+/**
+ * Update an existing punch's time and/or type (for editing timings on attendance page).
+ * @param {number} companyId
+ * @param {number} logId - attendance_logs.id
+ * @param {object} params - { punch_time (ISO string), punch_type ('in'|'out')? }
+ * @returns {Promise<{ id, punch_time, punch_type }>}
+ */
+async function updatePunch(companyId, logId, { punch_time: punchTimeParam, punch_type: punchTypeParam }) {
+  const logIdNum = Number(logId);
+  if (!logIdNum || logIdNum < 1) {
+    throw new AppError('Valid log id is required', 400);
+  }
+
+  const punchTypeNorm = punchTypeParam != null ? String(punchTypeParam).toLowerCase() : null;
+  if (punchTypeNorm != null && punchTypeNorm !== 'in' && punchTypeNorm !== 'out') {
+    throw new AppError('punch_type must be "in" or "out"', 400);
+  }
+
+  let punchTime = null;
+  if (punchTimeParam != null && punchTimeParam !== '') {
+    const d = new Date(punchTimeParam);
+    if (Number.isNaN(d.getTime())) {
+      throw new AppError('Invalid punch_time', 400);
+    }
+    punchTime = d;
+  }
+
+  if (punchTime == null && punchTypeNorm == null) {
+    throw new AppError('Provide punch_time and/or punch_type to update', 400);
+  }
+
+  const client = await pool.connect();
+  try {
+    const existing = await client.query(
+      `SELECT id, employee_id, punch_time, punch_type
+       FROM attendance_logs
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, logIdNum]
+    );
+    if (existing.rowCount === 0) {
+      throw new AppError('Punch record not found', 404);
+    }
+
+    const row = existing.rows[0];
+    const newPunchTime = punchTime != null ? punchTime.toISOString() : row.punch_time;
+    const newPunchType = punchTypeNorm != null ? punchTypeNorm : (row.punch_type || 'in').toLowerCase();
+
+    const result = await client.query(
+      `UPDATE attendance_logs
+       SET punch_time = $1, punch_type = $2
+       WHERE company_id = $3 AND id = $4
+       RETURNING id, punch_time, punch_type`,
+      [newPunchTime, newPunchType, companyId, logIdNum]
+    );
+
+    if (result.rowCount === 0) {
+      throw new AppError('Punch record not found', 404);
+    }
+
+    return result.rows[0];
+  } catch (err) {
+    if (err.code === '23505') {
+      throw new AppError('Another punch already exists for this employee at the new time', 409);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getDailyAttendance,
   getMonthlyAttendance,
   addManualPunch,
   addManualFullDay,
   addManualFullDayBulk,
+  updatePunch,
 };

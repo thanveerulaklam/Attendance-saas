@@ -182,9 +182,11 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         }
 
         if (firstInTime && !holidaySet.has(dayKey)) {
-          const dayStart = new Date(`${dayKey}T00:00:00.000Z`);
+          // Use local midnight for shift start so "9:00" is 9 AM in server TZ (e.g. IST), not UTC
+          const [y, mo, d] = dayKey.split('-').map(Number);
+          const localMidnight = new Date(y, mo - 1, d, 0, 0, 0);
           const shiftStartMs =
-            dayStart.getTime() +
+            localMidnight.getTime() +
             (shift.startHour * 60 + shift.startMinute) * 60 * 1000;
           const allowedStartMs = shiftStartMs + shift.graceMs;
           if (firstInTime.getTime() > allowedStartMs) {
@@ -231,6 +233,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       workingDays,
       workingDaysInMonth,
       presentDays,
+      presentWorkingDays,
       overtimeHours,
       lateMinutes,
       lunchOverMinutes,
@@ -261,7 +264,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -294,6 +297,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const isMonthComplete = !isCurrentMonth || now.getDate() >= lastDayOfMonth;
 
     const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
+    const presentWorkingDays = summary.presentWorkingDays ?? 0;
+    const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
+    const travelAllowance = dailyTravelAllowance * presentWorkingDays;
+
     let earnedBasic;
     let absenceDeduction;
     if (isMonthComplete) {
@@ -324,8 +331,9 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
     }
 
-    const grossSalary = earnedBasic + overtimePay;
-    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction;
+    const grossSalary = earnedBasic + overtimePay + travelAllowance;
+    const esiDeduction = Number(employee.esi_amount || 0);
+    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
     const salaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
     const globalIncentive = Number(noLeaveIncentive) || 0;
@@ -406,7 +414,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? now.toISOString().slice(0, 10) : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -431,6 +439,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const isMonthComplete = !isCurrentMonth || now.getDate() >= lastDayOfMonth;
 
   const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
+  const presentWorkingDays = summary.presentWorkingDays ?? 0;
+  const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
+  const travelAllowance = dailyTravelAllowance * presentWorkingDays;
+
   let earnedBasic;
   let absenceDeduction;
   if (isMonthComplete) {
@@ -461,8 +473,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
   }
 
-  const grossSalary = earnedBasic + overtimePay;
-  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction;
+  const grossSalary = earnedBasic + overtimePay + travelAllowance;
+  const esiDeduction = Number(employee.esi_amount || 0);
+  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
   const salaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
   let noLeaveIncentive = 0;
   const recordResult = await pool.query(
@@ -488,6 +501,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       workingDays: summary.workingDays,
       daysInMonth: summary.daysInMonth,
       presentDays: summary.presentDays,
+      presentWorkingDays: summary.presentWorkingDays,
       absenceDays: summary.absenceDays,
       overtimeHours: summary.overtimeHours,
       lateMinutes: summary.lateMinutes,
@@ -499,10 +513,13 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       isMonthComplete,
       basicSalary: earnedBasic,
       overtimePay,
+      travelAllowance,
+      presentWorkingDays: summary.presentWorkingDays,
       grossSalary,
       absenceDeduction,
       lateDeduction,
       lunchOverDeduction,
+      esiDeduction,
       totalDeductions,
       salaryAdvance,
       noLeaveIncentive,

@@ -4,6 +4,7 @@ const {
   addManualPunch,
   addManualFullDay,
   addManualFullDayBulk,
+  updatePunch,
 } = require('../services/attendanceService');
 
 /**
@@ -78,12 +79,12 @@ async function getMonthly(req, res, next) {
 
 /**
  * POST /api/attendance/manual-punch
- * Body: { employee_id, date (YYYY-MM-DD), time (HH:mm), punch_type ('in'|'out') }
+ * Body: { employee_id, punch_time? (ISO from browser), date?, time?, punch_type ('in'|'out') }
  */
 async function createManualPunch(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { employee_id: employeeId, date, time, punch_type: punchType } = req.body || {};
+    const { employee_id: employeeId, punch_time: punchTime, date, time, punch_type: punchType } = req.body || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -94,6 +95,7 @@ async function createManualPunch(req, res, next) {
 
     const result = await addManualPunch(companyId, {
       employeeId,
+      punch_time: punchTime,
       date,
       time,
       punchType,
@@ -165,10 +167,43 @@ async function createManualFullDayBulk(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/attendance/logs/:id
+ * Body: { punch_time (ISO string), punch_type ('in'|'out')? }
+ */
+async function updatePunchById(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const logId = req.params.id;
+    const { punch_time: punchTime, punch_type: punchType } = req.body || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const updated = await updatePunch(companyId, logId, {
+      punch_time: punchTime,
+      punch_type: punchType,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      message: 'Punch updated',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getDaily,
   getMonthly,
   createManualPunch,
   createManualFullDay,
   createManualFullDayBulk,
+  updatePunchById,
 };
