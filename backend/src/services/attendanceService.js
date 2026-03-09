@@ -1,6 +1,16 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 
+function rowToShiftConfig(row) {
+  const [startHour, startMinute] = row.start_time.split(':').map(Number);
+  const [endHour, endMinute] = row.end_time.split(':').map(Number);
+  const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+  const shiftMs = shiftMinutes * 60 * 1000;
+  const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
+  const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
+  return { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted };
+}
+
 /**
  * Get shift config for a company (start/end/grace in ms).
  * Uses same logic as payroll for consistency.
@@ -19,21 +29,45 @@ async function getShiftConfig(companyId) {
     throw new AppError('No shift configured for company', 400);
   }
 
-  const row = result.rows[0];
-  const [startHour, startMinute] = row.start_time.split(':').map(Number);
-  const [endHour, endMinute] = row.end_time.split(':').map(Number);
-  const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
-  const shiftMs = shiftMinutes * 60 * 1000;
-  const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
-  const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
+  return rowToShiftConfig(result.rows[0]);
+}
 
-  return {
-    startHour,
-    startMinute,
-    shiftMs,
-    graceMs,
-    lunchMinutesAllotted,
-  };
+/**
+ * Get shift config by shift ID. Returns null if not found.
+ */
+async function getShiftConfigById(shiftId) {
+  if (!shiftId) return null;
+  const result = await pool.query(
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes
+     FROM shifts WHERE id = $1`,
+    [shiftId]
+  );
+  if (result.rowCount === 0) return null;
+  return rowToShiftConfig(result.rows[0]);
+}
+
+/**
+ * Build a map of shift_id -> config for given shift IDs, plus company default.
+ * Used when computing attendance for employees who may have different assigned shifts.
+ */
+async function getShiftConfigMap(companyId, shiftIds) {
+  const defaultConfig = await getShiftConfig(companyId);
+  const map = new Map();
+  map.set(null, defaultConfig);
+  const uniqueIds = [...new Set((shiftIds || []).filter(Boolean))];
+  if (uniqueIds.length === 0) return map;
+  const result = await pool.query(
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes
+     FROM shifts WHERE id = ANY($1::bigint[])`,
+    [uniqueIds]
+  );
+  for (const row of result.rows) {
+    map.set(row.id, rowToShiftConfig(row));
+  }
+  for (const id of uniqueIds) {
+    if (!map.has(id)) map.set(id, defaultConfig);
+  }
+  return map;
 }
 
 /**
@@ -180,19 +214,17 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
 
   const client = await pool.connect();
   try {
-    const shiftConfig = await getShiftConfig(companyId);
-
     let employeesResult;
     if (employeeId) {
       employeesResult = await client.query(
-        `SELECT id, name, employee_code
+        `SELECT id, name, employee_code, shift_id
          FROM employees
          WHERE company_id = $1 AND id = $2 AND status = 'active'`,
         [companyId, employeeId]
       );
     } else {
       employeesResult = await client.query(
-        `SELECT id, name, employee_code
+        `SELECT id, name, employee_code, shift_id
          FROM employees
          WHERE company_id = $1 AND status = 'active'
          ORDER BY name`,
@@ -204,6 +236,11 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
     if (employees.length === 0) {
       return [];
     }
+
+    const shiftConfigMap = await getShiftConfigMap(
+      companyId,
+      employees.map((e) => e.shift_id)
+    );
 
     const ids = employees.map((e) => e.id);
 
@@ -234,6 +271,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
     return employees.map((emp) => {
       const rawDayLogs = logsByEmployee.get(emp.id) || [];
       const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
+      const shiftConfig = shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       const status = computeDayStatus(dayLogs, shiftConfig, dayStart);
       const punches = dayLogs.map((l) => ({
         id: l.id,
@@ -280,19 +318,17 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
 
   const client = await pool.connect();
   try {
-    const shiftConfig = await getShiftConfig(companyId);
-
     let employeesResult;
     if (employeeId) {
       employeesResult = await client.query(
-        `SELECT id, name, employee_code
+        `SELECT id, name, employee_code, shift_id
          FROM employees
          WHERE company_id = $1 AND id = $2 AND status = 'active'`,
         [companyId, employeeId]
       );
     } else {
       employeesResult = await client.query(
-        `SELECT id, name, employee_code
+        `SELECT id, name, employee_code, shift_id
          FROM employees
          WHERE company_id = $1 AND status = 'active'
          ORDER BY name`,
@@ -305,10 +341,15 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
       return { year: y, month: m, daysInMonth, employees: [] };
     }
 
+    const shiftConfigMap = await getShiftConfigMap(
+      companyId,
+      employees.map((e) => e.shift_id)
+    );
+
     const ids = employees.map((e) => e.id);
 
     const logsResult = await client.query(
-      `SELECT employee_id, punch_time, punch_type
+       `SELECT employee_id, punch_time, punch_type
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
@@ -333,6 +374,7 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
 
     const employeesWithDays = [];
     for (const emp of employees) {
+      const shiftConfig = shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       const byDay = logsByEmployeeAndDay.get(emp.id) || new Map();
       const days = [];
       for (let d = 1; d <= daysInMonth; d += 1) {

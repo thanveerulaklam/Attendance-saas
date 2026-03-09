@@ -69,16 +69,22 @@ CHANGE these 3 values (keep the quotes and commas):
 - Save the file (Ctrl+S) and close Notepad.
 
 
-STEP 4: Install (run once)
---------------------------
+STEP 4: Install (run once) – IMPORTANT: must run as Administrator
+----------------------------------------------------------------
 - In the AttendanceConnector folder, find "install-windows.bat"
-- RIGHT-CLICK on it
+- RIGHT-CLICK on it (do not double-click)
 - Click "Run as administrator"
 - Click "Yes" if Windows asks for permission
 - You should see: "SUCCESS: Connector will start automatically when Windows starts."
+- The installer will also start the connector once so you don't have to restart immediately.
 - Press any key to close the window
 
-DONE! The connector is now installed.
+DONE! The connector is now installed. You do NOT need to add anything to Task Manager
+Startup or run connector.exe manually – it will start automatically every time the PC is on.
+
+If the installer window closed too quickly: open the AttendanceConnector folder and check
+"install-log.txt" – it will say SUCCESS or FAILED and why. The window should now stay open
+until you press a key; if it still closes, use install-log.txt to see the result.
 
 
 STEP 5: Verify (optional)
@@ -168,13 +174,23 @@ Problem: "Socket isn't connected" or "Device read error"
 - Try: ping 192.168.x.x (replace with your device IP) in Command Prompt / Terminal
 
 
+Problem: Installer window opened and closed in a second
+------------------------------------------------------
+- Open the AttendanceConnector folder and look for "install-log.txt".
+- Open install-log.txt in Notepad: it will say SUCCESS or FAILED and the reason.
+- If SUCCESS: the connector is installed; restart the PC or run the task from Task Scheduler.
+- If FAILED or "Not run as Administrator": right-click install-windows.bat → Run as administrator again.
+- The installer was updated so the window now stays open until you press a key; update your files and run again.
+
+
 Problem: Connector doesn't start after restart
 ----------------------------------------------
 Windows:
-- Open Task Scheduler (search in Start menu)
-- Look for "AttendanceConnector" task
-- If it exists, right-click → Run to test
-- If it failed, try running install-windows.bat again as Administrator
+- The installer must be run as Administrator (right-click install-windows.bat → Run as administrator).
+  Otherwise the scheduled task is not created correctly and the connector won't start at boot.
+- Open Task Scheduler (search in Start menu) and look for "AttendanceConnector"
+- If the task is missing or doesn't run: right-click install-windows.bat → Run as administrator again
+- If the task exists, right-click it → Run to test immediately
 
 Mac:
 - Open Terminal, run: launchctl list | grep attendancesaas
