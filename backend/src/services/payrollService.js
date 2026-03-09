@@ -3,6 +3,16 @@ const { AppError } = require('../utils/AppError');
 const { getHolidayDatesForMonth } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 
+const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
+const TZ_OFFSETS = { 'Asia/Kolkata': '+05:30', 'Asia/Calcutta': '+05:30', UTC: 'Z', 'Etc/UTC': 'Z' };
+
+function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
+  const offset = TZ_OFFSETS[COMPANY_TZ] ?? '+05:30';
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}:00${offset === 'Z' ? 'Z' : offset}`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? new Date(year, month - 1, day, startHour, startMinute, 0).getTime() : d.getTime();
+}
+
 function getMonthBounds(year, month) {
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
   const end = new Date(Date.UTC(year, month, 1, 0, 0, 0));
@@ -212,12 +222,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         }
 
         if (firstInTime && !holidaySet.has(dayKey)) {
-          // Use local midnight for shift start so "9:00" is 9 AM in server TZ (e.g. IST), not UTC
           const [y, mo, d] = dayKey.split('-').map(Number);
-          const localMidnight = new Date(y, mo - 1, d, 0, 0, 0);
-          const shiftStartMs =
-            localMidnight.getTime() +
-            (shift.startHour * 60 + shift.startMinute) * 60 * 1000;
+          const shiftStartMs = getShiftStartMsForDate(y, mo, d, shift.startHour, shift.startMinute);
           const allowedStartMs = shiftStartMs + shift.graceMs;
           if (firstInTime.getTime() > allowedStartMs) {
             totalLateMs += firstInTime.getTime() - allowedStartMs;

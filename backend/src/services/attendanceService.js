@@ -1,6 +1,28 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 
+// Company timezone for shift/late calculations. Server may run in UTC, but punches and shifts are in company local time.
+// Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
+const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
+
+const TZ_OFFSETS = {
+  'Asia/Kolkata': '+05:30',
+  'Asia/Calcutta': '+05:30',
+  UTC: 'Z',
+  'Etc/UTC': 'Z',
+};
+
+/**
+ * Get shift start timestamp (ms) for a given date in company timezone.
+ * "9:30" must mean 9:30 AM in company local (e.g. IST), not server UTC.
+ */
+function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
+  const offset = TZ_OFFSETS[COMPANY_TZ] ?? '+05:30';
+  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}:00${offset === 'Z' ? 'Z' : offset}`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? new Date(year, month - 1, day, startHour, startMinute, 0).getTime() : d.getTime();
+}
+
 function rowToShiftConfig(row) {
   const [startHour, startMinute] = row.start_time.split(':').map(Number);
   const [endHour, endMinute] = row.end_time.split(':').map(Number);
@@ -157,17 +179,20 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
     lunchOverMinutes = Math.max(0, lunchMinutes - allotted);
   }
 
-  // Build shift start on the same calendar day as the first punch, in server local time,
-  // so "9:00" is 9 AM local (e.g. IST), not 9:00 UTC. Otherwise late is wrong when company TZ != UTC.
+  // Build shift start on the same calendar day as the first punch, in company timezone (e.g. IST).
+  // Server may run in UTC; "9:30" must mean 9:30 AM company local, not UTC.
   let shiftStartMs;
   if (firstInTime != null) {
     const d = new Date(firstInTime);
-    const localMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0);
-    shiftStartMs =
-      localMidnight.getTime() +
-      (shiftConfig.startHour * 60 + shiftConfig.startMinute) * 60 * 1000;
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth() + 1;
+    const day = d.getUTCDate();
+    shiftStartMs = getShiftStartMsForDate(y, m, day, shiftConfig.startHour, shiftConfig.startMinute);
   } else {
-    shiftStartMs = dayStart.getTime() + (shiftConfig.startHour * 60 + shiftConfig.startMinute) * 60 * 1000;
+    const y = dayStart.getUTCFullYear();
+    const m = dayStart.getUTCMonth() + 1;
+    const day = dayStart.getUTCDate();
+    shiftStartMs = getShiftStartMsForDate(y, m, day, shiftConfig.startHour, shiftConfig.startMinute);
   }
   const late =
     present &&
