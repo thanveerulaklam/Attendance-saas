@@ -73,7 +73,7 @@ export default function RegisterPage() {
             A
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-slate-900">Attendance SaaS</h1>
+            <h1 className="text-lg font-semibold text-slate-900">PunchPay</h1>
             <p className="text-xs text-slate-500">Create your company</p>
           </div>
         </div>

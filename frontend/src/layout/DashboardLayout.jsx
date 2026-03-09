@@ -69,8 +69,8 @@ export default function DashboardLayout() {
             A
           </div>
           <div>
-            <div className="text-sm font-semibold tracking-wide">Attendance SaaS</div>
-            <div className="text-xs text-slate-400">Modern HR & Payroll</div>
+            <div className="text-sm font-semibold tracking-wide">PunchPay</div>
+            <div className="text-xs text-slate-400">Punch in. Pay out.</div>
           </div>
         </div>
 
@@ -94,7 +94,7 @@ export default function DashboardLayout() {
         </nav>
 
         <div className="mt-8 px-2 text-xs text-slate-500">
-          © {new Date().getFullYear()} Attendance SaaS
+          © {new Date().getFullYear()} PunchPay
         </div>
       </aside>
 
