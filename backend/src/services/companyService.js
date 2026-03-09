@@ -132,9 +132,25 @@ async function updateBillingMetadata(companyId, data) {
     'subscription_end_date',
     'is_active',
   ];
-  const entries = Object.entries(data || {}).filter(
-    ([key, value]) => allowedFields.includes(key) && typeof value !== 'undefined'
-  );
+
+  const rawEntries = Object.entries(data || {});
+
+  // Normalise empty strings for DATE fields to null so Postgres accepts them
+  const dateFields = new Set([
+    'next_billing_date',
+    'last_payment_date',
+    'subscription_start_date',
+    'subscription_end_date',
+  ]);
+
+  const entries = rawEntries
+    .map(([key, value]) => {
+      if (dateFields.has(key) && value === '') {
+        return [key, null];
+      }
+      return [key, value];
+    })
+    .filter(([key, value]) => allowedFields.includes(key) && typeof value !== 'undefined');
 
   if (entries.length === 0) {
     return getCompanyById(companyId);
