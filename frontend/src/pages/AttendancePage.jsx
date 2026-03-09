@@ -36,6 +36,8 @@ export default function AttendancePage() {
   const [editPunchOpen, setEditPunchOpen] = useState(false);
   const [editPunchSubmitting, setEditPunchSubmitting] = useState(false);
   const [editPunchError, setEditPunchError] = useState(null);
+  const [lateModalOpen, setLateModalOpen] = useState(false);
+  const [absentModalOpen, setAbsentModalOpen] = useState(false);
   const [editPunchData, setEditPunchData] = useState(null); // { employeeName, date, punches: [{ id, punch_time, punch_type }] }
   const [editPunchEdits, setEditPunchEdits] = useState([]); // [{ id, time, punch_type }] for form
   const [manualForm, setManualForm] = useState({
@@ -318,14 +320,32 @@ export default function AttendancePage() {
               <p className="text-[10px] font-medium text-emerald-700">Present</p>
               <p className="text-lg font-semibold text-emerald-800">{todaySummary.present}</p>
             </div>
-            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => todaySummary.absent > 0 && setAbsentModalOpen(true)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                todaySummary.absent > 0
+                  ? 'bg-slate-50 border-slate-200 hover:bg-slate-100 cursor-pointer'
+                  : 'bg-slate-50 border-slate-200 cursor-default'
+              }`}
+              disabled={todaySummary.absent === 0}
+            >
               <p className="text-[10px] font-medium text-slate-600">Absent</p>
               <p className="text-lg font-semibold text-slate-800">{todaySummary.absent}</p>
-            </div>
-            <div className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-2">
+            </button>
+            <button
+              type="button"
+              onClick={() => todaySummary.late > 0 && setLateModalOpen(true)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                todaySummary.late > 0
+                  ? 'bg-amber-50 border-amber-100 hover:bg-amber-100/80 cursor-pointer'
+                  : 'bg-amber-50 border-amber-100 cursor-default'
+              }`}
+              disabled={todaySummary.late === 0}
+            >
               <p className="text-[10px] font-medium text-amber-700">Late</p>
               <p className="text-lg font-semibold text-amber-800">{todaySummary.late}</p>
-            </div>
+            </button>
             <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
               <p className="text-[10px] font-medium text-blue-700">Full day</p>
               <p className="text-lg font-semibold text-blue-800">{todaySummary.fullDay}</p>
@@ -581,6 +601,106 @@ export default function AttendancePage() {
           </div>
         )}
       </section>
+
+      {/* Absent staff modal */}
+      {absentModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setAbsentModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-sm flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Staff absent today</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {dateStr} — {todaySummary.absent} {todaySummary.absent === 1 ? 'employee' : 'employees'} did not punch in
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
+              <ul className="space-y-2">
+                {(dailyData || [])
+                  .filter((r) => !r.present)
+                  .map((row) => (
+                    <li
+                      key={row.employee_id}
+                      className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2"
+                    >
+                      <span className="font-medium text-slate-800">{row.name}</span>
+                      {row.employee_code && (
+                        <span className="text-[11px] text-slate-500">({row.employee_code})</span>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setAbsentModalOpen(false)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Late staff modal */}
+      {lateModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setLateModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-sm flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Staff late today</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {dateStr} — {todaySummary.late} {todaySummary.late === 1 ? 'employee' : 'employees'} arrived after grace period
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
+              <ul className="space-y-2">
+                {(dailyData || [])
+                  .filter((r) => r.late)
+                  .map((row) => {
+                    const firstIn = (row.punches || []).find((p) => (p.punch_type || '').toLowerCase() === 'in');
+                    const arrivalTime = firstIn
+                      ? new Date(firstIn.punch_time).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: true,
+                        })
+                      : '—';
+                    return (
+                      <li
+                        key={row.employee_id}
+                        className="flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50/50 px-3 py-2"
+                      >
+                        <span className="font-medium text-slate-800">{row.name}</span>
+                        <span className="text-amber-700 font-medium text-sm">{arrivalTime}</span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setLateModalOpen(false)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit punch timings modal */}
       {editPunchOpen && editPunchData && (
