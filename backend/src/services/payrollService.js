@@ -10,6 +10,28 @@ function getMonthBounds(year, month) {
   return { start, end, daysInMonth };
 }
 
+function rowToShiftConfig(row) {
+  const [startHour, startMinute] = row.start_time.split(':').map(Number);
+  const [endHour, endMinute] = row.end_time.split(':').map(Number);
+  const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+  const shiftMs = shiftMinutes * 60 * 1000;
+  const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
+  const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
+  return {
+    id: row.id,
+    startHour,
+    startMinute,
+    shiftMs,
+    graceMs,
+    lunchMinutesAllotted,
+    lateDeductionMinutes: Number(row.late_deduction_minutes || 0),
+    lateDeductionAmount: Number(row.late_deduction_amount || 0),
+    lunchOverDeductionMinutes: Number(row.lunch_over_deduction_minutes || 0),
+    lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
+    noLeaveIncentive: Number(row.no_leave_incentive || 0),
+  };
+}
+
 async function getDefaultShiftForCompany(client, companyId) {
   const result = await client.query(
     `SELECT
@@ -34,28 +56,36 @@ async function getDefaultShiftForCompany(client, companyId) {
     throw new AppError('No shift configured for company', 400);
   }
 
-  const row = result.rows[0];
-  const [startHour, startMinute] = row.start_time.split(':').map(Number);
-  const [endHour, endMinute] = row.end_time.split(':').map(Number);
+  return rowToShiftConfig(result.rows[0]);
+}
 
-  const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
-  const shiftMs = shiftMinutes * 60 * 1000;
-  const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
-  const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
+/**
+ * Get shift config for an employee. Uses employee's assigned shift_id if set, else company default.
+ */
+async function getShiftForEmployee(client, companyId, employeeId) {
+  const empResult = await client.query(
+    `SELECT shift_id FROM employees WHERE company_id = $1 AND id = $2`,
+    [companyId, employeeId]
+  );
+  const shiftId = empResult.rowCount > 0 ? empResult.rows[0].shift_id : null;
 
-  return {
-    id: row.id,
-    startHour,
-    startMinute,
-    shiftMs,
-    graceMs,
-    lunchMinutesAllotted,
-    lateDeductionMinutes: Number(row.late_deduction_minutes || 0),
-    lateDeductionAmount: Number(row.late_deduction_amount || 0),
-    lunchOverDeductionMinutes: Number(row.lunch_over_deduction_minutes || 0),
-    lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
-    noLeaveIncentive: Number(row.no_leave_incentive || 0),
-  };
+  if (shiftId) {
+    const result = await client.query(
+      `SELECT
+         id, start_time, end_time, grace_minutes, lunch_minutes,
+         late_deduction_minutes, late_deduction_amount,
+         lunch_over_deduction_minutes, lunch_over_deduction_amount,
+         no_leave_incentive
+       FROM shifts
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, shiftId]
+    );
+    if (result.rowCount > 0) {
+      return rowToShiftConfig(result.rows[0]);
+    }
+  }
+
+  return getDefaultShiftForCompany(client, companyId);
 }
 
 /** Add or subtract days from YYYY-MM-DD, return YYYY-MM-DD. */
@@ -88,7 +118,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
   try {
     const { start, end, daysInMonth } = getMonthBounds(year, month);
 
-    const shift = await getDefaultShiftForCompany(client, companyId);
+    const shift = await getShiftForEmployee(client, companyId, employeeId);
 
     const [logsResult, holidaySet] = await Promise.all([
       client.query(
