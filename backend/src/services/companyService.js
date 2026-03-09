@@ -1,7 +1,8 @@
 const { pool } = require('../config/database');
 
 const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at,
-  subscription_start_date, subscription_end_date, is_active, created_at`;
+  subscription_start_date, subscription_end_date, is_active, plan_code, billing_cycle,
+  next_billing_date, last_payment_date, payment_status, billing_notes, created_at`;
 
 async function getCompanyById(companyId) {
   const result = await pool.query(
@@ -118,11 +119,54 @@ async function updateSubscription(companyId, data) {
   return result.rows[0] || null;
 }
 
+async function updateBillingMetadata(companyId, data) {
+  const allowedFields = [
+    'plan_code',
+    'billing_cycle',
+    'next_billing_date',
+    'last_payment_date',
+    'payment_status',
+    'billing_notes',
+    // convenience: allow subscription fields to be adjusted from the same admin form
+    'subscription_start_date',
+    'subscription_end_date',
+    'is_active',
+  ];
+  const entries = Object.entries(data || {}).filter(
+    ([key, value]) => allowedFields.includes(key) && typeof value !== 'undefined'
+  );
+
+  if (entries.length === 0) {
+    return getCompanyById(companyId);
+  }
+
+  const fields = [];
+  const values = [companyId];
+  let paramIndex = 2;
+
+  for (const [key, value] of entries) {
+    fields.push(`${key} = $${paramIndex}`);
+    values.push(value);
+    paramIndex += 1;
+  }
+
+  const result = await pool.query(
+    `UPDATE companies
+     SET ${fields.join(', ')}
+     WHERE id = $1
+     RETURNING ${COMPANY_SELECT}`,
+    values
+  );
+
+  return result.rows[0] || null;
+}
+
 module.exports = {
   getCompanyById,
   getSubscriptionStatus,
   isSubscriptionAllowed,
   updateCompany,
   updateSubscription,
+  updateBillingMetadata,
 };
 

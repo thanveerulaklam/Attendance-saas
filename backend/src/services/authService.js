@@ -95,7 +95,16 @@ async function login(email, password) {
 
   for (const row of result.rows) {
     if (row.company_status === 'pending') {
-      throw new AppError('Your company registration is pending approval. You will be notified once it is activated.', 403);
+      throw new AppError(
+        'Your company registration is pending approval. You will be notified once it is activated.',
+        403
+      );
+    }
+    if (row.company_status === 'locked') {
+      throw new AppError(
+        'Your company account has been locked. Please contact support or your service provider.',
+        403
+      );
     }
     if (row.company_status === 'declined') {
       continue; // try next account if any

@@ -22,6 +22,20 @@ export default function AdminPage() {
   const [keyError, setKeyError] = useState('');
   const [toast, setToast] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [billingModalCompany, setBillingModalCompany] = useState(null);
+  const [billingForm, setBillingForm] = useState({
+    plan_code: 'starter',
+    billing_cycle: 'monthly',
+    next_billing_date: '',
+    last_payment_date: '',
+    payment_status: 'paid',
+    billing_notes: '',
+    subscription_start_date: '',
+    subscription_end_date: '',
+    is_active: true,
+  });
+  const [billingSaving, setBillingSaving] = useState(false);
+  const [lockBusyId, setLockBusyId] = useState(null);
 
   const loadPending = useCallback(async () => {
     if (!adminKey) return;
@@ -156,6 +170,121 @@ export default function AdminPage() {
     setKeyError('');
   };
 
+  const handleLockToggle = async (company, action) => {
+    if (!company) return;
+    const verb = action === 'lock' ? 'lock' : 'unlock';
+    if (
+      action === 'lock' &&
+      !window.confirm(
+        `Lock "${company.name || `Company #${company.id}`}"? Users will no longer be able to log in until you unlock them.`
+      )
+    ) {
+      return;
+    }
+    setLockBusyId(company.id);
+    try {
+      const res = await adminFetch(
+        action === 'lock' ? '/lock-company' : '/unlock-company',
+        {
+          method: 'POST',
+          body: JSON.stringify({ company_id: company.id }),
+        },
+        adminKey
+      );
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setKeyError('Invalid admin key');
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+        setAdminKey('');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(json.message || `Failed to ${verb} company`);
+      }
+      setToast({
+        type: 'success',
+        message: json.message || `Company ${verb}ed.`,
+      });
+      loadOverview();
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || `Failed to ${verb} company`,
+      });
+    } finally {
+      setLockBusyId(null);
+    }
+  };
+
+  const openBillingModal = (company) => {
+    if (!company) return;
+    const toDateInput = (value) =>
+      value ? new Date(value).toISOString().slice(0, 10) : '';
+    setBillingForm({
+      plan_code: company.plan_code || 'starter',
+      billing_cycle: company.billing_cycle || 'monthly',
+      next_billing_date: toDateInput(company.next_billing_date),
+      last_payment_date: toDateInput(company.last_payment_date),
+      payment_status: company.payment_status || 'paid',
+      billing_notes: company.billing_notes || '',
+      subscription_start_date: toDateInput(company.subscription_start_date),
+      subscription_end_date: toDateInput(company.subscription_end_date),
+      is_active: company.is_active !== false,
+    });
+    setBillingModalCompany(company);
+  };
+
+  const closeBillingModal = () => {
+    setBillingModalCompany(null);
+    setBillingSaving(false);
+  };
+
+  const handleBillingChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setBillingForm((prev) => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value,
+    }));
+  };
+
+  const handleBillingSubmit = async (e) => {
+    e.preventDefault();
+    if (!billingModalCompany) return;
+    setBillingSaving(true);
+    try {
+      const res = await adminFetch(
+        '/company-billing',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            company_id: billingModalCompany.id,
+            ...billingForm,
+          }),
+        },
+        adminKey
+      );
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setKeyError('Invalid admin key');
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+        setAdminKey('');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to update billing');
+      }
+      setToast({ type: 'success', message: json.message || 'Billing updated.' });
+      closeBillingModal();
+      loadOverview();
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to update billing',
+      });
+      setBillingSaving(false);
+    }
+  };
+
   // Gate: require admin key
   if (!adminKey) {
     return (
@@ -239,18 +368,20 @@ export default function AdminPage() {
 
         {/* High-level overview cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-          {['totalCompanies', 'activeCompanies', 'pendingCompanies', 'declinedCompanies'].map((key) => {
+          {['totalCompanies', 'activeCompanies', 'pendingCompanies', 'declinedCompanies', 'lockedCompanies'].map((key) => {
             const labelMap = {
               totalCompanies: 'Total companies',
               activeCompanies: 'Approved (active)',
               pendingCompanies: 'Pending approval',
               declinedCompanies: 'Declined',
+              lockedCompanies: 'Locked',
             };
             const colorMap = {
               totalCompanies: 'bg-slate-900',
               activeCompanies: 'bg-emerald-600',
               pendingCompanies: 'bg-amber-500',
               declinedCompanies: 'bg-rose-500',
+              lockedCompanies: 'bg-slate-500',
             };
             const value = totals[key] ?? 0;
             return (
@@ -304,8 +435,10 @@ export default function AdminPage() {
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Email</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Status</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Staff</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Plan / billing</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Subscription</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Created</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Controls</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -324,7 +457,9 @@ export default function AdminPage() {
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
                         : c.status === 'pending'
                           ? 'bg-amber-50 text-amber-700 border-amber-100'
-                          : 'bg-rose-50 text-rose-700 border-rose-100';
+                          : c.status === 'locked'
+                            ? 'bg-slate-50 text-slate-700 border-slate-300'
+                            : 'bg-rose-50 text-rose-700 border-rose-100';
                     return (
                       <tr key={c.id} className="hover:bg-slate-50/60">
                         <td className="px-4 py-2.5">
@@ -338,6 +473,44 @@ export default function AdminPage() {
                           >
                             {c.status || 'unknown'}
                           </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-700">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-xs font-medium text-slate-900">
+                              {(c.plan_code || 'starter')
+                                .charAt(0)
+                                .toUpperCase() +
+                                (c.plan_code || 'starter').slice(1)}
+                              {c.billing_cycle ? ` • ${c.billing_cycle}` : ''}
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              {c.next_billing_date
+                                ? `Next: ${new Date(
+                                    c.next_billing_date
+                                  ).toLocaleDateString()}`
+                                : 'Next billing not set'}
+                            </span>
+                            <span
+                              className={`inline-flex mt-0.5 w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                                c.payment_status === 'overdue'
+                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                  : c.payment_status === 'pending'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : c.payment_status === 'trial'
+                                      ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              }`}
+                            >
+                              {c.payment_status || 'paid'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => openBillingModal(c)}
+                              className="mt-1 text-[11px] text-blue-600 hover:underline w-fit"
+                            >
+                              Manage billing
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-2.5 text-slate-700">
                           {c.active_staff} active
@@ -360,6 +533,34 @@ export default function AdminPage() {
                           )}
                         </td>
                         <td className="px-4 py-2.5 text-slate-600">{createdAt || '—'}</td>
+                        <td className="px-4 py-2.5">
+                          {c.status === 'active' || c.status === 'locked' ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleLockToggle(c, c.status === 'locked' ? 'unlock' : 'lock')
+                              }
+                              disabled={lockBusyId === c.id}
+                              className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                                c.status === 'locked'
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                  : 'bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-100'
+                              } disabled:opacity-50`}
+                            >
+                              {c.status === 'locked'
+                                ? lockBusyId === c.id
+                                  ? 'Unlocking…'
+                                  : 'Unlock'
+                                : lockBusyId === c.id
+                                  ? 'Locking…'
+                                  : 'Lock'}
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">
+                              No actions
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -457,6 +658,174 @@ export default function AdminPage() {
             Back to login
           </Link>
         </p>
+
+        {billingModalCompany && (
+          <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40">
+            <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-200 p-6">
+              <h2 className="text-base font-semibold text-slate-900 mb-1">
+                Manage billing – {billingModalCompany.name || `Company #${billingModalCompany.id}`}
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Update plan, billing cycle, and manual payment status. Automated gateways can be added later.
+              </p>
+              <form onSubmit={handleBillingSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Plan
+                    </label>
+                    <select
+                      name="plan_code"
+                      value={billingForm.plan_code}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    >
+                      <option value="starter">Starter (up to 30)</option>
+                      <option value="growth">Growth (up to 100)</option>
+                      <option value="business">Business (up to 250)</option>
+                      <option value="enterprise">Enterprise (250+)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Billing cycle
+                    </label>
+                    <select
+                      name="billing_cycle"
+                      value={billingForm.billing_cycle}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    >
+                      <option value="monthly">Monthly</option>
+                      <option value="annual">Annual</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Next billing date
+                    </label>
+                    <input
+                      type="date"
+                      name="next_billing_date"
+                      value={billingForm.next_billing_date}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Last payment date
+                    </label>
+                    <input
+                      type="date"
+                      name="last_payment_date"
+                      value={billingForm.last_payment_date}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Payment status
+                    </label>
+                    <select
+                      name="payment_status"
+                      value={billingForm.payment_status}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    >
+                      <option value="trial">Trial</option>
+                      <option value="paid">Paid</option>
+                      <option value="pending">Pending</option>
+                      <option value="overdue">Overdue</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 mt-5 sm:mt-7">
+                    <input
+                      id="billing-is-active"
+                      type="checkbox"
+                      name="is_active"
+                      checked={billingForm.is_active}
+                      onChange={handleBillingChange}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <label
+                      htmlFor="billing-is-active"
+                      className="text-xs font-medium text-slate-700"
+                    >
+                      Subscription active
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Subscription start
+                    </label>
+                    <input
+                      type="date"
+                      name="subscription_start_date"
+                      value={billingForm.subscription_start_date}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Subscription end
+                    </label>
+                    <input
+                      type="date"
+                      name="subscription_end_date"
+                      value={billingForm.subscription_end_date}
+                      onChange={handleBillingChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Internal notes
+                  </label>
+                  <textarea
+                    name="billing_notes"
+                    value={billingForm.billing_notes}
+                    onChange={handleBillingChange}
+                    rows={3}
+                    className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    placeholder="e.g. 10% discount until Dec, annual contract, cheque no., etc."
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeBillingModal}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    disabled={billingSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+                    disabled={billingSaving}
+                  >
+                    {billingSaving ? 'Saving…' : 'Save billing'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
