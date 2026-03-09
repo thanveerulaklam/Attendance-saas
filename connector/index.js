@@ -28,7 +28,7 @@ const config = loadConfig();
 const DEVICE_IP = config.deviceIp || '192.168.1.50';
 const DEVICE_PORT = parseInt(config.devicePort || '4370', 10);
 const DEVICE_API_KEY = config.deviceApiKey;
-const BACKEND_URL = (config.backendUrl || 'http://localhost:3000').replace(/\/$/, '');
+const BACKEND_URL = (config.backendUrl || 'https://punchpay.in').replace(/\/$/, '');
 const POLL_INTERVAL_MS = parseInt(config.pollIntervalMs || '60000', 10);
 
 const runOnce = process.argv.includes('--once');

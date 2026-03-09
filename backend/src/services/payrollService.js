@@ -39,6 +39,7 @@ function rowToShiftConfig(row) {
     lunchOverDeductionMinutes: Number(row.lunch_over_deduction_minutes || 0),
     lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
     noLeaveIncentive: Number(row.no_leave_incentive || 0),
+    paidLeaveDays: Number(row.paid_leave_days || 0),
   };
 }
 
@@ -54,7 +55,8 @@ async function getDefaultShiftForCompany(client, companyId) {
        late_deduction_amount,
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
-       no_leave_incentive
+       no_leave_incentive,
+       paid_leave_days
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -85,7 +87,8 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          id, start_time, end_time, grace_minutes, lunch_minutes,
          late_deduction_minutes, late_deduction_amount,
          lunch_over_deduction_minutes, lunch_over_deduction_amount,
-         no_leave_incentive
+         no_leave_incentive,
+         paid_leave_days
        FROM shifts
        WHERE company_id = $1 AND id = $2`,
       [companyId, shiftId]
@@ -257,7 +260,13 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
     }
 
-    const absenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
+    const rawAbsenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
+
+    // Apply per-shift paid leave allowance: some companies allow a fixed number of paid leave
+    // days per month (no salary loss). Treat up to paidLeaveDays as non-absence for payroll.
+    const paidLeaveDaysAllowed = Number(shift.paidLeaveDays || 0);
+    const paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
+    const absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
 
     const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
     const lateMinutes = totalLateMs / (60 * 1000);
@@ -280,6 +289,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       lunchOverDeductionMinutes: shift.lunchOverDeductionMinutes,
       lunchOverDeductionAmount: shift.lunchOverDeductionAmount,
       noLeaveIncentiveFromShift: shift.noLeaveIncentive,
+      paidLeaveDaysAllowed,
+      paidLeaveUsed,
+      rawAbsenceDays,
       absenceDays,
     };
   } finally {
@@ -337,14 +349,17 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * presentWorkingDays;
 
+    const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
+
     let earnedBasic;
-    let absenceDeduction;
+    let absenceDeduction = 0;
     if (isMonthComplete) {
-      earnedBasic = basicSalary;
-      absenceDeduction = summary.absenceDays * dailyRate;
+      // For full months, pay for all worked days plus the shift's paid leave allowance.
+      // Example: 30-day month, 27 present, 4 paid leave → salary for 31 days.
+      earnedBasic = dailyRate * (summary.presentDays + paidLeaveDaysAllowed);
     } else {
+      // For partial months, pay only for days actually worked.
       earnedBasic = dailyRate * summary.presentDays;
-      absenceDeduction = 0;
     }
 
     let lateDeduction = 0;
@@ -375,7 +390,9 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const globalIncentive = Number(noLeaveIncentive) || 0;
     const effectiveNoLeaveIncentive = shiftIncentive > 0 ? shiftIncentive : globalIncentive;
     const noLeaveIncentiveAmount =
-      effectiveNoLeaveIncentive > 0 && summary.absenceDays === 0 && isMonthComplete
+      effectiveNoLeaveIncentive > 0 &&
+      isMonthComplete &&
+      Number(summary.rawAbsenceDays || 0) <= paidLeaveDaysAllowed
         ? effectiveNoLeaveIncentive
         : 0;
     const netSalary = grossSalary - deductions - salaryAdvance + noLeaveIncentiveAmount;
@@ -479,14 +496,14 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
   const travelAllowance = dailyTravelAllowance * presentWorkingDays;
 
+  const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
+
   let earnedBasic;
-  let absenceDeduction;
+  let absenceDeduction = 0;
   if (isMonthComplete) {
-    earnedBasic = basicSalary;
-    absenceDeduction = summary.absenceDays * dailyRate;
+    earnedBasic = dailyRate * (summary.presentDays + paidLeaveDaysAllowed);
   } else {
     earnedBasic = dailyRate * summary.presentDays;
-    absenceDeduction = 0;
   }
 
   let lateDeduction = 0;

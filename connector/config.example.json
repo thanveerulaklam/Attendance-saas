@@ -2,6 +2,6 @@
   "deviceIp": "192.168.1.50",
   "devicePort": 4370,
   "deviceApiKey": "paste-your-device-api-key-from-the-app",
-  "backendUrl": "https://api.yourapp.com",
+  "backendUrl": "https://punchpay.in",
   "pollIntervalMs": 60000
 }

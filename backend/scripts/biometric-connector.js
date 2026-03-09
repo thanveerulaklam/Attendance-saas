@@ -10,7 +10,7 @@
  *   BIOMETRIC_DEVICE_IP=192.168.1.50
  *   BIOMETRIC_DEVICE_PORT=4370
  *   DEVICE_API_KEY=<your device API key from the app>
- *   BACKEND_URL=http://localhost:3000
+ *   BACKEND_URL=https://punchpay.in
  *
  * --once: run once and exit; otherwise runs every 60 seconds.
  */
@@ -21,7 +21,7 @@ const ZKAttendanceClient = require('zk-attendance-sdk');
 const DEVICE_IP = process.env.BIOMETRIC_DEVICE_IP || '192.168.1.50';
 const DEVICE_PORT = parseInt(process.env.BIOMETRIC_DEVICE_PORT || '4370', 10);
 const DEVICE_API_KEY = process.env.DEVICE_API_KEY;
-const BACKEND_URL = (process.env.BACKEND_URL || 'http://localhost:3000').replace(/\/$/, '');
+const BACKEND_URL = (process.env.BACKEND_URL || 'https://punchpay.in').replace(/\/$/, '');
 const POLL_INTERVAL_MS = parseInt(process.env.BIOMETRIC_POLL_INTERVAL_MS || '60000', 10);
 
 const runOnce = process.argv.includes('--once');

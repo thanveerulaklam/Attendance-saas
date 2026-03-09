@@ -8,8 +8,7 @@ Use this guide to see which URLs work and decide what to use for backend and fro
 
 | URL | Role |
 |-----|------|
-| **http://143.110.251.182** | Backend API (Node) – works over HTTP |
-| **https://payroll.mzonetechnologies.com** | Domain with HTTPS (frontend and/or API) |
+| **https://punchpay.in** | Frontend + Backend API (Node) – HTTPS via Nginx proxy |
 
 ---
 
@@ -20,11 +19,8 @@ Run these in **Terminal**. Replace the URL in each command with the one you’re
 ### Test 1 – Health (no auth)
 
 ```bash
-# Backend on IP (HTTP)
-curl -s -o /dev/null -w "%{http_code}" http://143.110.251.182/api/health
-
-# Backend on domain (HTTPS) – if you have proxy/SSL set up
-curl -s -o /dev/null -w "%{http_code}" https://payroll.mzonetechnologies.com/api/health
+# Backend on domain (HTTPS)
+curl -s -o /dev/null -w "%{http_code}" https://punchpay.in/api/health
 ```
 
 - **200** = that URL works for the API.  
@@ -35,8 +31,8 @@ curl -s -o /dev/null -w "%{http_code}" https://payroll.mzonetechnologies.com/api
 ### Test 2 – Login (API really works)
 
 ```bash
-# Replace URL with the base (no /api/auth/login), e.g. http://143.110.251.182 or https://payroll.mzonetechnologies.com
-curl -s -X POST https://payroll.mzonetechnologies.com/api/auth/login \
+# Replace URL with the base (no /api/auth/login), e.g. https://punchpay.in
+curl -s -X POST https://punchpay.in/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@mzoneapps.com","password":"test"}' | head -c 200
 ```
@@ -46,8 +42,7 @@ curl -s -X POST https://payroll.mzonetechnologies.com/api/auth/login \
 
 **Write down:**
 
-- [ ] `http://143.110.251.182` → Health: _____  Login: _____  
-- [ ] `https://payroll.mzonetechnologies.com` → Health: _____  Login: _____
+- [ ] `https://punchpay.in` → Health: _____  Login: _____
 
 ---
 
@@ -56,8 +51,7 @@ curl -s -X POST https://payroll.mzonetechnologies.com/api/auth/login \
 ### Test 3 – Open frontend
 
 1. Open in the browser:
-   - **A:** `http://143.110.251.182` (if you serve frontend there)
-   - **B:** `https://payroll.mzonetechnologies.com` (if you serve frontend there)
+   - **A:** `https://punchpay.in`
 2. You should see the **login page** (not a blank page or “connection not secure” you can’t bypass).
 
 Note which URL(s) show the app: _____  
@@ -68,8 +62,7 @@ Note which URL(s) show the app: _____
 2. After login, open **DevTools** (F12 or Right‑click → Inspect) → **Network** tab.
 3. Click around (e.g. Dashboard, Employees). Watch the **Request URL** of API calls.
 
-- If API calls go to **same host** as the page (e.g. both `payroll.mzonetechnologies.com`) → frontend is using “same domain” for API.
-- If API calls go to **143.110.251.182** → frontend is configured to use that as backend.
+- If API calls go to **same host** as the page (e.g. both `punchpay.in`) → frontend is using “same domain” for API.
 
 **Write down:**
 

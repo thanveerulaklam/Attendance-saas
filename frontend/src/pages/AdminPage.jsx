@@ -36,6 +36,7 @@ export default function AdminPage() {
   });
   const [billingSaving, setBillingSaving] = useState(false);
   const [lockBusyId, setLockBusyId] = useState(null);
+  const [detailsCompany, setDetailsCompany] = useState(null);
 
   const loadPending = useCallback(async () => {
     if (!adminKey) return;
@@ -343,7 +344,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">Super admin dashboard</h1>
@@ -408,7 +409,7 @@ export default function AdminPage() {
         </div>
 
         {/* Companies list with staff & subscription info */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-8">
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">All companies</h2>
@@ -428,17 +429,36 @@ export default function AdminPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-slate-900">
+              <table className="w-full min-w-[1150px] text-sm text-slate-900">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Company</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Email</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Status</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Staff</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Plan / billing</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Subscription</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Created</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Controls</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[16%]">
+                      Company
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[16%]">
+                      Email
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[12%]">
+                      Phone
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[9%]">
+                      Status
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[22%]">
+                      Plan / billing
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[12%]">
+                      Staff
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[14%]">
+                      Subscription
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[7%]">
+                      Created
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[8%]">
+                      Controls
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -461,12 +481,26 @@ export default function AdminPage() {
                             ? 'bg-slate-50 text-slate-700 border-slate-300'
                             : 'bg-rose-50 text-rose-700 border-rose-100';
                     return (
-                      <tr key={c.id} className="hover:bg-slate-50/60">
+                      <tr
+                        key={c.id}
+                        className="hover:bg-slate-50/60 cursor-pointer"
+                        onClick={() => setDetailsCompany(c)}
+                      >
                         <td className="px-4 py-2.5">
-                          <div className="font-medium text-slate-900">{c.name || '—'}</div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDetailsCompany(c);
+                            }}
+                            className="font-medium text-slate-900 hover:text-blue-600 hover:underline text-left"
+                          >
+                            {c.name || '—'}
+                          </button>
                           <div className="text-xs text-slate-500">ID: {c.id}</div>
                         </td>
                         <td className="px-4 py-2.5 text-slate-600">{c.email || '—'}</td>
+                        <td className="px-4 py-2.5 text-slate-600">{c.phone || '—'}</td>
                         <td className="px-4 py-2.5">
                           <span
                             className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusPillClasses}`}
@@ -474,6 +508,7 @@ export default function AdminPage() {
                             {c.status || 'unknown'}
                           </span>
                         </td>
+                        {/* Plan / billing */}
                         <td className="px-4 py-2.5 text-slate-700">
                           <div className="flex flex-col gap-0.5">
                             <span className="text-xs font-medium text-slate-900">
@@ -505,13 +540,17 @@ export default function AdminPage() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => openBillingModal(c)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openBillingModal(c);
+                              }}
                               className="mt-1 text-[11px] text-blue-600 hover:underline w-fit"
                             >
                               Manage billing
                             </button>
                           </div>
                         </td>
+                        {/* Staff */}
                         <td className="px-4 py-2.5 text-slate-700">
                           {c.active_staff} active
                           <span className="text-slate-400 text-xs">
@@ -537,9 +576,13 @@ export default function AdminPage() {
                           {c.status === 'active' || c.status === 'locked' ? (
                             <button
                               type="button"
-                              onClick={() =>
-                                handleLockToggle(c, c.status === 'locked' ? 'unlock' : 'lock')
-                              }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleLockToggle(
+                                  c,
+                                  c.status === 'locked' ? 'unlock' : 'lock'
+                                );
+                              }}
                               disabled={lockBusyId === c.id}
                               className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
                                 c.status === 'locked'
@@ -659,6 +702,174 @@ export default function AdminPage() {
           </Link>
         </p>
 
+        {/* Company details modal */}
+        {detailsCompany && (
+          <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40">
+            <div className="w-full max-w-2xl rounded-2xl bg-white shadow-xl border border-slate-200">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-slate-200 bg-slate-50 rounded-t-2xl">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">
+                    Company details – {detailsCompany.name || `Company #${detailsCompany.id}`}
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Full view of plan, billing, subscription, and staff summary.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDetailsCompany(null)}
+                  className="text-xs text-slate-500 hover:text-slate-900"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="px-5 py-4 grid gap-4 md:grid-cols-3">
+                <div className="md:col-span-1">
+                  <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">
+                    Overview
+                  </h3>
+                  <dl className="space-y-1.5 text-xs text-slate-600">
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Name</dt>
+                      <dd className="font-medium text-slate-900 text-right">
+                        {detailsCompany.name || '—'}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Company ID</dt>
+                      <dd className="font-mono text-[11px] text-slate-900">
+                        {detailsCompany.id}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Email</dt>
+                      <dd className="text-right">
+                        {detailsCompany.email || <span className="italic">Not set</span>}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Phone</dt>
+                      <dd className="text-right">
+                        {detailsCompany.phone || <span className="italic">Not set</span>}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Status</dt>
+                      <dd className="text-right capitalize">
+                        {detailsCompany.status}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Created</dt>
+                      <dd className="text-right">
+                        {detailsCompany.created_at
+                          ? new Date(detailsCompany.created_at).toLocaleDateString()
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Staff</dt>
+                      <dd className="text-right">
+                        {detailsCompany.active_staff} active /{' '}
+                        {detailsCompany.total_staff} total
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">
+                    Plan & billing
+                  </h3>
+                  <dl className="space-y-1.5 text-xs text-slate-600">
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Plan</dt>
+                      <dd className="text-right">
+                        {(detailsCompany.plan_code || 'starter')
+                          .charAt(0)
+                          .toUpperCase() +
+                          (detailsCompany.plan_code || 'starter').slice(1)}
+                        {detailsCompany.billing_cycle
+                          ? ` • ${detailsCompany.billing_cycle}`
+                          : ''}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Payment status</dt>
+                      <dd className="text-right capitalize">
+                        {detailsCompany.payment_status || 'paid'}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Next billing date</dt>
+                      <dd className="text-right">
+                        {detailsCompany.next_billing_date
+                          ? new Date(
+                              detailsCompany.next_billing_date
+                            ).toLocaleDateString()
+                          : 'Not set'}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Last payment</dt>
+                      <dd className="text-right">
+                        {detailsCompany.last_payment_date
+                          ? new Date(
+                              detailsCompany.last_payment_date
+                            ).toLocaleDateString()
+                          : 'Not set'}
+                      </dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Subscription active</dt>
+                      <dd className="text-right">
+                        {detailsCompany.is_active === false ? 'No' : 'Yes'}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">
+                    Subscription & notes
+                  </h3>
+                  <dl className="space-y-1.5 text-xs text-slate-600">
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-slate-500">Subscription period</dt>
+                      <dd className="text-right">
+                        {detailsCompany.subscription_start_date &&
+                        detailsCompany.subscription_end_date ? (
+                          <>
+                            {new Date(
+                              detailsCompany.subscription_start_date
+                            ).toLocaleDateString()}{' '}
+                            →{' '}
+                            {new Date(
+                              detailsCompany.subscription_end_date
+                            ).toLocaleDateString()}
+                          </>
+                        ) : (
+                          'Not set'
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                  <div className="mt-3">
+                    <div className="text-xs font-medium text-slate-700 mb-1">
+                      Internal billing notes
+                    </div>
+                    <div className="text-xs text-slate-600 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-h-[56px] whitespace-pre-wrap">
+                      {detailsCompany.billing_notes?.trim()
+                        ? detailsCompany.billing_notes
+                        : 'No notes added yet.'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {billingModalCompany && (
           <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40">
             <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-200 p-6">
@@ -683,7 +894,8 @@ export default function AdminPage() {
                       <option value="starter">Starter (up to 30)</option>
                       <option value="growth">Growth (up to 100)</option>
                       <option value="business">Business (up to 250)</option>
-                      <option value="enterprise">Enterprise (250+)</option>
+                      <option value="enterprise">Enterprise (up to 500)</option>
+                      <option value="custom">Custom (500+ employees, custom pricing)</option>
                     </select>
                   </div>
                   <div>

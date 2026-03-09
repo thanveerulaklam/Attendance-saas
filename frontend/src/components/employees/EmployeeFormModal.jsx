@@ -155,6 +155,7 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
           json?.error ||
           (Array.isArray(json?.errors) ? json.errors.join(', ') : null) ||
           'Something went wrong while saving employee';
+
         setToast({ type: 'error', message });
         return;
       }

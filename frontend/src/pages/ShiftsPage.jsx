@@ -15,6 +15,7 @@ const emptyForm = () => ({
   lunch_over_deduction_minutes: 0,
   lunch_over_deduction_amount: 0,
   no_leave_incentive: 0,
+  paid_leave_days: 0,
 });
 
 export default function ShiftsPage() {
@@ -57,8 +58,19 @@ export default function ShiftsPage() {
   };
 
   const handleChange = (field) => (event) => {
-    const numericFields = ['grace_minutes', 'lunch_minutes', 'late_deduction_minutes', 'late_deduction_amount', 'lunch_over_deduction_minutes', 'lunch_over_deduction_amount', 'no_leave_incentive'];
-    const value = numericFields.includes(field) ? Number(event.target.value || 0) : event.target.value;
+    const numericFields = [
+      'grace_minutes',
+      'lunch_minutes',
+      'late_deduction_minutes',
+      'late_deduction_amount',
+      'lunch_over_deduction_minutes',
+      'lunch_over_deduction_amount',
+      'no_leave_incentive',
+      'paid_leave_days',
+    ];
+    const value = numericFields.includes(field)
+      ? Number(event.target.value || 0)
+      : event.target.value;
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -96,6 +108,7 @@ export default function ShiftsPage() {
       lunch_over_deduction_minutes: shift.lunch_over_deduction_minutes ?? 0,
       lunch_over_deduction_amount: shift.lunch_over_deduction_amount ?? 0,
       no_leave_incentive: shift.no_leave_incentive ?? 0,
+      paid_leave_days: shift.paid_leave_days ?? 0,
     });
     setEditingShift(shift);
     setError(null);
@@ -300,6 +313,30 @@ export default function ShiftsPage() {
 
               <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">
+                  Paid leave allowance (optional)
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  For companies without a fixed weekly off, set how many days per month staff can
+                  take as paid leave (with salary). For example, set 4 to allow 4 paid leave days.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Paid leave days per month
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.paid_leave_days}
+                    onChange={handleChange('paid_leave_days')}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="e.g. 4"
+                  />
+                </div>
+              </div>
+
+              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">
                   Lunch over deduction (optional)
                 </p>
                 <p className="text-[10px] text-slate-500">
@@ -434,6 +471,15 @@ export default function ShiftsPage() {
                           <dt className="text-slate-500">Lunch over deduction</dt>
                           <dd className="font-medium text-slate-800">
                             {shift.lunch_over_deduction_minutes ?? 0} min → {shift.lunch_over_deduction_amount ?? 0}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {shift.paid_leave_days != null && Number(shift.paid_leave_days) > 0 ? (
+                        <div className="flex justify-between">
+                          <dt className="text-slate-500">Paid leave allowance</dt>
+                          <dd className="font-medium text-slate-800">
+                            {shift.paid_leave_days} day
+                            {Number(shift.paid_leave_days) === 1 ? '' : 's'} / month
                           </dd>
                         </div>
                       ) : null}

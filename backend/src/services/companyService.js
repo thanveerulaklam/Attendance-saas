@@ -6,9 +6,16 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
 
 async function getCompanyById(companyId) {
   const result = await pool.query(
-    `SELECT ${COMPANY_SELECT}
-     FROM companies
-     WHERE id = $1`,
+    `SELECT
+       c.${COMPANY_SELECT.replace(/,\s*/g, ', c.')}
+       ,
+       (
+         SELECT COUNT(*)::int
+         FROM employees e
+         WHERE e.company_id = c.id AND e.status = 'active'
+       ) AS active_staff_count
+     FROM companies c
+     WHERE c.id = $1`,
     [companyId]
   );
 

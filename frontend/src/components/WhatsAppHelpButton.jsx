@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
+import { API_BASE } from '../utils/apiBase';
 
-const DEFAULT_NUMBER = '919876543210';
+// Default WhatsApp support number (E.164 without +)
+const DEFAULT_NUMBER = '919600844041';
 
 /**
  * Floating WhatsApp help button. Opens wa.me with pre-filled text:
@@ -9,10 +11,11 @@ const DEFAULT_NUMBER = '919876543210';
  */
 export default function WhatsAppHelpButton() {
   const [user, setUser] = useState(null);
+  const [company, setCompany] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
-    authFetch('/api/auth/me', {
+    authFetch(`${API_BASE}/api/auth/me`, {
       headers: { 'Content-Type': 'application/json' },
     })
       .then((res) => (res.ok ? res.json() : null))
@@ -20,16 +23,38 @@ export default function WhatsAppHelpButton() {
         if (isMounted && json?.data) setUser(json.data);
       })
       .catch(() => {});
-    return () => { isMounted = false; };
+    authFetch(`${API_BASE}/api/company`, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (isMounted && json?.data) setCompany(json.data);
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  const number = (import.meta.env.VITE_WHATSAPP_SUPPORT_NUMBER || DEFAULT_NUMBER).replace(/\D/g, '');
-  const parts = [];
-  if (user?.company_id != null) parts.push(`Company ID: ${user.company_id}`);
-  if (user?.email) parts.push(`User: ${user.email}`);
-  const text = parts.length > 0
-    ? `Hi, I need support. ${parts.join(', ')}`
-    : 'Hi, I need support.';
+  const number = (import.meta.env.VITE_WHATSAPP_SUPPORT_NUMBER || DEFAULT_NUMBER).replace(
+    /\D/g,
+    ''
+  );
+
+  const companyId = user?.company_id ?? company?.id;
+  const planCode = (company?.plan_code || 'starter').toString();
+  const planName = planCode.charAt(0).toUpperCase() + planCode.slice(1);
+  const activeStaff = company?.active_staff_count ?? null;
+
+  const lines = ['Hi, I need support.'];
+  if (company?.name) lines.push(`Company: ${company.name}`);
+  if (companyId != null) lines.push(`Company ID: ${companyId}`);
+  if (company?.phone) lines.push(`Phone: ${company.phone}`);
+  if (planCode) lines.push(`Current plan: ${planName}`);
+  if (activeStaff != null) lines.push(`Active staff: ${activeStaff}`);
+  if (user?.email) lines.push(`User email: ${user.email}`);
+
+  const text = lines.join('\n');
   const href = `https://wa.me/${number}${text ? `?text=${encodeURIComponent(text)}` : ''}`;
 
   return (

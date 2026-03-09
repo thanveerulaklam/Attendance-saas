@@ -26,6 +26,7 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
        no_leave_incentive,
+       paid_leave_days,
        created_at
      FROM shifts
      WHERE company_id = $1
@@ -51,6 +52,7 @@ async function createShift(companyId, data) {
     lunchOverDeductionMinutes,
     lunchOverDeductionAmount,
     noLeaveIncentive,
+    paidLeaveDays,
   } = parsed;
 
   if (!name || !startTime || !endTime) {
@@ -72,9 +74,10 @@ async function createShift(companyId, data) {
        late_deduction_amount,
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
-       no_leave_incentive
+       no_leave_incentive,
+       paid_leave_days
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING
        id,
        company_id,
@@ -89,6 +92,7 @@ async function createShift(companyId, data) {
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
        no_leave_incentive,
+       paid_leave_days,
        created_at`,
     [
       companyId,
@@ -103,6 +107,7 @@ async function createShift(companyId, data) {
       lunchOverDeductionMinutes,
       lunchOverDeductionAmount,
       noLeaveIncentive,
+      paidLeaveDays,
     ]
   );
 
@@ -134,6 +139,9 @@ function parseShiftData(data) {
   const noLeaveIncentive = Number.isFinite(Number(data.no_leave_incentive))
     ? Number(data.no_leave_incentive)
     : 0;
+  const paidLeaveDays = Number.isFinite(Number(data.paid_leave_days))
+    ? Math.max(0, Number(data.paid_leave_days))
+    : 0;
   const weeklyOffDays = Array.isArray(data.weekly_off_days)
     ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : [];
@@ -150,6 +158,7 @@ function parseShiftData(data) {
     lunchOverDeductionMinutes,
     lunchOverDeductionAmount,
     noLeaveIncentive,
+    paidLeaveDays,
   };
 }
 
@@ -173,8 +182,9 @@ async function updateShift(companyId, shiftId, data) {
        late_deduction_amount = $9,
        lunch_over_deduction_minutes = $10,
        lunch_over_deduction_amount = $11,
-       no_leave_incentive = $12
-     WHERE company_id = $1 AND id = $13
+       no_leave_incentive = $12,
+       paid_leave_days = $13
+     WHERE company_id = $1 AND id = $14
      RETURNING
        id,
        company_id,
@@ -189,6 +199,7 @@ async function updateShift(companyId, shiftId, data) {
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
        no_leave_incentive,
+       paid_leave_days,
        created_at`,
     [
       companyId,
@@ -203,6 +214,7 @@ async function updateShift(companyId, shiftId, data) {
       parsed.lunchOverDeductionMinutes,
       parsed.lunchOverDeductionAmount,
       parsed.noLeaveIncentive,
+      parsed.paidLeaveDays,
       shiftId,
     ]
   );

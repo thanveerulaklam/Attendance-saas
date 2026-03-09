@@ -1,4 +1,4 @@
-# Fix: payroll.mzonetechnologies.com not opening
+# Fix: punchpay.in not opening
 
 DNS already points to **143.110.251.182**. The site doesn’t open because the VPS isn’t configured to respond for that hostname. Do the following **on the VPS** (SSH into 143.110.251.182).
 
@@ -23,10 +23,10 @@ If backend isn’t running: `cd /var/www/Attendance-saas/backend && pm2 start ec
 
 ---
 
-## 2. Create Nginx config for payroll.mzonetechnologies.com
+## 2. Create Nginx config for punchpay.in
 
 ```bash
-sudo nano /etc/nginx/sites-available/payroll-mzone
+sudo nano /etc/nginx/sites-available/punchpay
 ```
 
 Paste this (path is for `/var/www/Attendance-saas`; change if your project is elsewhere).
@@ -41,7 +41,7 @@ upstream attendance_api {
 
 server {
     listen 80;
-    server_name payroll.mzonetechnologies.com;
+    server_name punchpay.in www.punchpay.in app.punchpay.in;
 
     root /var/www/Attendance-saas/frontend/dist;
     index index.html;
@@ -70,7 +70,7 @@ Save (Ctrl+O, Enter, Ctrl+X).
 ## 3. Enable the site and reload Nginx
 
 ```bash
-sudo ln -sf /etc/nginx/sites-available/payroll-mzone /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/punchpay /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -79,7 +79,7 @@ sudo systemctl reload nginx
 
 ## 4. Test (HTTP)
 
-Open in browser: **http://payroll.mzonetechnologies.com**
+Open in browser: **http://punchpay.in**
 
 You should see the app. Login and API will work (same origin).
 
@@ -89,28 +89,22 @@ You should see the app. Login and API will work (same origin).
 
 ```bash
 sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d payroll.mzonetechnologies.com
+sudo certbot --nginx -d punchpay.in -d www.punchpay.in -d app.punchpay.in
 ```
 
 Then on the VPS, set in backend `.env`:
 
 ```env
-CORS_ORIGIN=https://payroll.mzonetechnologies.com
+CORS_ORIGIN=https://punchpay.in
+FRONTEND_URL=https://punchpay.in
 ```
 
-Restart backend:
+Restart backend (pm2 or systemd as configured).
 
-```bash
-pm2 restart attendance-api
-```
-
-After that, use **https://payroll.mzonetechnologies.com**.
+After that, use **https://punchpay.in** (or **https://app.punchpay.in** if you keep app on subdomain).
 
 ---
 
 ## Connector
 
-- **backendUrl** can stay **http://143.110.251.182** (works from anywhere).
-- Or use **https://payroll.mzonetechnologies.com** after SSL is set up.
-
-Both are valid; 143 is simpler if you don’t need the connector to use the domain.
+- Set **backendUrl** to **https://punchpay.in** (recommended).

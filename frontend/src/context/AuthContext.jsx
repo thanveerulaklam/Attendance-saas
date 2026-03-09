@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { getToken, setToken as persistToken, clearToken } from '../utils/api';
+import { API_BASE } from '../utils/apiBase';
 
 const AuthContext = createContext(null);
 
@@ -31,7 +32,7 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
-    fetch('/api/auth/me', {
+    fetch(`${API_BASE}/api/auth/me`, {
       credentials: 'include',
       headers: { Authorization: `Bearer ${t}` },
     })

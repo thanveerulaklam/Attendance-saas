@@ -5,6 +5,53 @@ const {
   validateUpdateEmployee,
 } = require('../validators/employeeValidator');
 
+// Employee limits per plan. Null means "no limit" for that plan.
+const PLAN_EMPLOYEE_LIMITS = {
+  starter: 30,
+  growth: 100,
+  business: 250,
+  enterprise: 500,
+  custom: null,
+};
+
+async function assertEmployeeLimitNotExceeded(companyId) {
+  // Fetch company plan
+  const companyResult = await pool.query(
+    `SELECT plan_code FROM companies WHERE id = $1`,
+    [companyId]
+  );
+
+  if (companyResult.rowCount === 0) {
+    throw new AppError('Company not found', 404);
+  }
+
+  const planCode = (companyResult.rows[0].plan_code || 'starter').toLowerCase();
+  const limit = Object.prototype.hasOwnProperty.call(PLAN_EMPLOYEE_LIMITS, planCode)
+    ? PLAN_EMPLOYEE_LIMITS[planCode]
+    : null;
+
+  if (limit == null) {
+    // No limit for this plan (e.g. enterprise)
+    return;
+  }
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS active_count
+     FROM employees
+     WHERE company_id = $1 AND status = 'active'`,
+    [companyId]
+  );
+
+  const activeCount = Number(countResult.rows[0]?.active_count || 0);
+  if (activeCount >= limit) {
+    const planName = planCode.charAt(0).toUpperCase() + planCode.slice(1);
+    throw new AppError(
+      `You have reached the employee limit for your ${planName} plan (${limit} active employees). Please contact support using the WhatsApp help button in the bottom-left corner of the app to upgrade your plan.`,
+      403
+    );
+  }
+}
+
 /**
  * Create a new employee for a company.
  * Enforces unique employee_code per company.
@@ -14,10 +61,16 @@ async function createEmployee(companyId, data) {
 
   const shiftId = payload.shift_id != null ? payload.shift_id : null;
 
-  const dailyTravelAllowance = payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
+  const dailyTravelAllowance =
+    payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
   const esiAmount = payload.esi_amount != null ? payload.esi_amount : 0;
 
   try {
+    // Enforce per-plan active employee limits before creating a new active employee
+    if (payload.status === 'active') {
+      await assertEmployeeLimitNotExceeded(companyId);
+    }
+
     const result = await pool.query(
       `INSERT INTO employees (
         company_id,
