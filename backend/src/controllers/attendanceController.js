@@ -5,6 +5,7 @@ const {
   addManualFullDay,
   addManualFullDayBulk,
   updatePunch,
+  deletePunch,
 } = require('../services/attendanceService');
 
 /**
@@ -199,6 +200,34 @@ async function updatePunchById(req, res, next) {
   }
 }
 
+/**
+ * DELETE /api/attendance/logs/:id
+ * Deletes a punch record.
+ */
+async function deletePunchById(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const logId = req.params.id;
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const deleted = await deletePunch(companyId, logId);
+
+    return res.status(200).json({
+      success: true,
+      data: deleted,
+      message: 'Punch deleted',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getDaily,
   getMonthly,
@@ -206,4 +235,5 @@ module.exports = {
   createManualFullDay,
   createManualFullDayBulk,
   updatePunchById,
+  deletePunchById,
 };

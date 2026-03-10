@@ -3,9 +3,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE } from '../utils/apiBase';
 
-const WHATSAPP_NUMBER = '91XXXXXXXXXX';
+const WHATSAPP_NUMBER = '919600844041';
 const WHATSAPP_LINK =
-  'https://wa.me/91XXXXXXXXXX?text=Hi%2C%20I%20want%20to%20try%20PunchPay%20for%20my%20business';
+  'https://wa.me/919600844041?text=Hi%2C%20I%20want%20to%20try%20PunchPay%20for%20my%20business';
 
 const useInView = (ref) => {
   const [inView, setInView] = useState(false);

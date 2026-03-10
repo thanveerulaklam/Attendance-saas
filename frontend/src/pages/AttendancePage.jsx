@@ -725,7 +725,10 @@ export default function AttendancePage() {
                 </div>
               )}
               {editPunchEdits.map((edit, idx) => (
-                <div key={edit.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                <div
+                  key={edit.id}
+                  className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/50 p-3"
+                >
                   <span className="text-[11px] font-medium text-slate-500 w-16">Punch {idx + 1}</span>
                   <input
                     type="time"
@@ -749,6 +752,34 @@ export default function AttendancePage() {
                     <option value="in">IN</option>
                     <option value="out">OUT</option>
                   </select>
+                  <button
+                    type="button"
+                    disabled={editPunchSubmitting}
+                    onClick={async () => {
+                      if (!window.confirm('Delete this punch? This cannot be undone.')) return;
+                      setEditPunchSubmitting(true);
+                      setEditPunchError(null);
+                      try {
+                        const res = await authFetch(`/api/attendance/logs/${edit.id}`, {
+                          method: 'DELETE',
+                          headers: { 'Content-Type': 'application/json' },
+                        });
+                        if (!res.ok) {
+                          const j = await res.json().catch(() => ({}));
+                          throw new Error(j?.message || 'Failed to delete punch');
+                        }
+                        refreshAfterManual();
+                        setEditPunchOpen(false);
+                      } catch (err) {
+                        setEditPunchError(err.message || 'Failed to delete');
+                      } finally {
+                        setEditPunchSubmitting(false);
+                      }
+                    }}
+                    className="ml-auto rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                  >
+                    Delete
+                  </button>
                 </div>
               ))}
             </div>

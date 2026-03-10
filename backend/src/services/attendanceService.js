@@ -700,6 +700,37 @@ async function updatePunch(companyId, logId, { punch_time: punchTimeParam, punch
   }
 }
 
+/**
+ * Delete a punch (used from edit timings modal).
+ * @param {number} companyId
+ * @param {number} logId - attendance_logs.id
+ * @returns {Promise<{ id: number }>}
+ */
+async function deletePunch(companyId, logId) {
+  const logIdNum = Number(logId);
+  if (!logIdNum || logIdNum < 1) {
+    throw new AppError('Valid log id is required', 400);
+  }
+
+  const client = await pool.connect();
+  try {
+    const result = await client.query(
+      `DELETE FROM attendance_logs
+       WHERE company_id = $1 AND id = $2
+       RETURNING id`,
+      [companyId, logIdNum]
+    );
+
+    if (result.rowCount === 0) {
+      throw new AppError('Punch record not found', 404);
+    }
+
+    return result.rows[0];
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getDailyAttendance,
   getMonthlyAttendance,
@@ -707,4 +738,5 @@ module.exports = {
   addManualFullDay,
   addManualFullDayBulk,
   updatePunch,
+  deletePunch,
 };
