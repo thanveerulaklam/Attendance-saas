@@ -36,8 +36,31 @@ app.use('/api/', (req, res, next) => {
   apiLimiter(req, res, next);
 });
 
+// CORS: explicit allowlist + optional env override; never use wildcard with credentials:true
+const allowedOrigins = [
+  'https://punchpay.in',
+  'https://www.punchpay.in',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+if (process.env.CORS_ORIGIN) {
+  allowedOrigins.push(process.env.CORS_ORIGIN);
+}
+
+app.use(cors({
+  origin(origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, Postman, connector)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
+
 // Parsing
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
 // Allow slightly larger JSON bodies for bulk device log push; text for ZKTeco direct push
 app.use(express.json({ limit: '5mb' }));
 app.use(express.text({ type: ['text/plain', 'text/*'], limit: '1mb' }));
