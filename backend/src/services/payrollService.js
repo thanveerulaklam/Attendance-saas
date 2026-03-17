@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { getHolidayDatesForMonth } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
+const { ensureAutoOutForMonth } = require('./attendanceService');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 const TZ_OFFSETS = { 'Asia/Kolkata': '+05:30', 'Asia/Calcutta': '+05:30', UTC: 'Z', 'Etc/UTC': 'Z' };
@@ -27,6 +28,11 @@ function rowToShiftConfig(row) {
   const shiftMs = shiftMinutes * 60 * 1000;
   const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
   const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
+  const attendanceMode =
+    (row.attendance_mode || 'shift_based').toLowerCase() === 'hours_based'
+      ? 'hours_based'
+      : 'shift_based';
+  const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
   return {
     id: row.id,
     startHour,
@@ -40,6 +46,8 @@ function rowToShiftConfig(row) {
     lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
     noLeaveIncentive: Number(row.no_leave_incentive || 0),
     paidLeaveDays: Number(row.paid_leave_days || 0),
+    attendanceMode,
+    requiredHoursPerDay,
   };
 }
 
@@ -56,7 +64,9 @@ async function getDefaultShiftForCompany(client, companyId) {
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
        no_leave_incentive,
-       paid_leave_days
+       paid_leave_days,
+       attendance_mode,
+       required_hours_per_day
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -88,7 +98,9 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          late_deduction_minutes, late_deduction_amount,
          lunch_over_deduction_minutes, lunch_over_deduction_amount,
          no_leave_incentive,
-         paid_leave_days
+         paid_leave_days,
+         attendance_mode,
+         required_hours_per_day
        FROM shifts
        WHERE company_id = $1 AND id = $2`,
       [companyId, shiftId]
@@ -125,10 +137,32 @@ function getLastDateToConsider(year, month, asOfDate) {
   return asOfStr < lastDayStr ? asOfStr : lastDayStr;
 }
 
+function computeHoursInsideForDay(dayLogs) {
+  if (!dayLogs || dayLogs.length === 0) return 0;
+  const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+  let totalMinutes = 0;
+  let lastIn = null;
+
+  for (const log of sorted) {
+    if (log.punchType === 'in') {
+      lastIn = log.punchTime;
+    } else if (log.punchType === 'out' && lastIn) {
+      const diffMin = (log.punchTime - lastIn) / (60 * 1000);
+      if (diffMin >= 0 && diffMin <= 600) {
+        totalMinutes += diffMin;
+      }
+      lastIn = null;
+    }
+  }
+  return totalMinutes / 60;
+}
+
 async function getAttendanceSummary(companyId, employeeId, year, month, options = {}) {
   const { treatHolidayAdjacentAbsenceAsWorking = false, asOfDate = null } = options;
   const client = await pool.connect();
   try {
+    await ensureAutoOutForMonth(companyId, employeeId, year, month);
+
     const { start, end, daysInMonth } = getMonthBounds(year, month);
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
@@ -174,7 +208,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       });
     }
 
-    /** Days where employee actually worked (workedMs > 0). */
+    /** Days where employee actually worked (workedMs > 0 or hoursInside > 0). */
     const presentDayKeys = new Set();
     let presentDays = 0;
     let presentWorkingDays = 0;
@@ -188,59 +222,254 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     const allottedLunchMs = (shift.lunchMinutesAllotted ?? 60) * 60 * 1000;
 
-    for (const [dayKey, dayLogs] of logsByDay.entries()) {
-      if (!dayLogs.length) continue;
+    // Hours-based mode: compute presence/absence and overtime purely from total hours inside,
+    // but still track late arrivals (first punch) using the same late logic.
+    if (shift.attendanceMode === 'hours_based') {
+      const required = Number(shift.requiredHoursPerDay || 8);
+      const dayDetails = [];
 
-      const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
-      let workedMs = 0;
-      let lastIn = null;
-      let firstInTime = null;
-      let lunchStartTime = null;
-      let lunchEndTime = null;
+      let rawAbsenceDays = 0;
 
-      for (const log of sorted) {
-        if (log.punchType === 'in') {
-          if (!firstInTime) firstInTime = log.punchTime;
-          if (lunchStartTime != null && lunchEndTime == null) lunchEndTime = log.punchTime;
-          lastIn = log.punchTime;
-        } else if (log.punchType === 'out' && lastIn) {
-          workedMs += Math.max(0, log.punchTime - lastIn);
-          if (lunchStartTime == null) lunchStartTime = log.punchTime;
-          lastIn = null;
+      for (const [dayKey, dayLogs] of logsByDay.entries()) {
+        if (dayKey > lastDateToConsider) {
+          continue;
         }
-      }
-
-      if (workedMs > 0 && dayKey <= lastDateToConsider) {
-        presentDayKeys.add(dayKey);
         const isHoliday = holidaySet.has(dayKey);
-
-        presentDays += 1;
-        if (!isHoliday) {
-          presentWorkingDays += 1;
+        if (!dayLogs.length) {
+          if (!isHoliday) {
+            rawAbsenceDays += 1;
+          }
+          continue;
         }
 
-        const overtimeMs = workedMs - shift.shiftMs - shift.graceMs;
-        if (overtimeMs > 0) {
-          totalOvertimeMs += overtimeMs;
+        const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+        const hoursInside = computeHoursInsideForDay(sorted);
+
+        let presentFraction = 0;
+        let statusLabel = 'absent';
+
+        if (hoursInside >= required) {
+          presentFraction = 1;
+          statusLabel = 'present';
+          overtimeHours += hoursInside - required;
+        } else if (hoursInside >= required * 0.5) {
+          presentFraction = 0.5;
+          statusLabel = 'half_day';
         }
 
-        if (firstInTime && !holidaySet.has(dayKey)) {
+        let firstInTime = null;
+        for (const log of sorted) {
+          if (log.punchType === 'in') {
+            firstInTime = log.punchTime;
+            break;
+          }
+        }
+
+        let isLate = false;
+        let minutesLate = 0;
+        if (firstInTime && !isHoliday) {
           const [y, mo, d] = dayKey.split('-').map(Number);
-          const shiftStartMs = getShiftStartMsForDate(y, mo, d, shift.startHour, shift.startMinute);
+          const shiftStartMs = getShiftStartMsForDate(
+            y,
+            mo,
+            d,
+            shift.startHour,
+            shift.startMinute
+          );
           const allowedStartMs = shiftStartMs + shift.graceMs;
           if (firstInTime.getTime() > allowedStartMs) {
-            totalLateMs += firstInTime.getTime() - allowedStartMs;
+            isLate = true;
+            const diffMs = firstInTime.getTime() - allowedStartMs;
+            minutesLate = Math.round(diffMs / (60 * 1000));
+            totalLateMs += diffMs;
             lateDays += 1;
           }
         }
 
-        if (lunchStartTime != null && lunchEndTime != null) {
-          const lunchMs = lunchEndTime - lunchStartTime;
-          if (lunchMs > allottedLunchMs) {
-            totalLunchOverMs += lunchMs - allottedLunchMs;
-            lunchOverDays += 1;
+        if (presentFraction > 0) {
+          presentDayKeys.add(dayKey);
+          presentDays += presentFraction;
+          if (!isHoliday) {
+            presentWorkingDays += presentFraction;
+          }
+        } else if (!isHoliday) {
+          rawAbsenceDays += 1;
+        }
+
+        dayDetails.push({
+          date: dayKey,
+          firstInTime: firstInTime ? firstInTime.toISOString() : null,
+          totalHoursInside: hoursInside,
+          late: isLate,
+          minutesLate,
+          status: statusLabel,
+        });
+      }
+
+      let effectiveWorkingDays = workingDays;
+      if (treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0) {
+        let holidaysCountedAsWorking = 0;
+        for (const holidayKey of holidaySet) {
+          if (holidayKey > lastDateToConsider) continue;
+          const prevKey = addDays(holidayKey, -1);
+          const nextKey = addDays(holidayKey, 1);
+          const absentPrev =
+            prevKey >= firstDayStr &&
+            prevKey <= lastDateToConsider &&
+            !presentDayKeys.has(prevKey);
+          const absentNext =
+            nextKey >= firstDayStr &&
+            nextKey <= lastDateToConsider &&
+            !presentDayKeys.has(nextKey);
+          if (absentPrev || absentNext) {
+            holidaysCountedAsWorking += 1;
           }
         }
+        effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
+      }
+
+      // For hours_based, rawAbsenceDays is already tracked per working day (non-holiday).
+      const paidLeaveDaysAllowed = Number(shift.paidLeaveDays || 0);
+      const paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
+      const absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+
+      const overtimeHoursFinal = overtimeHours;
+      const lateMinutes = totalLateMs / (60 * 1000);
+
+      return {
+        daysInMonth,
+        workingDaysUpToDate: lastDateToConsider,
+        workingDays,
+        workingDaysInMonth,
+        presentDays,
+        presentWorkingDays,
+        overtimeHours: overtimeHoursFinal,
+        lateMinutes,
+        lunchOverMinutes: 0,
+        lateDays,
+        lunchOverDays: 0,
+        lateDeductionMinutes: shift.lateDeductionMinutes,
+        lateDeductionAmount: shift.lateDeductionAmount,
+        lunchOverDeductionMinutes: 0,
+        lunchOverDeductionAmount: 0,
+        noLeaveIncentiveFromShift: shift.noLeaveIncentive,
+        paidLeaveDaysAllowed,
+        paidLeaveUsed,
+        rawAbsenceDays,
+        absenceDays,
+        attendanceMode: 'hours_based',
+        requiredHoursPerDay: required,
+        dayDetails,
+      };
+    }
+
+    for (const [dayKey, dayLogs] of logsByDay.entries()) {
+      if (!dayLogs.length || dayKey > lastDateToConsider) continue;
+
+      const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+      const logsForStatus = sorted.map((l) => ({
+        punch_time: l.punchTime.toISOString(),
+        punch_type: l.punchType,
+      }));
+
+      const [yy, mo, dd] = dayKey.split('-').map(Number);
+      const dayStart = new Date(Date.UTC(yy, mo - 1, dd, 0, 0, 0));
+      const status = require('./attendanceService').computeDayStatus
+        ? require('./attendanceService').computeDayStatus(logsForStatus, shift, dayStart)
+        : (() => {
+            let workedMs = 0;
+            let lastIn = null;
+            let firstInTime = null;
+            let lunchStartTime = null;
+            let lunchEndTime = null;
+            for (const log of sorted) {
+              if (log.punchType === 'in') {
+                if (!firstInTime) firstInTime = log.punchTime;
+                if (lunchStartTime != null && lunchEndTime == null) {
+                  lunchEndTime = log.punchTime;
+                }
+                lastIn = log.punchTime;
+              } else if (log.punchType === 'out' && lastIn) {
+                workedMs += Math.max(0, log.punchTime - lastIn);
+                if (lunchStartTime == null) lunchStartTime = log.punchTime;
+                lastIn = null;
+              }
+            }
+            const presentLocal = workedMs > 0 || !!firstInTime;
+            const shiftStartMs = getShiftStartMsForDate(yy, mo, dd, shift.startHour, shift.startMinute);
+            const overtimeMsLocal = Math.max(0, workedMs - shift.shiftMs - shift.graceMs);
+            const lateLocal =
+              presentLocal &&
+              firstInTime &&
+              firstInTime.getTime() > shiftStartMs + shift.graceMs;
+            const allowedLunchMsLocal = allottedLunchMs;
+            let lunchOverLocal = 0;
+            if (lunchStartTime != null && lunchEndTime != null) {
+              const lunchMs = lunchEndTime - lunchStartTime;
+              if (lunchMs > allowedLunchMsLocal) {
+                lunchOverLocal = lunchMs - allowedLunchMsLocal;
+              }
+            }
+            const midpointMs = shiftStartMs + (shift.shiftMs || 0) / 2;
+            let halfDayLocal = false;
+            if (presentLocal && midpointMs) {
+              const lastPunch = sorted[sorted.length - 1];
+              if (
+                lastPunch &&
+                lastPunch.punchType === 'out' &&
+                lastPunch.punchTime.getTime() < midpointMs
+              ) {
+                halfDayLocal = true;
+              } else if (firstInTime && firstInTime.getTime() > midpointMs) {
+                halfDayLocal = true;
+              }
+            }
+            return {
+              present: presentLocal,
+              overtimeHours: overtimeMsLocal / (60 * 60 * 1000),
+              late: lateLocal,
+              halfDay: halfDayLocal,
+              lunchOverMinutes: lunchOverLocal / (60 * 1000),
+            };
+          })();
+
+      if (!status.present) {
+        continue;
+      }
+
+      presentDayKeys.add(dayKey);
+      const isHoliday = holidaySet.has(dayKey);
+
+      const presentFraction = status.halfDay ? 0.5 : 1;
+      presentDays += presentFraction;
+      if (!isHoliday) {
+        presentWorkingDays += presentFraction;
+      }
+
+      if (status.overtimeHours && status.overtimeHours > 0) {
+        totalOvertimeMs += status.overtimeHours * 60 * 60 * 1000;
+      }
+
+      if (status.late && !isHoliday) {
+        const [y2, m2, d2] = dayKey.split('-').map(Number);
+        const shiftStartMs = getShiftStartMsForDate(
+          y2,
+          m2,
+          d2,
+          shift.startHour,
+          shift.startMinute
+        );
+        const allowedStartMs = shiftStartMs + shift.graceMs;
+        const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
+        if (firstInTime) {
+          totalLateMs += Math.max(0, firstInTime.getTime() - allowedStartMs);
+          lateDays += 1;
+        }
+      }
+
+      if (status.lunchOverMinutes && status.lunchOverMinutes > 0) {
+        totalLunchOverMs += status.lunchOverMinutes * 60 * 1000;
+        lunchOverDays += 1;
       }
     }
 
@@ -293,6 +522,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       paidLeaveUsed,
       rawAbsenceDays,
       absenceDays,
+      attendanceMode: shift.attendanceMode || 'shift_based',
+      requiredHoursPerDay: shift.requiredHoursPerDay || 8,
+      dayDetails: null,
     };
   } finally {
     client.release();
@@ -360,6 +592,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     } else {
       // For partial months, pay only for days actually worked.
       earnedBasic = dailyRate * summary.presentDays;
+    }
+    // For hours_based shifts, apply salary deduction based on hours-driven absences.
+    if (summary.attendanceMode === 'hours_based') {
+      absenceDeduction = dailyRate * (summary.absenceDays || 0);
     }
 
     let lateDeduction = 0;
@@ -505,6 +741,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   } else {
     earnedBasic = dailyRate * summary.presentDays;
   }
+  if (summary.attendanceMode === 'hours_based') {
+    absenceDeduction = dailyRate * (summary.absenceDays || 0);
+  }
 
   let lateDeduction = 0;
   if (
@@ -561,6 +800,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       lunchOverMinutes: summary.lunchOverMinutes,
       lateDays: summary.lateDays,
       lunchOverDays: summary.lunchOverDays,
+      attendanceMode: summary.attendanceMode,
+      requiredHoursPerDay: summary.requiredHoursPerDay,
+      dayDetails: summary.dayDetails,
     },
     breakdown: {
       isMonthComplete,

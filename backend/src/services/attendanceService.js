@@ -30,7 +30,24 @@ function rowToShiftConfig(row) {
   const shiftMs = shiftMinutes * 60 * 1000;
   const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
   const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
-  return { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted };
+  const attendanceMode =
+    (row.attendance_mode || 'shift_based').toLowerCase() === 'hours_based'
+      ? 'hours_based'
+      : 'shift_based';
+  const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
+  const overtimeAllowed = row.allow_overtime === true || row.allow_overtime === 'true';
+  return {
+    startHour,
+    startMinute,
+    endHour,
+    endMinute,
+    shiftMs,
+    graceMs,
+    lunchMinutesAllotted,
+    attendanceMode,
+    requiredHoursPerDay,
+    overtimeAllowed,
+  };
 }
 
 /**
@@ -39,7 +56,7 @@ function rowToShiftConfig(row) {
  */
 async function getShiftConfig(companyId) {
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, allow_overtime
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -60,7 +77,7 @@ async function getShiftConfig(companyId) {
 async function getShiftConfigById(shiftId) {
   if (!shiftId) return null;
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, allow_overtime
      FROM shifts WHERE id = $1`,
     [shiftId]
   );
@@ -79,7 +96,7 @@ async function getShiftConfigMap(companyId, shiftIds) {
   const uniqueIds = [...new Set((shiftIds || []).filter(Boolean))];
   if (uniqueIds.length === 0) return map;
   const result = await pool.query(
-    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day
      FROM shifts WHERE id = ANY($1::bigint[])`,
     [uniqueIds]
   );
@@ -134,6 +151,7 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
   let currentIn = null;
   let lunchStartTime = null; // time of first OUT (lunch start)
   let lunchEndTime = null;   // time of second IN (lunch end)
+  let lastOutTime = null;
 
   const sorted = [...dayLogs].sort(
     (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
@@ -157,6 +175,7 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
         }
       }
       currentIn = null;
+      lastOutTime = t;
     }
   }
 
@@ -204,6 +223,16 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
     workedMs - shiftConfig.shiftMs - shiftConfig.graceMs
   );
   const overtimeHours = overtimeMs / (60 * 60 * 1000);
+  const midpointMs = shiftStartMs + (shiftConfig.shiftMs || 0) / 2;
+
+  let halfDay = false;
+  if (present && !fullDay && !leftDuringLunch && midpointMs) {
+    if (lastOutTime && lastOutTime.getTime() < midpointMs) {
+      halfDay = true;
+    } else if (firstInTime && firstInTime.getTime() > midpointMs) {
+      halfDay = true;
+    }
+  }
 
   return {
     present,
@@ -214,7 +243,262 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
     lunchMinutes,
     lunchMinutesAllotted: allotted,
     lunchOverMinutes: lunchOverMinutes !== null ? lunchOverMinutes : null,
+    firstInTime,
+    minutesLate:
+      present && firstInTime != null && late
+        ? Math.max(
+            0,
+            Math.round(
+              (firstInTime.getTime() -
+                (shiftStartMs + shiftConfig.graceMs)) /
+                (60 * 1000)
+            )
+          )
+        : 0,
+    halfDay,
   };
+}
+
+function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
+  const empty = {
+    present: false,
+    late: false,
+    overtimeHours: 0,
+    fullDay: false,
+    leftDuringLunch: false,
+    lunchMinutes: null,
+    lunchMinutesAllotted: 0,
+    lunchOverMinutes: null,
+    totalHoursInside: 0,
+    halfDay: false,
+    firstInTime: null,
+    minutesLate: 0,
+  };
+  if (!dayLogs.length) return empty;
+
+  const sorted = [...dayLogs].sort(
+    (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
+  );
+
+  let totalMinutesInside = 0;
+  let lastIn = null;
+  let firstInTime = null;
+
+  for (const log of sorted) {
+    const t = new Date(log.punch_time);
+    const type = (log.punch_type || '').toLowerCase();
+    if (type === 'in') {
+      if (!firstInTime) firstInTime = t;
+      lastIn = t;
+    } else if (type === 'out' && lastIn) {
+      const diffMinutes = (t - lastIn) / (60 * 1000);
+      if (diffMinutes >= 0 && diffMinutes <= 600) {
+        totalMinutesInside += diffMinutes;
+      }
+      lastIn = null;
+    }
+  }
+
+  const totalHoursInside = totalMinutesInside / 60;
+  const required = Number(shiftConfig.requiredHoursPerDay || 8);
+
+  let present = false;
+  let halfDay = false;
+  let overtimeHours = 0;
+
+  if (totalHoursInside >= required) {
+    present = true;
+    overtimeHours = totalHoursInside - required;
+  } else if (totalHoursInside >= required * 0.5) {
+    present = true;
+    halfDay = true;
+  }
+
+  const fullDay = present && !halfDay;
+
+  // Late detection based on first IN punch vs shift start + grace
+  let late = false;
+  let minutesLate = 0;
+  if (firstInTime) {
+    const d = new Date(firstInTime);
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth() + 1;
+    const day = d.getUTCDate();
+    const shiftStartMs = getShiftStartMsForDate(
+      y,
+      m,
+      day,
+      shiftConfig.startHour,
+      shiftConfig.startMinute
+    );
+    const allowedStartMs = shiftStartMs + shiftConfig.graceMs;
+    if (firstInTime.getTime() > allowedStartMs) {
+      late = true;
+      minutesLate = Math.round(
+        (firstInTime.getTime() - allowedStartMs) / (60 * 1000)
+      );
+    }
+  }
+
+  return {
+    present,
+    late,
+    overtimeHours,
+    fullDay,
+    leftDuringLunch: false,
+    lunchMinutes: null,
+    lunchMinutesAllotted: 0,
+    lunchOverMinutes: null,
+    totalHoursInside,
+    halfDay,
+    firstInTime,
+    minutesLate,
+  };
+}
+
+/**
+ * Ensure auto OUT punches are inserted for a given date for all employees in the company.
+ * This is used so that both daily attendance views and payroll calculations see a closed day
+ * when staff forgot to punch OUT.
+ *
+ * Rules:
+ * - For each employee/day where the last punch is an IN and there is no OUT after it, insert
+ *   an OUT at shift end time with device_id = 'auto_out'.
+ * - Do not insert for today if current time is before shift end time.
+ * - If overtime is allowed for the shift, wait until the next calendar day before auto closing.
+ */
+async function ensureAutoOutForDate(companyId, dateStr) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!match) {
+    throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
+  }
+
+  const [, y, m, d] = match;
+  const year = parseInt(y, 10);
+  const month = parseInt(m, 10);
+  const dayNum = parseInt(d, 10);
+
+  const dayStart = new Date(Date.UTC(year, month - 1, dayNum, 0, 0, 0));
+  const dayEnd = new Date(Date.UTC(year, month - 1, dayNum + 1, 0, 0, 0));
+
+  const now = new Date();
+  const todayY = now.getUTCFullYear();
+  const todayM = now.getUTCMonth() + 1;
+  const todayD = now.getUTCDate();
+  const isToday = year === todayY && month === todayM && dayNum === todayD;
+
+  const client = await pool.connect();
+  try {
+    const employeesResult = await client.query(
+      `SELECT id, shift_id
+       FROM employees
+       WHERE company_id = $1 AND status = 'active'`,
+      [companyId]
+    );
+    const employees = employeesResult.rows;
+    if (employees.length === 0) {
+      return;
+    }
+
+    const shiftConfigMap = await getShiftConfigMap(
+      companyId,
+      employees.map((e) => e.shift_id)
+    );
+
+    const employeeIds = employees.map((e) => e.id);
+    const logsResult = await client.query(
+      `SELECT employee_id, punch_time, punch_type
+       FROM attendance_logs
+       WHERE company_id = $1
+         AND employee_id = ANY($2::bigint[])
+         AND punch_time >= $3
+         AND punch_time < $4
+       ORDER BY punch_time ASC`,
+      [companyId, employeeIds, dayStart.toISOString(), dayEnd.toISOString()]
+    );
+
+    const logsByEmployee = new Map();
+    for (const row of logsResult.rows) {
+      const eid = row.employee_id;
+      if (!logsByEmployee.has(eid)) logsByEmployee.set(eid, []);
+      logsByEmployee.get(eid).push({
+        punch_time: row.punch_time,
+        punch_type: (row.punch_type || '').toLowerCase(),
+      });
+    }
+
+    for (const emp of employees) {
+      const dayLogs = logsByEmployee.get(emp.id) || [];
+      if (!dayLogs.length) continue;
+      const sorted = [...dayLogs].sort(
+        (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
+      );
+      const last = sorted[sorted.length - 1];
+      if ((last.punch_type || '').toLowerCase() !== 'in') {
+        continue;
+      }
+
+      const shiftConfig =
+        shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
+
+      const shiftStartMs = getShiftStartMsForDate(
+        year,
+        month,
+        dayNum,
+        shiftConfig.startHour,
+        shiftConfig.startMinute
+      );
+      const shiftEndMs = shiftStartMs + (shiftConfig.shiftMs || 0);
+
+      if (isToday) {
+        const nowMs = now.getTime();
+        if (nowMs < shiftEndMs) {
+          continue;
+        }
+        if (shiftConfig.overtimeAllowed) {
+          continue;
+        }
+      } else if (shiftConfig.overtimeAllowed) {
+        const dayUtc = Date.UTC(year, month - 1, dayNum);
+        const todayUtc = Date.UTC(todayY, todayM - 1, todayD);
+        if (todayUtc <= dayUtc) {
+          continue;
+        }
+      }
+
+      const shiftEndDate = new Date(shiftEndMs);
+      await client.query(
+        `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id)
+         VALUES ($1, $2, $3, 'out', 'auto_out')
+         ON CONFLICT (employee_id, punch_time) DO NOTHING`,
+        [companyId, emp.id, shiftEndDate.toISOString()]
+      );
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Ensure auto OUT punches exist for the entire month for a specific employee.
+ * Used by payroll calculations that operate on a month at a time.
+ */
+async function ensureAutoOutForMonth(companyId, employeeId, year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) {
+    throw new AppError('Valid year and month are required', 400);
+  }
+  const daysInMonth = new Date(y, m, 0).getDate();
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    // Reuse company-wide helper – it is safe to call multiple times.
+    // It will only ever insert missing auto_out punches.
+    // We do not currently restrict to one employee to keep query logic simple.
+    // (attendance_logs inserts are idempotent via ON CONFLICT.)
+    // eslint-disable-next-line no-await-in-loop
+    await ensureAutoOutForDate(companyId, dateStr);
+  }
 }
 
 /**
@@ -236,6 +520,8 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
   const dayNum = parseInt(d, 10);
   const dayStart = new Date(Date.UTC(year, month - 1, dayNum, 0, 0, 0));
   const dayEnd = new Date(Date.UTC(year, month - 1, dayNum + 1, 0, 0, 0));
+
+  await ensureAutoOutForDate(companyId, dateStr);
 
   const client = await pool.connect();
   try {
@@ -270,7 +556,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
     const ids = employees.map((e) => e.id);
 
     const logsResult = await client.query(
-      `SELECT id, employee_id, punch_time, punch_type
+      `SELECT id, employee_id, punch_time, punch_type, device_id
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
@@ -290,18 +576,24 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
         id: row.id,
         punch_time: row.punch_time,
         punch_type: row.punch_type,
+        device_id: row.device_id,
       });
     }
 
     return employees.map((emp) => {
       const rawDayLogs = logsByEmployee.get(emp.id) || [];
       const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
-      const shiftConfig = shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
-      const status = computeDayStatus(dayLogs, shiftConfig, dayStart);
+      const shiftConfig =
+        shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
+      const status =
+        shiftConfig.attendanceMode === 'hours_based'
+          ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart)
+          : computeDayStatus(dayLogs, shiftConfig, dayStart);
       const punches = dayLogs.map((l) => ({
         id: l.id,
         punch_time: l.punch_time,
         punch_type: (l.punch_type || '').toLowerCase(),
+        device_id: l.device_id || null,
       }));
       return {
         employee_id: emp.id,
@@ -311,10 +603,25 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
         late: status.late,
         overtime_hours: Math.round(status.overtimeHours * 100) / 100,
         full_day: status.fullDay,
+        half_day: status.halfDay || false,
         left_during_lunch: status.leftDuringLunch,
         lunch_minutes: status.lunchMinutes,
         lunch_minutes_allotted: status.lunchMinutesAllotted,
         lunch_over_minutes: status.lunchOverMinutes,
+        attendance_mode: shiftConfig.attendanceMode,
+        required_hours_per_day:
+          shiftConfig.attendanceMode === 'hours_based'
+            ? shiftConfig.requiredHoursPerDay
+            : null,
+        total_hours_inside:
+          shiftConfig.attendanceMode === 'hours_based'
+            ? Math.round((status.totalHoursInside || 0) * 100) / 100
+            : null,
+        first_in_time: status.firstInTime
+          ? status.firstInTime.toISOString()
+          : null,
+        minutes_late:
+          status.minutesLate != null ? Math.round(status.minutesLate) : 0,
         punches,
       };
     });
@@ -399,7 +706,8 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
 
     const employeesWithDays = [];
     for (const emp of employees) {
-      const shiftConfig = shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
+      const shiftConfig =
+        shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       const byDay = logsByEmployeeAndDay.get(emp.id) || new Map();
       const days = [];
       for (let d = 1; d <= daysInMonth; d += 1) {
@@ -407,7 +715,10 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
         const key = dayStart.toISOString().slice(0, 10);
         const rawDayLogs = byDay.get(key) || [];
         const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
-        const status = computeDayStatus(dayLogs, shiftConfig, dayStart);
+        const status =
+          shiftConfig.attendanceMode === 'hours_based'
+            ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart)
+            : computeDayStatus(dayLogs, shiftConfig, dayStart);
         days.push({
           date: key,
           day: d,
@@ -415,10 +726,20 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
           late: status.late,
           overtime_hours: Math.round(status.overtimeHours * 100) / 100,
           full_day: status.fullDay,
+          half_day: status.halfDay || false,
           left_during_lunch: status.leftDuringLunch,
           lunch_minutes: status.lunchMinutes,
           lunch_minutes_allotted: status.lunchMinutesAllotted,
           lunch_over_minutes: status.lunchOverMinutes,
+          attendance_mode: shiftConfig.attendanceMode,
+          required_hours_per_day:
+            shiftConfig.attendanceMode === 'hours_based'
+              ? shiftConfig.requiredHoursPerDay
+              : null,
+          total_hours_inside:
+            shiftConfig.attendanceMode === 'hours_based'
+              ? Math.round((status.totalHoursInside || 0) * 100) / 100
+              : null,
         });
       }
       const presentDays = days.filter((d) => d.present).length;
@@ -739,4 +1060,6 @@ module.exports = {
   addManualFullDayBulk,
   updatePunch,
   deletePunch,
+  ensureAutoOutForDate,
+  ensureAutoOutForMonth,
 };

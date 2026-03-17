@@ -50,9 +50,10 @@ export default function AttendancePage() {
     selected_ids: [],
   });
   const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(todayStr());
 
   const { year, month } = monthYear;
-  const dateStr = todayStr();
+  const dateStr = selectedDate;
 
   const refreshAfterManual = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -190,6 +191,12 @@ export default function AttendancePage() {
   const goPrev = () => setMonthYear((m) => getMonthYear(-1));
   const goNext = () => setMonthYear((m) => getMonthYear(1));
 
+  const handleSelectDate = (dayNum) => {
+    const d = new Date(year, month - 1, dayNum);
+    const iso = d.toISOString().slice(0, 10);
+    setSelectedDate(iso);
+  };
+
   const handleManualSubmit = (e) => {
     e.preventDefault();
     const isBulk = manualForm.mode === 'full_day' && manualForm.bulk;
@@ -297,12 +304,19 @@ export default function AttendancePage() {
         </p>
       </header>
 
-      {/* Today summary card */}
+      {/* Daily summary card for selected date */}
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold text-slate-900">Today&apos;s summary</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">{dateStr}</p>
+            <h2 className="text-sm font-semibold text-slate-900">Daily summary</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Attendance for{' '}
+              {new Date(dateStr).toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+              })}
+            </p>
           </div>
           <button
             type="button"
@@ -360,10 +374,17 @@ export default function AttendancePage() {
           {todaySummary.total} active employees
         </p>
 
-        {/* Today's punch timings */}
+        {/* Punch timings for selected date */}
         {!dailyLoading && dailyData && dailyData.length > 0 && (
           <div className="mt-4 border-t border-slate-100 pt-4">
-            <h3 className="text-xs font-semibold text-slate-700 mb-2">Punch timings today</h3>
+            <h3 className="text-xs font-semibold text-slate-700 mb-2">
+              Punch timings for{' '}
+              {new Date(dateStr).toLocaleDateString('en-IN', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+            </h3>
             <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-100">
               <table className="w-full text-[11px]">
                 <thead className="bg-slate-50 sticky top-0">
@@ -388,10 +409,15 @@ export default function AttendancePage() {
                               minute: '2-digit',
                               hour12: true,
                             });
-                            return `${timeStr} ${(p.punch_type || '').toUpperCase()}`;
+                            const isAuto =
+                              (p.device_id || '').toLowerCase() === 'auto_out' &&
+                              (p.punch_type || '').toLowerCase() === 'out';
+                            const suffix = isAuto ? ' OUT (Auto — shift end)' : ` ${(p.punch_type || '').toUpperCase()}`;
+                            return `${timeStr}${suffix}`;
                           })
                           .join(', ')
                       : '—';
+                    const isHoursBased = row.attendance_mode === 'hours_based';
                     let dayStatus = 'Absent';
                     if (row.present) {
                       if (row.full_day) dayStatus = 'Full day';
@@ -406,9 +432,43 @@ export default function AttendancePage() {
                         ? 'text-blue-600'
                         : dayStatus.startsWith('Left')
                           ? 'text-rose-600'
-                          : row.present
-                            ? 'text-emerald-600'
-                            : 'text-slate-500';
+                        : row.present
+                          ? 'text-emerald-600'
+                          : 'text-slate-500';
+                    let hoursLabel = '';
+                    if (isHoursBased && row.total_hours_inside != null) {
+                      const total = Number(row.total_hours_inside || 0);
+                      const required = Number(row.required_hours_per_day || 0);
+                      const diffMinutes = required > 0 ? (total - required) * 60 : 0;
+                      const absDiffMin = Math.abs(Math.round(diffMinutes));
+                      const diffH = Math.floor(absDiffMin / 60);
+                      const diffM = absDiffMin % 60;
+                      const diffStr =
+                        absDiffMin === 0
+                          ? ''
+                          : diffH > 0
+                            ? ` by ${diffH}h ${diffM}m`
+                            : ` by ${diffM}m`;
+                      const met = total >= required && required > 0;
+                      hoursLabel = `Total inside: ${total.toFixed(2)}h — ${
+                        met ? 'Met' : 'Short'
+                      }${diffStr}`;
+                    }
+                    let firstPunchLabel = '';
+                    if (row.first_in_time) {
+                      const t = new Date(row.first_in_time);
+                      const timeStr = t.toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: true,
+                      });
+                      const minsLate = Number(row.minutes_late || 0);
+                      const lateStr =
+                        row.late && minsLate > 0
+                          ? `Late by ${minsLate} mins`
+                          : 'On time';
+                      firstPunchLabel = `First punch: ${timeStr} — ${lateStr}`;
+                    }
                     const lunch =
                       row.left_during_lunch
                         ? '—'
@@ -426,7 +486,21 @@ export default function AttendancePage() {
                         <td className="py-1.5 px-2 font-medium text-slate-800">{row.name}</td>
                         <td className="py-1.5 px-2 text-slate-600">{row.employee_code || '—'}</td>
                         <td className="py-1.5 px-2 text-slate-600">{timingsStr}</td>
-                        <td className={`py-1.5 px-2 font-medium ${statusCls}`}>{dayStatus}</td>
+                        <td className={`py-1.5 px-2 font-medium ${statusCls}`}>
+                          <div className="flex flex-col gap-0.5">
+                            <span>{dayStatus}</span>
+                            {isHoursBased && hoursLabel && (
+                              <span className="text-[10px] font-normal text-slate-600">
+                                {hoursLabel}
+                              </span>
+                            )}
+                            {isHoursBased && firstPunchLabel && (
+                              <span className="text-[10px] font-normal text-slate-600">
+                                {firstPunchLabel}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className={`py-1.5 px-2 ${lunchCls}`}>{lunch}</td>
                         <td className="py-1.5 px-2 text-right">
                           {punches.length > 0 && punches.some((p) => p.id) ? (
@@ -471,7 +545,7 @@ export default function AttendancePage() {
         )}
       </section>
 
-      {/* Monthly calendar */}
+        {/* Monthly calendar */}
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-sm font-semibold text-slate-900">Monthly view</h2>
@@ -548,6 +622,8 @@ export default function AttendancePage() {
                         dayNum === new Date().getDate() &&
                         month === new Date().getMonth() + 1 &&
                         year === new Date().getFullYear();
+                      const cellDate = new Date(year, month - 1, dayNum).toISOString().slice(0, 10);
+                      const isSelected = cellDate === selectedDate;
                       let bg = 'bg-slate-50 text-slate-400';
                       if (present) {
                         bg = late
@@ -557,11 +633,16 @@ export default function AttendancePage() {
                       if (isToday) {
                         bg += ' ring-2 ring-primary-400 ring-offset-1';
                       }
+                      if (isSelected) {
+                        bg += ' outline outline-[2px] outline-blue-600';
+                      }
                       const showSummary = !calendarGrid.isSingleEmployee && info?.total != null && info.total > 0;
                       return (
                         <td key={colIdx} className="p-1">
-                          <div
-                            className={`rounded-md py-1.5 text-center font-medium ${bg}`}
+                          <button
+                            type="button"
+                            onClick={() => handleSelectDate(dayNum)}
+                            className={`w-full rounded-md py-1.5 text-center font-medium transition ${bg}`}
                             title={
                               info
                                 ? `${present ? 'Present' : 'Absent'}${late ? ', Late' : ''}${info.total > 1 ? ` (${info.presentCount}/${info.total})` : ''}`
@@ -574,7 +655,7 @@ export default function AttendancePage() {
                                 {info.presentCount ?? 0}/{info.total}
                               </span>
                             )}
-                          </div>
+                          </button>
                         </td>
                       );
                     })}

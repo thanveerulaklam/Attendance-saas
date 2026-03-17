@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
+import PayslipModal from '../components/payroll/PayslipModal';
 
 const PAGE_SIZE = 10;
 const MONTHS = [
@@ -50,6 +51,7 @@ export default function PayrollPage() {
   const [breakdown, setBreakdown] = useState(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const [breakdownError, setBreakdownError] = useState(null);
+  const [attendanceMeta, setAttendanceMeta] = useState(null);
 
   const subscription = getSubscriptionStatus(company);
   const subscriptionAllowed = subscription.allowed;
@@ -131,8 +133,74 @@ export default function PayrollPage() {
         if (!res.ok) throw new Error('Failed to load details');
         return res.json();
       })
-      .then((json) => {
-        if (isMounted) setBreakdown(json.data);
+      .then(async (json) => {
+        if (!isMounted) return;
+        setBreakdown(json.data);
+        try {
+          const monthlyParams = new URLSearchParams({
+            year: String(detailRow.year),
+            month: String(detailRow.month),
+            employee_id: String(detailRow.employee_id),
+          });
+          const monthlyRes = await authFetch(`/api/attendance/monthly?${monthlyParams}`, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+          const empMeta = {
+            designation: null,
+            department: null,
+            join_date: null,
+            shift_name: null,
+            phone: null,
+            absentDates: [],
+            halfDayDates: [],
+            lateDetails: [],
+            lateCount: 0,
+            halfDayCount: 0,
+          };
+          if (monthlyRes.ok) {
+            const monthlyJson = await monthlyRes.json();
+            const data = monthlyJson.data;
+            const employee = Array.isArray(data?.employees) ? data.employees[0] : null;
+            if (employee) {
+              const days = employee.days || [];
+              empMeta.absentDates = days
+                .filter((d) => !d.present)
+                .map((d) => d.date);
+              empMeta.halfDayDates = days
+                .filter((d) => d.half_day)
+                .map((d) => d.date);
+              empMeta.halfDayCount = empMeta.halfDayDates.length;
+              empMeta.lateDetails = days
+                .filter((d) => d.late)
+                .map((d) => ({
+                  date: d.date,
+                  minutes: d.minutes_late || null,
+                }));
+              empMeta.lateCount = empMeta.lateDetails.length;
+            }
+          }
+          const empRes = await authFetch(`/api/employees/${detailRow.employee_id}`, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (empRes.ok) {
+            const empJson = await empRes.json();
+            const e = empJson.data;
+            if (e) {
+              empMeta.designation = e.designation || null;
+              empMeta.department = e.department || null;
+              empMeta.join_date = e.join_date || null;
+              empMeta.shift_name = e.shift_name || null;
+              empMeta.phone = e.phone || null;
+            }
+          }
+          if (isMounted) {
+            setAttendanceMeta(empMeta);
+          }
+        } catch {
+          if (isMounted) {
+            setAttendanceMeta(null);
+          }
+        }
       })
       .catch((err) => {
         if (isMounted) setBreakdownError(err.message || 'Unable to load breakdown');
@@ -153,6 +221,7 @@ export default function PayrollPage() {
     setDetailRow(null);
     setBreakdown(null);
     setBreakdownError(null);
+    setAttendanceMeta(null);
   };
 
   const activeCount = employees.filter((e) => e.status === 'active').length;
@@ -506,157 +575,14 @@ export default function PayrollPage() {
       )}
 
       {detailModalOpen && detailRow && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">
-          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-            <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-slate-900">
-                  {detailRow.employee_name}
-                  <span className="ml-1.5 text-slate-500 font-normal">({detailRow.employee_code})</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {new Date(detailRow.year, detailRow.month - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' })} — Payroll details
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeDetailModal}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="px-5 py-4 space-y-5">
-              {breakdownLoading ? (
-                <div className="space-y-2 py-6">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="h-8 rounded bg-slate-100 animate-pulse" />
-                  ))}
-                </div>
-              ) : breakdownError ? (
-                <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-                  {breakdownError}
-                </div>
-              ) : breakdown ? (
-                <>
-                  <section>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Attendance</h3>
-                    {breakdown.attendance?.workingDaysUpToDate && (
-                      <p className="text-[10px] text-slate-500 mb-1.5">
-                        Calculated as of {new Date(breakdown.attendance.workingDaysUpToDate + 'T12:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
-                      </p>
-                    )}
-                    <ul className="space-y-1.5 text-sm">
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Working days</span>
-                        <span className="font-medium text-slate-900">{breakdown.attendance?.workingDays ?? '—'}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Present days</span>
-                        <span className="font-medium text-slate-900">{breakdown.attendance?.presentDays ?? '—'}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Leaves (absent)</span>
-                        <span className="font-medium text-amber-700">{breakdown.attendance?.absenceDays ?? '—'}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Overtime (hours)</span>
-                        <span className="font-medium text-emerald-600">{Number(breakdown.attendance?.overtimeHours || 0) > 0 ? `+${Number(breakdown.attendance.overtimeHours).toFixed(2)}` : (breakdown.attendance?.overtimeHours ?? '—')}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Late (minutes)</span>
-                        <span className="font-medium text-slate-900">{breakdown.attendance?.lateMinutes != null ? Number(breakdown.attendance.lateMinutes).toFixed(0) : '—'}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Lunch over (minutes)</span>
-                        <span className="font-medium text-slate-900">{breakdown.attendance?.lunchOverMinutes != null ? Number(breakdown.attendance.lunchOverMinutes).toFixed(0) : '—'}</span>
-                      </li>
-                    </ul>
-                  </section>
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Earnings</h3>
-                    <ul className="space-y-1.5 text-sm">
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Basic salary</span>
-                        <span className="font-medium text-slate-900">{formatMoney(breakdown.breakdown?.basicSalary)}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Overtime pay</span>
-                        <span className="font-medium text-emerald-600">+{formatMoney(breakdown.breakdown?.overtimePay)}</span>
-                      </li>
-                      {Number(breakdown.breakdown?.travelAllowance) > 0 && (
-                        <li className="flex justify-between">
-                          <span className="text-slate-600">Travel allowance ({breakdown.breakdown?.presentWorkingDays ?? 0} working days)</span>
-                          <span className="font-medium text-emerald-600">+{formatMoney(breakdown.breakdown?.travelAllowance)}</span>
-                        </li>
-                      )}
-                      <li className="flex justify-between border-t border-slate-100 pt-1.5">
-                        <span className="text-slate-700 font-medium">Gross salary</span>
-                        <span className="font-semibold text-slate-900">{formatMoney(breakdown.breakdown?.grossSalary)}</span>
-                      </li>
-                    </ul>
-                  </section>
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Deductions &amp; Fines</h3>
-                    <ul className="space-y-1.5 text-sm">
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Absence (leaves)</span>
-                        <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.absenceDeduction)}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Late fine</span>
-                        <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.lateDeduction)}</span>
-                      </li>
-                      <li className="flex justify-between">
-                        <span className="text-slate-600">Lunch over fine</span>
-                        <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.lunchOverDeduction)}</span>
-                      </li>
-                      {Number(breakdown.breakdown?.esiDeduction) > 0 && (
-                        <li className="flex justify-between">
-                          <span className="text-slate-600">ESI</span>
-                          <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.esiDeduction)}</span>
-                        </li>
-                      )}
-                      <li className="flex justify-between border-t border-slate-100 pt-1.5">
-                        <span className="text-slate-700 font-medium">Total deductions</span>
-                        <span className="font-semibold text-amber-700">−{formatMoney(breakdown.breakdown?.totalDeductions)}</span>
-                      </li>
-                    </ul>
-                  </section>
-
-                  <section>
-                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Advance</h3>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-600">Salary advance (deducted)</span>
-                      <span className="font-medium text-amber-700">−{formatMoney(breakdown.breakdown?.salaryAdvance)}</span>
-                    </div>
-                  </section>
-
-                  {Number(breakdown.breakdown?.noLeaveIncentive) > 0 && (
-                    <section>
-                      <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Incentive</h3>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-600">No-leave incentive</span>
-                        <span className="font-medium text-emerald-600">+{formatMoney(breakdown.breakdown.noLeaveIncentive)}</span>
-                      </div>
-                    </section>
-                  )}
-
-                  <section className="border-t border-slate-200 pt-4">
-                    <div className="flex justify-between items-center text-base">
-                      <span className="font-semibold text-slate-900">Final payable salary</span>
-                      <span className="font-bold text-slate-900 text-lg">{formatMoney(breakdown.breakdown?.netSalary)}</span>
-                    </div>
-                  </section>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
+        <PayslipModal
+          open={detailModalOpen}
+          onClose={closeDetailModal}
+          company={company}
+          payrollRow={detailRow}
+          breakdown={breakdown}
+          attendanceDetails={attendanceMeta}
+        />
       )}
     </div>
   );

@@ -16,6 +16,8 @@ const emptyForm = () => ({
   lunch_over_deduction_amount: 0,
   no_leave_incentive: 0,
   paid_leave_days: 0,
+  attendance_mode: 'shift_based',
+  required_hours_per_day: 8,
 });
 
 export default function ShiftsPage() {
@@ -67,6 +69,7 @@ export default function ShiftsPage() {
       'lunch_over_deduction_amount',
       'no_leave_incentive',
       'paid_leave_days',
+      'required_hours_per_day',
     ];
     const value = numericFields.includes(field)
       ? Number(event.target.value || 0)
@@ -109,6 +112,8 @@ export default function ShiftsPage() {
       lunch_over_deduction_amount: shift.lunch_over_deduction_amount ?? 0,
       no_leave_incentive: shift.no_leave_incentive ?? 0,
       paid_leave_days: shift.paid_leave_days ?? 0,
+      attendance_mode: shift.attendance_mode || 'shift_based',
+      required_hours_per_day: shift.required_hours_per_day ?? 8,
     });
     setEditingShift(shift);
     setError(null);
@@ -182,6 +187,48 @@ export default function ShiftsPage() {
               <p className="text-[11px] font-medium text-slate-700">Add shift</p>
             </div>
             <div className="space-y-2">
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">Attendance Mode</p>
+                <p className="text-[10px] text-slate-500">
+                  Choose how attendance is calculated for this shift.
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  <label className="inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="attendance_mode_create"
+                      value="shift_based"
+                      checked={form.attendance_mode === 'shift_based'}
+                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'shift_based' }))}
+                      disabled={creating}
+                      className="mt-0.5 text-primary-600"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      <span className="font-medium">Shift Based</span>
+                      <span className="block text-[10px] text-slate-500">
+                        Traditional mode. Attendance calculated based on shift start/end time, late arrivals, and lunch breaks.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="attendance_mode_create"
+                      value="hours_based"
+                      checked={form.attendance_mode === 'hours_based'}
+                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'hours_based' }))}
+                      disabled={creating}
+                      className="mt-0.5 text-primary-600"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      <span className="font-medium">Hours Based</span>
+                      <span className="block text-[10px] text-slate-500">
+                        Flexible mode. Employee must spend minimum required hours inside the premises. Suitable for long shifts with multiple breaks.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </div>
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-slate-700">Name</label>
                 <input
@@ -228,22 +275,46 @@ export default function ShiftsPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
                   />
                 </div>
+                {form.attendance_mode === 'shift_based' && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Lunch minutes (allotted)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={form.lunch_minutes}
+                      onChange={handleChange('lunch_minutes')}
+                      disabled={creating}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                      placeholder="60"
+                      title="Max minutes staff can take for lunch break"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {form.attendance_mode === 'hours_based' && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
-                    Lunch minutes (allotted)
+                    Required Hours Per Day
                   </label>
                   <input
                     type="number"
-                    min={0}
-                    value={form.lunch_minutes}
-                    onChange={handleChange('lunch_minutes')}
+                    min={1}
+                    max={24}
+                    step={0.5}
+                    value={form.required_hours_per_day}
+                    onChange={handleChange('required_hours_per_day')}
                     disabled={creating}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="60"
-                    title="Max minutes staff can take for lunch break"
+                    placeholder="10"
                   />
+                  <p className="text-[10px] text-slate-500">
+                    Employee must be inside for at least this many hours to be marked present.
+                  </p>
                 </div>
-              </div>
+              )}
 
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">
@@ -335,24 +406,26 @@ export default function ShiftsPage() {
                 </div>
               </div>
 
-              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">
-                  Lunch over deduction (optional)
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  If staff take more than allotted lunch minutes, deduct this fixed amount per day (e.g. 3 days over = 3 × amount).
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Lunch over minutes</label>
-                    <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
-                    <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+              {form.attendance_mode === 'shift_based' && (
+                <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                  <p className="text-[11px] font-medium text-slate-700">
+                    Lunch over deduction (optional)
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    If staff take more than allotted lunch minutes, deduct this fixed amount per day (e.g. 3 days over = 3 × amount).
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Lunch over minutes</label>
+                      <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
+                      <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
             <div className="flex justify-end">
               <button
@@ -394,7 +467,19 @@ export default function ShiftsPage() {
                     className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 transition-all duration-200 hover:border-primary-100 hover:shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-sm font-semibold text-slate-900">{shift.shift_name}</h3>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900">{shift.shift_name}</h3>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                        {shift.attendance_mode === 'hours_based' ? 'Hours based' : 'Shift based'}
+                      </span>
+                      {shift.attendance_mode === 'hours_based' && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                          {(shift.required_hours_per_day ?? 8)}h / day
+                        </span>
+                      )}
+                    </div>
+                  </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         <button
                           type="button"

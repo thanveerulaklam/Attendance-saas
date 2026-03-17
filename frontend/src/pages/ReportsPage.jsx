@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { authFetch } from '../utils/api';
+import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -43,6 +44,11 @@ export default function ReportsPage() {
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(null);
   const [toast, setToast] = useState(null);
+  const [detailedLoading, setDetailedLoading] = useState(false);
+  const [detailedEmployeeId, setDetailedEmployeeId] = useState('');
+  const [detailedFrom, setDetailedFrom] = useState('');
+  const [detailedTo, setDetailedTo] = useState('');
+  const [includeWeekends, setIncludeWeekends] = useState(true);
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -174,6 +180,114 @@ export default function ReportsPage() {
             <li><strong>Payroll:</strong> Employee code, name, present/total days, overtime, gross, deductions, net salary.</li>
             <li><strong>Overtime:</strong> Employee code, name, overtime hours for the month.</li>
           </ul>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+        <h2 className="text-sm font-semibold text-slate-900">Detailed Attendance Report (PDF)</h2>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          Generate a printable PDF with per-employee summary and per-day attendance details.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                Period
+              </label>
+              <p className="text-[11px] text-slate-500">
+                Uses selected month/year above. Optionally override with a custom date range below.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                  From date (optional)
+                </label>
+                <input
+                  type="date"
+                  value={detailedFrom}
+                  onChange={(e) => setDetailedFrom(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-800"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                  To date (optional)
+                </label>
+                <input
+                  type="date"
+                  value={detailedTo}
+                  onChange={(e) => setDetailedTo(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-800"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                Include weekends
+              </label>
+              <label className="inline-flex items-center gap-2 text-[11px] text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={includeWeekends}
+                  onChange={(e) => setIncludeWeekends(e.target.checked)}
+                  className="rounded border-slate-300 text-blue-600"
+                />
+                <span>Include Saturdays and Sundays in detailed section</span>
+              </label>
+            </div>
+          </div>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                Employee
+              </label>
+              <p className="text-[11px] text-slate-500 mb-1">
+                Leave blank for all employees or enter a specific employee ID to focus on one person.
+              </p>
+              <input
+                type="text"
+                value={detailedEmployeeId}
+                onChange={(e) => setDetailedEmployeeId(e.target.value)}
+                placeholder="All employees"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] text-slate-800"
+              />
+            </div>
+            <div className="pt-2">
+              <button
+                type="button"
+                disabled={detailedLoading}
+                onClick={async () => {
+                  try {
+                    setDetailedLoading(true);
+                    setToast(null);
+                    await generateDetailedAttendancePdf({
+                      year,
+                      month,
+                      fromDate: detailedFrom || null,
+                      toDate: detailedTo || null,
+                      employeeId: detailedEmployeeId || null,
+                      includeWeekends,
+                    });
+                    setToast({ type: 'success', message: 'Detailed attendance PDF generated' });
+                  } catch (err) {
+                    setToast({
+                      type: 'error',
+                      message: err.message || 'Failed to generate detailed PDF',
+                    });
+                  } finally {
+                    setDetailedLoading(false);
+                  }
+                }}
+                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {detailedLoading ? 'Generating PDF...' : 'Generate detailed attendance PDF'}
+              </button>
+              <p className="mt-2 text-[10px] text-slate-500">
+                The PDF is generated in your browser using current attendance and company data. No file is stored on the server.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
     </div>
