@@ -31,17 +31,16 @@ No on-site software. The device sends each punch to your cloud over HTTP.
 On the biometric device:
 
 1. Go to **Communication → Cloud server setting** (or **Server** / **Push** – name may vary).
-2. **Server URL:** your cloud API webhook URL with the API key in the query:
+2. **Server URL:** your cloud API webhook URL (no query string), for example:
 
    ```text
-   https://your-api-domain.com/api/device/webhook?key=PASTE_DEVICE_API_KEY_HERE
+   https://your-api-domain.com/api/device/webhook
    ```
 
-   Example (replace with your real domain and key):
+   If the firmware supports sending custom HTTP headers, configure **one** of:
 
-   ```text
-   https://api.attendancesaas.com/api/device/webhook?key=a1b2c3d4...
-   ```
+   - `x-device-key: PASTE_DEVICE_API_KEY_HERE`
+   - `Authorization: Bearer PASTE_DEVICE_API_KEY_HERE`
 
 3. If the device has a **“Ping”** or **“Get request”** URL, set it to:
 
@@ -61,7 +60,7 @@ On the biometric device:
 
 The backend accepts:
 
-- **Query auth:** `?key=DEVICE_API_KEY` (use this in Cloud server URL).
+- **Header auth:** `x-device-key: DEVICE_API_KEY` (preferred) or `Authorization: Bearer DEVICE_API_KEY`.
 - **JSON (single punch):** `{ "userId": "26", "punchTime": "2026-02-27T10:30:00", "state": 0 }` — `state`: 0 = in, 1 = out.
 - **JSON (batch):** `{ "logs": [{ "employee_code": "26", "punch_time": "...", "punch_type": "in" }, ...] }`.
 - **ZKTeco tab-separated (text/plain):** `USER_PIN\tDATETIME\tSTATE\t...` — e.g. `26\t2026-02-27 10:30:00\t0\t15`.
@@ -112,7 +111,7 @@ Same as Part A: device User ID must match **employee_code** in the app.
 | Goal | Approach |
 |------|----------|
 | **Use app from anywhere** | Host frontend + backend in the **cloud** (e.g. Hostinger VPS). |
-| **Get punches into cloud** | Prefer **Direct Cloud Push**: set device “Cloud server” URL to `https://your-api.com/api/device/webhook?key=...`. No on-site software. |
+| **Get punches into cloud** | Prefer **Direct Cloud Push**: set device “Cloud server” URL to `https://your-api.com/api/device/webhook` and send the API key via header. No on-site software. |
 | **When Direct Push isn’t possible** | Use **Connector** at each site: run connector with `BACKEND_URL` = cloud API; device uses Ethernet only. |
 
 - **Direct Push:** Device → Internet → Your VPS → DB → Web app. No PC dependency, low support.
@@ -236,19 +235,18 @@ Forwarding   https://abc123.ngrok-free.app -> http://localhost:3000
 
 Copy the **HTTPS** URL (e.g. `https://abc123.ngrok-free.app`). This is your temporary public URL for the backend.
 
-### Step 4: Build the webhook URL with your API key
+### Step 4: Build the webhook URL and configure the API key
 
-Format:
-
-```text
-https://YOUR_NGROK_URL/api/device/webhook?key=YOUR_DEVICE_API_KEY
-```
-
-Example (replace with your ngrok host and key):
+Webhook URL (no query string):
 
 ```text
-https://abc123.ngrok-free.app/api/device/webhook?key=a1b2c3d4e5f6...
+https://YOUR_NGROK_URL/api/device/webhook
 ```
+
+Send the device API key via HTTP header if the firmware allows custom headers:
+
+- `x-device-key: YOUR_DEVICE_API_KEY`
+- or `Authorization: Bearer YOUR_DEVICE_API_KEY`
 
 Ping URL (if the device has a “Ping” or “Get request” field):
 
@@ -261,7 +259,7 @@ https://abc123.ngrok-free.app/api/device/ping
 On the biometric device:
 
 1. Go to **Communication → Cloud server setting** (or **Server** / **Push**).
-2. **Server URL:** paste the webhook URL from Step 4 (with `?key=...`).
+2. **Server URL:** paste the webhook URL from Step 4.
 3. **Ping URL (if available):** paste the ping URL.
 4. Save.
 
@@ -293,7 +291,7 @@ In the terminal where ngrok is running, press **Ctrl+C**. The URL will stop work
 
 # Quick reference
 
-- **Webhook (Direct Push):** `POST /api/device/webhook` — auth: `?key=API_KEY` or header `x-device-key`.
+- **Webhook (Direct Push):** `POST /api/device/webhook` — auth: header `x-device-key: API_KEY` or `Authorization: Bearer API_KEY`.
 - **Ping (device health):** `GET /api/device/ping` → responds `OK`.
 - **Connector push:** `POST /api/device/push` — auth: header `x-device-key`, body `{ "logs": [...] }`.
 - **Employee codes:** Must match between device User ID and app `employee_code`.

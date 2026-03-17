@@ -160,7 +160,7 @@ All other routes use middleware: `authenticate` → optional `requireRole(['admi
 
 - Each device has an **API key** (stored hashed or in plain per implementation). Connector or device uses this to authenticate:
   - **POST /api/device/push:** Header `x-device-key: <API_KEY>`. Backend resolves device by key, validates `company_id`, then processes logs and updates `last_seen_at`.
-  - **POST /api/device/webhook:** Query `?key=<API_KEY>` or equivalent header. Same resolution and processing.
+  - **POST /api/device/webhook:** Header `x-device-key: <API_KEY>` (preferred) or `Authorization: Bearer <API_KEY>`. Same resolution and processing.
 - Device push and webhook are rate-limited (e.g. 200 req/min per IP). Subscription check: if company subscription is expired (past grace), device push can be rejected so punches are not stored (align with business rules).
 
 ---

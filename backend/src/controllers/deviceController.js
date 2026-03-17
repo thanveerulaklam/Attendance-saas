@@ -268,15 +268,20 @@ function parseWebhookBody(body, contentType, rawBody) {
 /**
  * POST /api/device/webhook
  * Direct Cloud Push: device sends punches to your cloud URL.
- * API key: query key=, or header x-device-key, or body.api_key.
+ * API key: header x-device-key (primary) or Authorization: Bearer <API_KEY>.
  * Body: JSON (our format or vendor single-punch) or ZKTeco tab-separated text.
  */
 async function deviceWebhook(req, res, next) {
-  const apiKey = req.query.key || req.headers['x-device-key'] || req.body?.api_key;
+  const headerKey = req.headers['x-device-key'];
+  const authHeader = req.headers.authorization;
+  const bearerKey = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  const apiKey = headerKey || bearerKey;
 
   try {
     if (!apiKey) {
-      throw new AppError('Device API key is required (use ?key= or x-device-key or body.api_key)', 401);
+      throw new AppError('Device API key is required (use x-device-key header or Authorization: Bearer <API_KEY>)', 401);
     }
 
     const contentType = req.headers['content-type'] || '';

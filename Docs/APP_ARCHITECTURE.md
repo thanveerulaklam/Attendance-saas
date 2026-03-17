@@ -76,7 +76,7 @@ Build a **cloud-based multi-tenant attendance and payroll management system** fo
 
 ```
 Biometric Device (Cloud server setting)
-       ↓ HTTP POST /api/device/webhook?key=...
+       ↓ HTTP POST /api/device/webhook  (with API key in header)
 Express Backend
        ↓
 PostgreSQL (Single DB, Multi-tenant)
@@ -330,7 +330,7 @@ Derived from real data (no manual checkboxes).
 
 ## Endpoints
 
-* **Direct Cloud Push (recommended):** `POST /api/device/webhook` — device sends punches to cloud; auth via `?key=API_KEY` or header; accepts JSON or ZKTeco tab-separated payloads.
+* **Direct Cloud Push (recommended):** `POST /api/device/webhook` — device sends punches to cloud; auth via `x-device-key: API_KEY` or `Authorization: Bearer API_KEY`; accepts JSON or ZKTeco tab-separated payloads.
 * **Ping:** `GET /api/device/ping` — device connectivity check (returns OK).
 * **Connector push (optional):** `POST /api/device/push` — on-site connector sends bulk logs; auth via `x-device-key`; body `{ logs: [...] }`.
 
