@@ -13,7 +13,6 @@ import AttendancePage from './pages/AttendancePage';
 import ReportsPage from './pages/ReportsPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
-import AdminPage from './pages/AdminPage';
 
 function RootRedirect() {
   const { isAuthenticated, loading } = useAuth();
@@ -29,7 +28,6 @@ function App() {
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
-          <Route path="/admin" element={<AdminPage />} />
           <Route
             element={
               <ProtectedRoute>

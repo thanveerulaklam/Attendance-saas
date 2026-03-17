@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PunchPay Super Admin Portal</title>
+    <!-- Access: punchpay.in/admin-portal.html -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      .container {
+        max-width: 900px;
+        margin: 40px auto;
+        padding: 24px;
+        background: #020617;
+        border-radius: 16px;
+        border: 1px solid #1f2937;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.7);
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin: 0 0 4px;
+      }
+      .subtitle {
+        font-size: 0.85rem;
+        color: #9ca3af;
+        margin-bottom: 16px;
+      }
+      .section {
+        margin-top: 20px;
+        padding-top: 16px;
+        border-top: 1px solid #1f2937;
+      }
+      label {
+        display: block;
+        font-size: 0.8rem;
+        margin-bottom: 4px;
+        color: #9ca3af;
+      }
+      input,
+      select,
+      button,
+      textarea {
+        font-family: inherit;
+        font-size: 0.85rem;
+      }
+      input,
+      select,
+      textarea {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid #374151;
+        background: #020617;
+        color: #e5e7eb;
+      }
+      textarea {
+        resize: vertical;
+        min-height: 60px;
+      }
+      button {
+        border-radius: 999px;
+        border: none;
+        padding: 6px 14px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: #2563eb;
+        color: #f9fafb;
+      }
+      .btn-secondary {
+        background: #111827;
+        color: #e5e7eb;
+        border: 1px solid #374151;
+      }
+      .btn-danger {
+        background: #b91c1c;
+        color: #f9fafb;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: flex-end;
+      }
+      .col {
+        flex: 1 1 0;
+        min-width: 160px;
+      }
+      .table-wrapper {
+        margin-top: 12px;
+        border-radius: 12px;
+        border: 1px solid #1f2937;
+        overflow: auto;
+        background: #020617;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+      }
+      th,
+      td {
+        padding: 6px 8px;
+        border-bottom: 1px solid #111827;
+      }
+      th {
+        text-align: left;
+        background: #020617;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      tr:nth-child(even) td {
+        background: #020617;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.7rem;
+      }
+      .pill-pending {
+        background: #f59e0b33;
+        color: #fbbf24;
+      }
+      .pill-active {
+        background: #22c55e33;
+        color: #4ade80;
+      }
+      .pill-declined {
+        background: #f9737333;
+        color: #fb7185;
+      }
+      .pill-locked {
+        background: #6b728033;
+        color: #9ca3af;
+      }
+      .badge {
+        display: inline-block;
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 6px;
+        border: 1px solid #374151;
+        color: #9ca3af;
+      }
+      .muted {
+        color: #6b7280;
+      }
+      .toast {
+        margin-top: 12px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        font-size: 0.8rem;
+      }
+      .toast-success {
+        background: #22c55e26;
+        color: #4ade80;
+        border: 1px solid #22c55e40;
+      }
+      .toast-error {
+        background: #ef444426;
+        color: #fecaca;
+        border: 1px solid #ef444440;
+      }
+      .small {
+        font-size: 0.75rem;
+      }
+      .mt-2 {
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>PunchPay Super Admin Portal</h1>
+      <div class="subtitle">
+        For provider use only — manages pending registrations, billing metadata, and
+        company status. Secret is never stored; enter it for each action.
+      </div>
+
+      <div id="toast"></div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <label for="admin-secret">Admin approval secret</label>
+            <input
+              id="admin-secret"
+              type="password"
+              placeholder="Value of ADMIN_APPROVAL_SECRET"
+              autocomplete="off"
+            />
+          </div>
+          <div class="col" style="flex: 0 0 auto">
+            <button id="btn-refresh" class="btn-primary">Load data</button>
+          </div>
+          <div class="col" style="flex: 0 0 auto">
+            <span class="badge">Access: punchpay.in/admin-portal.html</span>
+          </div>
+        </div>
+        <div class="small muted mt-2">
+          The secret is used only to sign each request and is not stored in localStorage,
+          sessionStorage, or cookies.
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <strong class="small">System overview</strong>
+            <div id="overview-summary" class="small muted mt-2">
+              No data loaded yet.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <strong class="small">Pending registrations</strong>
+          </div>
+        </div>
+        <div id="pending-wrapper" class="table-wrapper mt-2">
+          <table>
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Company email</th>
+                <th>Admin email</th>
+                <th>Created</th>
+                <th style="text-align: right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pending-body">
+              <tr>
+                <td colspan="5" class="muted small">No data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <strong class="small">All companies</strong>
+          </div>
+        </div>
+        <div id="companies-wrapper" class="table-wrapper mt-2">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Company</th>
+                <th>Contact</th>
+                <th>Status</th>
+                <th>Plan / billing</th>
+                <th>Staff</th>
+                <th>Subscription</th>
+                <th style="text-align: right">Controls</th>
+              </tr>
+            </thead>
+            <tbody id="companies-body">
+              <tr>
+                <td colspan="8" class="muted small">No data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        function getSecret() {
+          var input = document.getElementById("admin-secret");
+          if (!input) return "";
+          return (input.value || "").trim();
+        }
+
+        function clearSecret() {
+          var input = document.getElementById("admin-secret");
+          if (input) input.value = "";
+        }
+
+        function showToast(type, message) {
+          var container = document.getElementById("toast");
+          if (!container) return;
+          container.innerHTML = "";
+          if (!message) return;
+          var div = document.createElement("div");
+          div.className =
+            "toast " + (type === "error" ? "toast-error" : "toast-success");
+          div.textContent = message;
+          container.appendChild(div);
+          setTimeout(function () {
+            if (container.firstChild === div) {
+              container.removeChild(div);
+            }
+          }, 6000);
+        }
+
+        function callAdmin(path, options) {
+          var secret = getSecret();
+          if (!secret) {
+            showToast("error", "Enter ADMIN_APPROVAL_SECRET before performing actions.");
+            return Promise.reject(new Error("Missing secret"));
+          }
+
+          var headers = {
+            "Content-Type": "application/json",
+            "X-Approval-Secret": secret,
+          };
+
+          var opts = Object.assign({}, options || {}, { headers: headers });
+
+          return fetch("/api/admin" + path, opts).then(function (res) {
+            if (res.status === 401) {
+              showToast("error", "Invalid admin secret.");
+              return res
+                .json()
+                .catch(function () {
+                  return {};
+                })
+                .then(function () {
+                  return Promise.reject(new Error("Unauthorized"));
+                });
+            }
+            if (res.status === 503) {
+              showToast(
+                "error",
+                "Server: set ADMIN_APPROVAL_SECRET in backend .env and restart the API."
+              );
+              return res
+                .json()
+                .catch(function () {
+                  return {};
+                })
+                .then(function () {
+                  return Promise.reject(new Error("Not configured"));
+                });
+            }
+            return res
+              .json()
+              .catch(function () {
+                return {};
+              })
+              .then(function (json) {
+                if (!res.ok) {
+                  var msg = json && json.message ? json.message : "Request failed";
+                  showToast("error", msg);
+                  return Promise.reject(new Error(msg));
+                }
+                return json;
+              });
+          });
+        }
+
+        function formatDateTime(iso) {
+          if (!iso) return "—";
+          var d = new Date(iso);
+          if (isNaN(d.getTime())) return iso;
+          return d.toLocaleString();
+        }
+
+        function formatDate(iso) {
+          if (!iso) return "—";
+          var d = new Date(iso);
+          if (isNaN(d.getTime())) return iso;
+          return d.toLocaleDateString();
+        }
+
+        function renderOverview(data) {
+          var el = document.getElementById("overview-summary");
+          if (!el) return;
+          if (!data || !data.totals) {
+            el.textContent = "No overview data available.";
+            return;
+          }
+          var t = data.totals;
+          el.innerHTML =
+            '<span class="small">Total companies: ' +
+            (t.totalCompanies || 0) +
+            " | Active: " +
+            (t.activeCompanies || 0) +
+            " | Pending: " +
+            (t.pendingCompanies || 0) +
+            " | Declined: " +
+            (t.declinedCompanies || 0) +
+            " | Locked: " +
+            (t.lockedCompanies || 0) +
+            "</span>";
+        }
+
+        function renderPending(list) {
+          var body = document.getElementById("pending-body");
+          if (!body) return;
+          body.innerHTML = "";
+          if (!list || !list.length) {
+            var tr = document.createElement("tr");
+            var td = document.createElement("td");
+            td.colSpan = 5;
+            td.className = "muted small";
+            td.textContent =
+              "No pending registrations. When someone registers, they will appear here.";
+            tr.appendChild(td);
+            body.appendChild(tr);
+            return;
+          }
+
+          list.forEach(function (row) {
+            var tr = document.createElement("tr");
+
+            var tdName = document.createElement("td");
+            tdName.textContent = row.name || "—";
+            tr.appendChild(tdName);
+
+            var tdEmail = document.createElement("td");
+            tdEmail.textContent = row.email || "—";
+            tr.appendChild(tdEmail);
+
+            var tdAdminEmail = document.createElement("td");
+            tdAdminEmail.textContent = row.admin_email || "—";
+            tr.appendChild(tdAdminEmail);
+
+            var tdCreated = document.createElement("td");
+            tdCreated.textContent = formatDateTime(row.created_at);
+            tr.appendChild(tdCreated);
+
+            var tdActions = document.createElement("td");
+            tdActions.style.textAlign = "right";
+
+            var btnApprove = document.createElement("button");
+            btnApprove.className = "btn-primary small";
+            btnApprove.textContent = "Approve";
+            btnApprove.onclick = function () {
+              callAdmin("/approve-company", {
+                method: "POST",
+                body: JSON.stringify({ company_id: row.id }),
+              })
+                .then(function (json) {
+                  var msg =
+                    (json && json.message) ||
+                    'Company "' + (row.name || row.id) + '" approved.';
+                  showToast("success", msg);
+                  refreshAll();
+                })
+                .catch(function () {});
+            };
+
+            var btnDecline = document.createElement("button");
+            btnDecline.className = "btn-secondary small";
+            btnDecline.textContent = "Decline";
+            btnDecline.style.marginLeft = "4px";
+            btnDecline.onclick = function () {
+              var confirmMsg =
+                'Decline registration for "' +
+                (row.name || "company #" + row.id) +
+                '"?';
+              if (!window.confirm(confirmMsg)) return;
+              callAdmin("/decline-company", {
+                method: "POST",
+                body: JSON.stringify({ company_id: row.id }),
+              })
+                .then(function (json) {
+                  var msg =
+                    (json && json.message) ||
+                    'Registration for "' + (row.name || row.id) + '" declined.';
+                  showToast("success", msg);
+                  refreshAll();
+                })
+                .catch(function () {});
+            };
+
+            tdActions.appendChild(btnApprove);
+            tdActions.appendChild(btnDecline);
+            tr.appendChild(tdActions);
+
+            body.appendChild(tr);
+          });
+        }
+
+        function renderCompanies(list) {
+          var body = document.getElementById("companies-body");
+          if (!body) return;
+          body.innerHTML = "";
+
+          if (!list || !list.length) {
+            var tr = document.createElement("tr");
+            var td = document.createElement("td");
+            td.colSpan = 8;
+            td.className = "muted small";
+            td.textContent = "No companies found.";
+            tr.appendChild(td);
+            body.appendChild(tr);
+            return;
+          }
+
+          list.forEach(function (c) {
+            var tr = document.createElement("tr");
+
+            function makeTd(text) {
+              var td = document.createElement("td");
+              td.textContent = text;
+              return td;
+            }
+
+            tr.appendChild(makeTd(c.id));
+            tr.appendChild(makeTd(c.name || "—"));
+
+            var tdContact = document.createElement("td");
+            tdContact.innerHTML =
+              (c.email || "—") +
+              "<br/><span class='muted small'>" +
+              (c.phone || "") +
+              "</span>";
+            tr.appendChild(tdContact);
+
+            var tdStatus = document.createElement("td");
+            var pill = document.createElement("span");
+            pill.className = "pill ";
+            var status = c.status || "unknown";
+            if (status === "active") pill.className += "pill-active";
+            else if (status === "pending") pill.className += "pill-pending";
+            else if (status === "declined") pill.className += "pill-declined";
+            else if (status === "locked") pill.className += "pill-locked";
+            else pill.className += "pill-locked";
+            pill.textContent = status;
+            tdStatus.appendChild(pill);
+            tr.appendChild(tdStatus);
+
+            var tdPlan = document.createElement("td");
+            tdPlan.innerHTML =
+              "<div class='small'>" +
+              (c.plan_code || "starter") +
+              (c.billing_cycle ? " • " + c.billing_cycle : "") +
+              "</div>" +
+              "<div class='small muted'>Next: " +
+              (c.next_billing_date ? formatDate(c.next_billing_date) : "—") +
+              "</div>" +
+              "<div class='small muted'>Payment: " +
+              (c.payment_status || "paid") +
+              "</div>";
+            tr.appendChild(tdPlan);
+
+            var tdStaff = document.createElement("td");
+            tdStaff.innerHTML =
+              "<div class='small'>" +
+              (c.active_staff || 0) +
+              " active</div><div class='small muted'>" +
+              (c.total_staff || 0) +
+              " total</div>";
+            tr.appendChild(tdStaff);
+
+            var tdSub = document.createElement("td");
+            tdSub.innerHTML =
+              "<div class='small'>" +
+              (c.subscription_start_date && c.subscription_end_date
+                ? formatDate(c.subscription_start_date) +
+                  " → " +
+                  formatDate(c.subscription_end_date)
+                : "Not set") +
+              "</div><div class='small muted'>" +
+              (c.is_active === false ? "Inactive" : "Active/within grace") +
+              "</div>";
+            tr.appendChild(tdSub);
+
+            var tdControls = document.createElement("td");
+            tdControls.style.textAlign = "right";
+
+            var isLocked = c.status === "locked";
+            var lockBtn = document.createElement("button");
+            lockBtn.className = "btn-secondary small";
+            lockBtn.textContent = isLocked ? "Unlock" : "Lock";
+            lockBtn.onclick = function () {
+              var action = isLocked ? "unlock" : "lock";
+              if (
+                action === "lock" &&
+                !window.confirm(
+                  'Lock "' +
+                    (c.name || "Company #" + c.id) +
+                    '"? Users will no longer be able to log in until you unlock them.'
+                )
+              ) {
+                return;
+              }
+
+              callAdmin("/" + (action === "lock" ? "lock-company" : "unlock-company"), {
+                method: "POST",
+                body: JSON.stringify({ company_id: c.id }),
+              })
+                .then(function (json) {
+                  var msg =
+                    (json && json.message) ||
+                    "Company " + (action === "lock" ? "locked" : "unlocked") + ".";
+                  showToast("success", msg);
+                  refreshAll();
+                })
+                .catch(function () {});
+            };
+
+            var editBtn = document.createElement("button");
+            editBtn.className = "btn-secondary small";
+            editBtn.style.marginLeft = "4px";
+            editBtn.textContent = "Billing…";
+            editBtn.onclick = function () {
+              openBillingDialog(c);
+            };
+
+            tdControls.appendChild(lockBtn);
+            tdControls.appendChild(editBtn);
+            tr.appendChild(tdControls);
+
+            body.appendChild(tr);
+          });
+        }
+
+        function openBillingDialog(company) {
+          var secret = getSecret();
+          if (!secret) {
+            showToast("error", "Enter ADMIN_APPROVAL_SECRET before editing billing.");
+            return;
+          }
+
+          var name = company.name || "Company #" + company.id;
+          var plan = window.prompt(
+            'Plan code for "' +
+              name +
+              '" (current: ' +
+              (company.plan_code || "starter") +
+              ")",
+            company.plan_code || "starter"
+          );
+          if (plan === null) return;
+
+          var billingCycle = window.prompt(
+            'Billing cycle (monthly/annual) for "' +
+              name +
+              '" (current: ' +
+              (company.billing_cycle || "monthly") +
+              ")",
+            company.billing_cycle || "monthly"
+          );
+          if (billingCycle === null) return;
+
+          var nextBilling = window.prompt(
+            'Next billing date (YYYY-MM-DD) for "' +
+              name +
+              '" (current: ' +
+              (company.next_billing_date || "not set") +
+              ")",
+            company.next_billing_date || ""
+          );
+          if (nextBilling === null) return;
+
+          var paymentStatus = window.prompt(
+            'Payment status (trial/paid/pending/overdue) for "' +
+              name +
+              '" (current: ' +
+              (company.payment_status || "paid") +
+              ")",
+            company.payment_status || "paid"
+          );
+          if (paymentStatus === null) return;
+
+          var isActiveInput = window.prompt(
+            'Subscription active? (yes/no) for "' +
+              name +
+              '" (current: ' +
+              (company.is_active === false ? "no" : "yes") +
+              ")",
+            company.is_active === false ? "no" : "yes"
+          );
+          if (isActiveInput === null) return;
+          var isActive = String(isActiveInput || "").toLowerCase().startsWith("y");
+
+          var body = {
+            company_id: company.id,
+            plan_code: plan || company.plan_code || "starter",
+            billing_cycle: billingCycle || company.billing_cycle || "monthly",
+            next_billing_date: nextBilling || "",
+            payment_status: paymentStatus || company.payment_status || "paid",
+            is_active: isActive,
+          };
+
+          callAdmin("/company-billing", {
+            method: "POST",
+            body: JSON.stringify(body),
+          })
+            .then(function (json) {
+              var msg =
+                (json && json.message) || "Billing details updated for " + name + ".";
+              showToast("success", msg);
+              refreshAll();
+            })
+            .catch(function () {});
+        }
+
+        function refreshAll() {
+          var secret = getSecret();
+          if (!secret) {
+            return;
+          }
+          Promise.all([
+            callAdmin("/overview", { method: "GET" }),
+            callAdmin("/pending-companies", { method: "GET" }),
+          ])
+            .then(function (results) {
+              var overviewJson = results[0] && results[0].data;
+              var pendingJson = results[1] && results[1].data;
+              if (overviewJson) {
+                renderOverview(overviewJson);
+                renderCompanies(overviewJson.companies || []);
+              }
+              if (pendingJson) {
+                renderPending(pendingJson);
+              }
+            })
+            .catch(function () {});
+        }
+
+        var refreshBtn = document.getElementById("btn-refresh");
+        if (refreshBtn) {
+          refreshBtn.addEventListener("click", function () {
+            refreshAll();
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
+
