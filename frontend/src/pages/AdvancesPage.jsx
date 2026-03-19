@@ -1,270 +1,387 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
 
-const MONTHS = Array.from({ length: 12 }, (_, i) => ({
-  value: String(i + 1),
-  label: new Date(2000, i, 1).toLocaleString('default', { month: 'long' }),
-}));
+const TABS = ['active', 'monthly', 'history'];
 
-function currentYear() {
-  return new Date().getFullYear();
+function formatMoney(n) {
+  if (n == null || Number.isNaN(Number(n))) return '0';
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Number(n));
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(`${dateStr}T12:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function monthLabel(year, month) {
+  if (!year || !month) return '—';
+  return new Date(Number(year), Number(month) - 1, 1).toLocaleString('default', { month: 'short', year: 'numeric' });
+}
+
+function statusBadge(status) {
+  const map = {
+    active: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+    cleared: 'bg-slate-100 text-slate-700 border-slate-200',
+    waived: 'bg-blue-50 text-blue-700 border-blue-100',
+    on_hold: 'bg-amber-50 text-amber-700 border-amber-100',
+  };
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${map[status] || map.active}`}>{status}</span>;
 }
 
 export default function AdvancesPage() {
-  const [year, setYear] = useState(currentYear());
-  const [month, setMonth] = useState(String(new Date().getMonth() + 1));
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const [tab, setTab] = useState('active');
   const [employees, setEmployees] = useState([]);
-  const [advances, setAdvances] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [loans, setLoans] = useState([]);
+  const [monthlyRepayments, setMonthlyRepayments] = useState([]);
+  const [expandedLoanId, setExpandedLoanId] = useState(null);
+  const [expandedLoan, setExpandedLoan] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
-  const [savingId, setSavingId] = useState(null);
-  const [localAmounts, setLocalAmounts] = useState({});
-  const [localNotes, setLocalNotes] = useState({});
-  const [localDates, setLocalDates] = useState({});
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideRepayment, setOverrideRepayment] = useState(null);
+  const [skipPending, setSkipPending] = useState(null);
+  const [form, setForm] = useState({
+    employee_id: '',
+    loan_amount: '',
+    loan_date: new Date().toISOString().slice(0, 10),
+    reason: '',
+    total_installments: 1,
+    monthly_installment: '',
+    notes: '',
+  });
+  const [overrideForm, setOverrideForm] = useState({
+    repayment_amount: '',
+    override_reason: '',
+  });
 
-  useEffect(() => {
-    let isMounted = true;
-    authFetch('/api/employees?limit=200', { headers: { 'Content-Type': 'application/json' } })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load employees'))))
-      .then((json) => {
-        if (isMounted) setEmployees(json.data?.data || []);
-      })
-      .catch(() => {});
-    return () => { isMounted = false; };
-  }, []);
+  const activeLoans = useMemo(() => loans.filter((l) => l.status === 'active' || l.status === 'on_hold'), [loans]);
+  const historyLoans = useMemo(() => loans.filter((l) => l.status === 'cleared' || l.status === 'waived'), [loans]);
+  const activeLoanWarning = useMemo(() => {
+    if (!form.employee_id) return null;
+    return activeLoans.find((l) => Number(l.employee_id) === Number(form.employee_id)) || null;
+  }, [activeLoans, form.employee_id]);
 
-  useEffect(() => {
-    let isMounted = true;
+  const totalMonthlyDeduction = useMemo(
+    () => monthlyRepayments.reduce((sum, r) => sum + Number(r.repayment_amount || 0), 0),
+    [monthlyRepayments]
+  );
+
+  const loadAll = useCallback(async () => {
     setLoading(true);
-    setError(null);
-    const params = new URLSearchParams();
-    params.set('year', String(year));
-    params.set('month', month);
-
-    authFetch(`/api/advances?${params}`, { headers: { 'Content-Type': 'application/json' } })
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load advances');
-        return res.json();
-      })
-      .then((json) => {
-        if (!isMounted) return;
-        const list = Array.isArray(json.data) ? json.data : [];
-        setAdvances(list);
-        const byEmp = {};
-        const notesByEmp = {};
-        const datesByEmp = {};
-        list.forEach((a) => {
-          byEmp[a.employee_id] = a.amount;
-          notesByEmp[a.employee_id] = a.note || '';
-          datesByEmp[a.employee_id] = a.advance_date || null;
-        });
-        setLocalAmounts(byEmp);
-        setLocalNotes(notesByEmp);
-        setLocalDates(datesByEmp);
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err.message || 'Unable to load advances');
-          setAdvances([]);
-          setLocalAmounts({});
-          setLocalNotes({});
-          setLocalDates({});
-        }
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false);
-      });
-    return () => { isMounted = false; };
-  }, [year, month]);
-
-  const activeEmployees = employees.filter((e) => e.status === 'active');
-
-  const handleAmountChange = (employeeId, value) => {
-    const parsed = value === '' ? '' : Math.max(0, Number(value));
-    setLocalAmounts((prev) => ({
-      ...prev,
-      [employeeId]: parsed === '' ? '' : parsed,
-    }));
-  };
-
-  const handleNoteChange = (employeeId, value) => {
-    setLocalNotes((prev) => ({ ...prev, [employeeId]: value }));
-  };
-
-  const saveAdvance = async (employeeId) => {
-    const amount = localAmounts[employeeId];
-    const numAmount = amount === '' ? 0 : Number(amount);
-    const note = localNotes[employeeId] || null;
-
-    setSavingId(employeeId);
-    setToast(null);
     try {
-      const res = await authFetch('/api/advances', {
+      const params = new URLSearchParams({ year: String(currentYear), month: String(currentMonth) });
+      const [empRes, loansRes, monthlyRes] = await Promise.all([
+        authFetch('/api/employees?limit=300', { headers: { 'Content-Type': 'application/json' } }),
+        authFetch('/api/advance-loans', { headers: { 'Content-Type': 'application/json' } }),
+        authFetch(`/api/advance-loans/monthly?${params}`, { headers: { 'Content-Type': 'application/json' } }),
+      ]);
+      const empJson = empRes.ok ? await empRes.json() : { data: { data: [] } };
+      const loansJson = loansRes.ok ? await loansRes.json() : { data: [] };
+      const monthlyJson = monthlyRes.ok ? await monthlyRes.json() : { data: [] };
+      setEmployees(empJson.data?.data || []);
+      setLoans(Array.isArray(loansJson.data) ? loansJson.data : []);
+      setMonthlyRepayments(Array.isArray(monthlyJson.data) ? monthlyJson.data : []);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to load advance loans' });
+    } finally {
+      setLoading(false);
+    }
+  }, [currentYear, currentMonth]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  useEffect(() => {
+    const amount = Number(form.loan_amount || 0);
+    const installments = Math.max(1, Number(form.total_installments || 1));
+    if (!amount) return;
+    const calculated = Math.ceil((amount / installments) * 100) / 100;
+    setForm((prev) => ({ ...prev, monthly_installment: prev.monthly_installment || String(calculated) }));
+  }, [form.loan_amount, form.total_installments]);
+
+  async function handleCreateLoan(force = false) {
+    try {
+      setCreateError('');
+      const loanDate = form.loan_date || new Date().toISOString().split('T')[0];
+      const parsedLoanDate = new Date(`${loanDate}T00:00:00`);
+      if (Number.isNaN(parsedLoanDate.getTime())) {
+        setCreateError('Please select a valid loan date');
+        return;
+      }
+
+      const employeeId = parseInt(form.employee_id, 10);
+      if (Number.isNaN(employeeId) || employeeId < 1) {
+        setCreateError('Please select an employee');
+        return;
+      }
+
+      const installments = parseInt(form.total_installments, 10);
+      if (Number.isNaN(installments) || installments < 1) {
+        setCreateError('Please enter number of installments');
+        return;
+      }
+
+      const monthlyAmount = parseFloat(form.monthly_installment);
+      if (Number.isNaN(monthlyAmount) || monthlyAmount <= 0) {
+        setCreateError('Please enter monthly installment amount');
+        return;
+      }
+
+      const loanAmount = parseFloat(form.loan_amount);
+      if (Number.isNaN(loanAmount) || loanAmount <= 0) {
+        setCreateError('Please enter a valid loan amount');
+        return;
+      }
+
+      const res = await authFetch('/api/advance-loans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           employee_id: employeeId,
-          year: Number(year),
-          month: Number(month),
-          amount: numAmount,
-          note: note || undefined,
-          advance_date: new Date().toISOString().slice(0, 10),
+          loan_amount: loanAmount,
+          loan_date: loanDate,
+          reason: form.reason || null,
+          total_installments: installments,
+          monthly_installment: monthlyAmount,
+          notes: form.notes || null,
+          allow_multiple_loans: force,
         }),
       });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.message || 'Failed to save advance');
-      }
-      const json = await res.json();
-      const rec = json.data;
-      setAdvances((prev) => {
-        const rest = prev.filter((a) => a.employee_id !== employeeId);
-        return [...rest, { ...rec, employee_name: employees.find((e) => e.id === employeeId)?.name, employee_code: employees.find((e) => e.id === employeeId)?.employee_code }].sort((a, b) => (a.employee_name || '').localeCompare(b.employee_name || ''));
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to create loan');
+      setToast({ type: 'success', message: 'Advance loan recorded successfully' });
+      setCreateOpen(false);
+      setCreateError('');
+      setForm({
+        employee_id: '',
+        loan_amount: '',
+        loan_date: new Date().toISOString().slice(0, 10),
+        reason: '',
+        total_installments: 1,
+        monthly_installment: '',
+        notes: '',
       });
-      setLocalAmounts((prev) => ({ ...prev, [employeeId]: rec.amount }));
-      setLocalNotes((prev) => ({ ...prev, [employeeId]: rec.note || '' }));
-      setLocalDates((prev) => ({ ...prev, [employeeId]: rec.advance_date || null }));
-      setToast({ type: 'success', message: 'Advance saved with today\'s date. It will be deducted in payroll for this month.' });
+      await loadAll();
     } catch (err) {
-      setToast({ type: 'error', message: err.message || 'Failed to save advance' });
-    } finally {
-      setSavingId(null);
+      setCreateError(err.message || 'Unable to create loan');
+      setToast({ type: 'error', message: err.message || 'Unable to create loan' });
     }
-  };
+  }
+
+  async function openLoanDetails(loanId) {
+    if (expandedLoanId === loanId) {
+      setExpandedLoanId(null);
+      setExpandedLoan(null);
+      return;
+    }
+    setExpandedLoanId(loanId);
+    const res = await authFetch(`/api/advance-loans/${loanId}`, { headers: { 'Content-Type': 'application/json' } });
+    if (!res.ok) return;
+    const json = await res.json();
+    setExpandedLoan(json.data);
+  }
+
+  async function handleOverrideSubmit() {
+    if (!overrideRepayment) return;
+    const res = await authFetch(`/api/advance-loans/repayments/${overrideRepayment.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        repayment_amount: Number(overrideForm.repayment_amount),
+        override_reason: overrideForm.override_reason,
+      }),
+    });
+    if (!res.ok) {
+      setToast({ type: 'error', message: 'Override failed' });
+      return;
+    }
+    setOverrideOpen(false);
+    setOverrideRepayment(null);
+    setOverrideForm({ repayment_amount: '', override_reason: '' });
+    await loadAll();
+  }
+
+  async function handleSkip(repaymentId) {
+    if (!window.confirm('Skip this month repayment?')) return;
+    const reason = skipPending || 'Skipped by admin';
+    const res = await authFetch(`/api/advance-loans/repayments/${repaymentId}/skip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) {
+      setToast({ type: 'error', message: 'Skip failed' });
+      return;
+    }
+    setSkipPending(null);
+    await loadAll();
+  }
+
+  async function handleWaive(loanId) {
+    const reason = window.prompt('Reason for waiver?') || '';
+    const res = await authFetch(`/api/advance-loans/${loanId}/waive`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (!res.ok) {
+      setToast({ type: 'error', message: 'Unable to waive loan' });
+      return;
+    }
+    await loadAll();
+  }
 
   return (
     <div className="space-y-6">
       {toast && (
         <div className="fixed top-20 z-30" style={{ right: '20%' }}>
-          <div
-            className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
-              toast.type === 'error'
-                ? 'border-rose-100 bg-rose-50 text-rose-700'
-                : 'border-emerald-100 bg-emerald-50 text-emerald-700'
-            }`}
-          >
-            <span className="mt-0.5 text-sm">{toast.type === 'error' ? '⚠️' : '✅'}</span>
-            <div>
-              <p className="font-medium">{toast.type === 'error' ? 'Error' : 'Success'}</p>
-              <p className="mt-0.5">{toast.message}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setToast(null)}
-              className="ml-2 text-[11px] text-slate-400 hover:text-slate-600"
-            >
-              Close
-            </button>
+          <div className={`rounded-lg border px-3 py-2 text-xs shadow-soft ${toast.type === 'error' ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'}`}>
+            {toast.message}
           </div>
         </div>
       )}
 
-      <header>
-        <h1 className="text-lg font-semibold text-slate-900">Salary advances</h1>
-        <p className="text-xs text-slate-500">
-          Enter advance amounts per staff for a month. These are automatically deducted when you generate payroll for that month.
-        </p>
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-slate-900">Advance Loans</h1>
+          <p className="text-xs text-slate-500">Track multi-month loan repayments and payroll deductions.</p>
+        </div>
+        <button type="button" onClick={() => setCreateOpen(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+          New Advance
+        </button>
       </header>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2">
-            <label className="text-[11px] font-medium text-slate-600">Year</label>
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
-            >
-              {[currentYear(), currentYear() - 1, currentYear() - 2].map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-[11px] font-medium text-slate-600">Month</label>
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
-            >
-              {MONTHS.map((m) => (
-                <option key={m.value} value={m.value}>{m.label}</option>
-              ))}
-            </select>
-          </div>
+      <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-soft">
+        <div className="mb-4 flex gap-2">
+          <button type="button" onClick={() => setTab('active')} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab === 'active' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>Active Loans</button>
+          <button type="button" onClick={() => setTab('monthly')} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab === 'monthly' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>This Month&apos;s Deductions</button>
+          <button type="button" onClick={() => setTab('history')} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab === 'history' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>Loan History</button>
         </div>
 
-        {error && (
-          <div className="mb-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
-            {error}
-          </div>
-        )}
-
         {loading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="h-14 rounded-lg bg-slate-50 animate-pulse" />
-            ))}
-          </div>
-        ) : activeEmployees.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-xs text-slate-500">
-            No active employees. Add employees first to record advances.
-          </div>
-        ) : (
+          <div className="h-24 animate-pulse rounded bg-slate-50" />
+        ) : tab === 'active' ? (
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
-                  <th className="pb-2 pr-3 font-medium">Employee</th>
-                  <th className="pb-2 pr-3 font-medium w-32 text-right">Advance amount (₹)</th>
-                  <th className="pb-2 pr-3 font-medium">Note (optional)</th>
-                  <th className="pb-2 pr-3 font-medium w-28">Date saved</th>
-                  <th className="pb-2 pr-3 font-medium w-24"></th>
+                  <th className="pb-2 pr-3">Employee</th>
+                  <th className="pb-2 pr-3">Loan Amount</th>
+                  <th className="pb-2 pr-3">Given On</th>
+                  <th className="pb-2 pr-3">Total Repaid</th>
+                  <th className="pb-2 pr-3">Outstanding</th>
+                  <th className="pb-2 pr-3">Monthly EMI</th>
+                  <th className="pb-2 pr-3">Next Deduction</th>
+                  <th className="pb-2 pr-3">Status</th>
+                  <th className="pb-2 pr-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {activeEmployees.map((emp) => (
-                  <tr key={emp.id} className="border-b border-slate-100 hover:bg-slate-50/50">
-                    <td className="py-3 pr-3">
-                      <span className="font-medium text-slate-900">{emp.name}</span>
-                      <span className="ml-1 text-slate-500">({emp.employee_code})</span>
-                    </td>
-                    <td className="py-3 pr-3 text-right">
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        placeholder="0"
-                        value={localAmounts[emp.id] === undefined ? '' : localAmounts[emp.id]}
-                        onChange={(e) => handleAmountChange(emp.id, e.target.value)}
-                        onBlur={() => saveAdvance(emp.id)}
-                        className="w-full max-w-[120px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-right text-slate-800 ml-auto"
-                      />
-                    </td>
-                    <td className="py-3 pr-3">
-                      <input
-                        type="text"
-                        placeholder="Optional note"
-                        value={localNotes[emp.id] ?? ''}
-                        onChange={(e) => handleNoteChange(emp.id, e.target.value)}
-                        onBlur={() => saveAdvance(emp.id)}
-                        className="w-full max-w-[200px] rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-slate-800"
-                      />
-                    </td>
-                    <td className="py-3 pr-3 text-slate-600">
-                      {localDates[emp.id]
-                        ? new Date(localDates[emp.id] + 'T12:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
-                        : '—'}
-                    </td>
-                    <td className="py-3 pr-3">
+                {activeLoans.map((loan) => (
+                  <Fragment key={loan.id}>
+                    <tr className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="py-2 pr-3 font-medium">{loan.employee_name} ({loan.employee_code})</td>
+                      <td className="py-2 pr-3">₹{formatMoney(loan.loan_amount)}</td>
+                      <td className="py-2 pr-3">{fmtDate(loan.loan_date)}</td>
+                      <td className="py-2 pr-3">₹{formatMoney(loan.total_repaid)}</td>
+                      <td className="py-2 pr-3 font-semibold text-amber-700">₹{formatMoney(loan.outstanding_balance)}</td>
+                      <td className="py-2 pr-3">₹{formatMoney(loan.monthly_installment)}</td>
+                      <td className="py-2 pr-3">{monthLabel(loan.next_repayment_year, loan.next_repayment_month)} • ₹{formatMoney(loan.next_repayment_amount || 0)}</td>
+                      <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
+                      <td className="py-2 pr-3">
+                        <button type="button" className="mr-2 text-blue-600" onClick={() => openLoanDetails(loan.id)}>Details</button>
+                        <button type="button" className="text-rose-600" onClick={() => handleWaive(loan.id)}>Waive</button>
+                      </td>
+                    </tr>
+                    {expandedLoanId === loan.id && expandedLoan && (
+                      <tr>
+                        <td colSpan={9} className="bg-slate-50 p-3">
+                          <p className="mb-2 text-xs text-slate-700">Repaid: ₹{formatMoney(expandedLoan.total_repaid)} / ₹{formatMoney(expandedLoan.loan_amount)}</p>
+                          <div className="mb-3 h-2 rounded bg-slate-200">
+                            <div className="h-2 rounded bg-emerald-500" style={{ width: `${Math.min(100, (Number(expandedLoan.total_repaid || 0) / Number(expandedLoan.loan_amount || 1)) * 100)}%` }} />
+                          </div>
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-left text-slate-500">
+                                <th className="pb-1 pr-2">Month</th>
+                                <th className="pb-1 pr-2">Suggested</th>
+                                <th className="pb-1 pr-2">Amount</th>
+                                <th className="pb-1 pr-2">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(expandedLoan.repayments || []).map((r) => (
+                                <tr key={r.id} className="border-t border-slate-200">
+                                  <td className="py-1 pr-2">{monthLabel(r.year, r.month)}</td>
+                                  <td className="py-1 pr-2">₹{formatMoney(r.suggested_amount)}</td>
+                                  <td className="py-1 pr-2">₹{formatMoney(r.repayment_amount)}</td>
+                                  <td className="py-1 pr-2">{r.status}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : tab === 'monthly' ? (
+          <div>
+            <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+              Total advance deductions this month: ₹{formatMoney(totalMonthlyDeduction)} across {new Set(monthlyRepayments.map((r) => r.employee_id)).size} employees
+            </div>
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-slate-600">
+                  <th className="pb-2 pr-3">Employee</th>
+                  <th className="pb-2 pr-3">Loan Ref</th>
+                  <th className="pb-2 pr-3">Original Amount</th>
+                  <th className="pb-2 pr-3">This Month Deduction</th>
+                  <th className="pb-2 pr-3">Suggested</th>
+                  <th className="pb-2 pr-3">Status</th>
+                  <th className="pb-2 pr-3">Override</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlyRepayments.map((r) => (
+                  <tr key={r.id} className="border-b border-slate-100">
+                    <td className="py-2 pr-3">{r.employee_name} ({r.employee_code})</td>
+                    <td className="py-2 pr-3">#{r.loan_id}</td>
+                    <td className="py-2 pr-3">₹{formatMoney(r.original_loan_amount)}</td>
+                    <td className="py-2 pr-3 font-semibold">₹{formatMoney(r.repayment_amount)}</td>
+                    <td className="py-2 pr-3">₹{formatMoney(r.suggested_amount)}</td>
+                    <td className="py-2 pr-3">{r.status}</td>
+                    <td className="py-2 pr-3 space-x-2">
                       <button
                         type="button"
-                        onClick={() => saveAdvance(emp.id)}
-                        disabled={savingId === emp.id}
-                        className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+                        onClick={() => {
+                          setOverrideRepayment(r);
+                          setOverrideForm({ repayment_amount: String(r.repayment_amount), override_reason: '' });
+                          setOverrideOpen(true);
+                        }}
+                        className="text-blue-600"
                       >
-                        {savingId === emp.id ? 'Saving...' : 'Save'}
+                        Override
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const reason = window.prompt('Reason to skip this month?') || '';
+                          setSkipPending(reason);
+                          handleSkip(r.id);
+                        }}
+                        className="text-amber-600"
+                      >
+                        Skip Month
                       </button>
                     </td>
                   </tr>
@@ -272,12 +389,95 @@ export default function AdvancesPage() {
               </tbody>
             </table>
           </div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-600">
+                <th className="pb-2 pr-3">Employee</th>
+                <th className="pb-2 pr-3">Loan Amount</th>
+                <th className="pb-2 pr-3">Given On</th>
+                <th className="pb-2 pr-3">Closed On</th>
+                <th className="pb-2 pr-3">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyLoans.map((loan) => (
+                <tr key={loan.id} className="border-b border-slate-100">
+                  <td className="py-2 pr-3">{loan.employee_name} ({loan.employee_code})</td>
+                  <td className="py-2 pr-3">₹{formatMoney(loan.loan_amount)}</td>
+                  <td className="py-2 pr-3">{fmtDate(loan.loan_date)}</td>
+                  <td className="py-2 pr-3">{fmtDate((loan.updated_at || '').slice(0, 10))}</td>
+                  <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
-      </section>
-
-      <div className="rounded-lg border border-slate-100 bg-slate-50/50 px-4 py-3 text-[11px] text-slate-600">
-        <strong>How it works:</strong> Set the advance amount for each employee for the selected month. When you run &quot;Generate payroll&quot; for that same month, the advance is automatically subtracted from the net salary. You can update amounts here anytime before or after generating payroll; re-running payroll will pick up the latest advance.
       </div>
+
+      {createOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
+          <div className="w-full max-w-xl rounded-xl bg-white p-4">
+            <h2 className="text-sm font-semibold text-slate-900">New Advance Loan</h2>
+            {createError && (
+              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {createError}
+              </div>
+            )}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <select value={form.employee_id} onChange={(e) => setForm((f) => ({ ...f, employee_id: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs">
+                <option value="">Select employee</option>
+                {employees.filter((e) => e.status === 'active').map((e) => <option key={e.id} value={e.id}>{e.name} ({e.employee_code})</option>)}
+              </select>
+              <input type="number" min="1" placeholder="Loan amount" value={form.loan_amount} onChange={(e) => setForm((f) => ({ ...f, loan_amount: e.target.value, monthly_installment: '' }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+              <input type="date" value={form.loan_date} onChange={(e) => setForm((f) => ({ ...f, loan_date: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+              <input type="text" placeholder="Reason (optional)" value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+              <input type="number" min="1" placeholder="Installments" value={form.total_installments} onChange={(e) => setForm((f) => ({ ...f, total_installments: e.target.value, monthly_installment: '' }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+              <input type="number" min="1" placeholder="Monthly installment" value={form.monthly_installment} onChange={(e) => setForm((f) => ({ ...f, monthly_installment: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+              <textarea placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-xs sm:col-span-2" />
+            </div>
+            <p className="mt-2 text-[11px] text-slate-600">
+              Total repayment: ₹{formatMoney((Number(form.total_installments || 0) * Number(form.monthly_installment || 0)) || 0)}
+            </p>
+            {activeLoanWarning && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                This employee already has an active loan: ₹{formatMoney(activeLoanWarning.outstanding_balance)} outstanding from {fmtDate(activeLoanWarning.loan_date)}.
+              </div>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateOpen(false);
+                  setCreateError('');
+                }}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+              >
+                Cancel
+              </button>
+              <button type="button" onClick={() => handleCreateLoan(Boolean(activeLoanWarning))} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white">
+                Record Advance Loan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overrideOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
+          <div className="w-full max-w-sm rounded-xl bg-white p-4">
+            <h2 className="text-sm font-semibold text-slate-900">Override Repayment</h2>
+            <div className="mt-3 space-y-2">
+              <input type="number" min="0" value={overrideForm.repayment_amount} onChange={(e) => setOverrideForm((f) => ({ ...f, repayment_amount: e.target.value }))} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+              <textarea value={overrideForm.override_reason} onChange={(e) => setOverrideForm((f) => ({ ...f, override_reason: e.target.value }))} placeholder="Reason" className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs" />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setOverrideOpen(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs">Cancel</button>
+              <button type="button" onClick={handleOverrideSubmit} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white">Save Override</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

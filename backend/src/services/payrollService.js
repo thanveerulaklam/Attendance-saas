@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { getHolidayDatesForMonth } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
+const { markRepaymentDeducted } = require('./advanceLoanService');
 const { ensureAutoOutForMonth } = require('./attendanceService');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
@@ -621,7 +622,28 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const grossSalary = earnedBasic + overtimePay + travelAllowance;
     const esiDeduction = Number(employee.esi_amount || 0);
     const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
-    const salaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+    const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+    const repaymentRowsResult = await client.query(
+      `SELECT
+         r.id,
+         r.loan_id,
+         r.repayment_amount
+       FROM employee_advance_repayments r
+       INNER JOIN employee_advance_loans l
+         ON l.id = r.loan_id
+        AND l.company_id = r.company_id
+       WHERE r.company_id = $1
+         AND r.employee_id = $2
+         AND r.year = $3
+         AND r.month = $4
+         AND r.status = 'pending'
+         AND l.status = 'active'
+       ORDER BY r.id ASC`,
+      [companyId, employeeId, year, month]
+    );
+    const repaymentRows = repaymentRowsResult.rows;
+    const newRepaymentAdvance = repaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
+    const salaryAdvance = oldSalaryAdvance + newRepaymentAdvance;
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
     const globalIncentive = Number(noLeaveIncentive) || 0;
     const effectiveNoLeaveIncentive = shiftIncentive > 0 ? shiftIncentive : globalIncentive;
@@ -676,6 +698,17 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         netSalary,
       ]
     );
+
+    for (const repayment of repaymentRows) {
+      await markRepaymentDeducted(
+        companyId,
+        repayment.loan_id,
+        year,
+        month,
+        Number(repayment.repayment_amount || 0),
+        { client }
+      );
+    }
 
     await client.query('COMMIT');
 
@@ -768,7 +801,35 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const grossSalary = earnedBasic + overtimePay + travelAllowance;
   const esiDeduction = Number(employee.esi_amount || 0);
   const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
-  const salaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+  const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+  const advanceRepaymentsResult = await pool.query(
+    `SELECT
+       r.loan_id,
+       r.repayment_amount AS this_month_deduction,
+       l.loan_amount AS original_loan_amount,
+       l.loan_date,
+       l.total_repaid AS total_repaid_so_far,
+       GREATEST(ROUND((l.outstanding_balance - r.repayment_amount)::numeric, 2), 0) AS outstanding_balance_after
+     FROM employee_advance_repayments r
+     INNER JOIN employee_advance_loans l ON l.id = r.loan_id AND l.company_id = r.company_id
+     WHERE r.company_id = $1
+       AND r.employee_id = $2
+       AND r.year = $3
+       AND r.month = $4
+       AND r.status IN ('pending', 'deducted')
+     ORDER BY r.loan_id ASC`,
+    [companyId, employeeId, year, month]
+  );
+  const advanceRepayments = advanceRepaymentsResult.rows.map((row) => ({
+    loan_id: row.loan_id,
+    original_loan_amount: Number(row.original_loan_amount || 0),
+    loan_date: row.loan_date,
+    this_month_deduction: Number(row.this_month_deduction || 0),
+    total_repaid_so_far: Number(row.total_repaid_so_far || 0),
+    outstanding_balance_after: Number(row.outstanding_balance_after || 0),
+  }));
+  const newSalaryAdvance = advanceRepayments.reduce((sum, row) => sum + Number(row.this_month_deduction || 0), 0);
+  const salaryAdvance = oldSalaryAdvance + newSalaryAdvance;
   let noLeaveIncentive = 0;
   const recordResult = await pool.query(
     `SELECT no_leave_incentive FROM payroll_records
@@ -820,6 +881,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       noLeaveIncentive,
       netSalary,
     },
+    advance_repayments: advanceRepayments,
   };
 }
 
