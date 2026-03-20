@@ -40,7 +40,6 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const [pricingPeriod, setPricingPeriod] = useState('monthly');
   const [demoSubmitted, setDemoSubmitted] = useState(false);
   const [demoName, setDemoName] = useState('');
   const [demoBusiness, setDemoBusiness] = useState('');
@@ -51,7 +50,6 @@ export default function LoginPage() {
   const statsRef = useRef(null);
   const featuresRef = useRef(null);
   const howItWorksRef = useRef(null);
-  const pricingRef = useRef(null);
   const testimonialsRef = useRef(null);
   const loginRef = useRef(null);
   const demoRef = useRef(null);
@@ -60,7 +58,6 @@ export default function LoginPage() {
   const statsInView = useInView(statsRef);
   const featuresInView = useInView(featuresRef);
   const howItWorksInView = useInView(howItWorksRef);
-  const pricingInView = useInView(pricingRef);
   const testimonialsInView = useInView(testimonialsRef);
   const loginInView = useInView(loginRef);
   const demoInView = useInView(demoRef);
@@ -128,8 +125,6 @@ export default function LoginPage() {
     setDemoSubmitted(true);
   };
 
-  const isYearly = pricingPeriod === 'yearly';
-
   return (
     <div className="bg-white text-slate-900">
       {/* Navbar */}
@@ -156,13 +151,6 @@ export default function LoginPage() {
                 className="text-slate-600 hover:text-blue-600"
               >
                 How it Works
-              </button>
-              <button
-                type="button"
-                onClick={() => handleScrollToSection('pricing')}
-                className="text-slate-600 hover:text-blue-600"
-              >
-                Pricing
               </button>
             </div>
             <button
@@ -442,194 +430,6 @@ export default function LoginPage() {
                   <p className="text-xs text-slate-600">{step.desc}</p>
                 </div>
               ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Pricing */}
-        <section
-          id="pricing"
-          ref={pricingRef}
-          className={`bg-white py-20 px-6 transition-all duration-700 ${
-            pricingInView ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
-          }`}
-        >
-          <div className="max-w-6xl mx-auto">
-            <div className="text-center">
-              <h2 className="text-3xl font-bold text-slate-900">Simple, transparent pricing</h2>
-              <p className="mt-2 text-slate-500">
-                Flat monthly price. No per-employee fees. Cancel anytime.
-              </p>
-              <div className="mt-6 inline-flex items-center rounded-full bg-slate-100 p-1 text-xs font-medium">
-                <button
-                  type="button"
-                  onClick={() => setPricingPeriod('monthly')}
-                  className={`px-4 py-1.5 rounded-full ${
-                    pricingPeriod === 'monthly' ? 'bg-[#1a56db] text-white' : 'text-slate-600'
-                  }`}
-                >
-                  Monthly
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPricingPeriod('yearly')}
-                  className={`px-4 py-1.5 rounded-full ${
-                    pricingPeriod === 'yearly' ? 'bg-[#1a56db] text-white' : 'text-slate-600'
-                  }`}
-                >
-                  Yearly
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-12 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
-              {/* Starter */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Starter</h3>
-                  <p className="mt-1 text-xs text-slate-500">Up to 30 employees • 1 device</p>
-                  <div className="mt-4 flex items-baseline gap-1">
-                    <span className="text-2xl font-bold">
-                      {pricingPeriod === 'yearly' ? '₹13,999' : '₹1,499'}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {pricingPeriod === 'yearly' ? '/yr' : '/mo'}
-                    </span>
-                  </div>
-                  {pricingPeriod === 'yearly' && (
-                    <div className="mt-2 inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 text-[11px] font-medium">
-                      Save 2 months
-                    </div>
-                  )}
-                  <ul className="mt-4 space-y-2 text-xs text-slate-600">
-                    <li>✓ Attendance tracking</li>
-                    <li>✓ Payroll generation</li>
-                    <li>✓ Biometric sync</li>
-                    <li>✓ CSV reports</li>
-                    <li>✓ WhatsApp support</li>
-                  </ul>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleScrollToSection('login-section')}
-                  className="mt-6 w-full rounded-xl border border-[#1a56db] text-[#1a56db] py-2.5 text-sm font-semibold hover:bg-blue-50"
-                >
-                  Get Started
-                </button>
-              </div>
-
-              {/* Growth */}
-              <div className="bg-white border-2 border-[#1a56db] rounded-2xl p-6 flex flex-col justify-between transform md:scale-105 shadow-md">
-                <div>
-                  <div className="inline-flex items-center rounded-full bg-[#1a56db] text-white px-3 py-1 text-[11px] font-medium">
-                    Most Popular
-                  </div>
-                  <h3 className="mt-3 text-sm font-semibold text-slate-900">Growth</h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Up to 100 employees • 3 devices
-                  </p>
-                  <div className="mt-4 flex items-baseline gap-1">
-                    <span className="text-2xl font-bold">
-                      {pricingPeriod === 'yearly' ? '₹37,999' : '₹3,999'}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {pricingPeriod === 'yearly' ? '/yr' : '/mo'}
-                    </span>
-                  </div>
-                  {pricingPeriod === 'yearly' && (
-                    <div className="mt-2 inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 text-[11px] font-medium">
-                      Save 2 months
-                    </div>
-                  )}
-                  <ul className="mt-4 space-y-2 text-xs text-slate-600">
-                    <li>✓ Everything in Starter</li>
-                    <li>✓ Multiple shifts</li>
-                    <li>✓ Advance management</li>
-                    <li>✓ Holiday management</li>
-                    <li>✓ Phone support</li>
-                  </ul>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleScrollToSection('login-section')}
-                  className="mt-6 w-full rounded-xl bg-[#1a56db] text-white py-2.5 text-sm font-semibold hover:bg-blue-700"
-                >
-                  Get Started
-                </button>
-              </div>
-
-              {/* Business */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Business</h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Up to 250 employees • Unlimited devices
-                  </p>
-                  <div className="mt-4 flex items-baseline gap-1">
-                    <span className="text-2xl font-bold">
-                      {pricingPeriod === 'yearly' ? '₹75,999' : '₹7,999'}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {pricingPeriod === 'yearly' ? '/yr' : '/mo'}
-                    </span>
-                  </div>
-                  {pricingPeriod === 'yearly' && (
-                    <div className="mt-2 inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 text-[11px] font-medium">
-                      Save 2 months
-                    </div>
-                  )}
-                  <ul className="mt-4 space-y-2 text-xs text-slate-600">
-                    <li>✓ Everything in Growth</li>
-                    <li>✓ Priority support</li>
-                    <li>✓ Personal onboarding</li>
-                    <li>✓ On-site setup help</li>
-                  </ul>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleScrollToSection('login-section')}
-                  className="mt-6 w-full rounded-xl border border-[#1a56db] text-[#1a56db] py-2.5 text-sm font-semibold hover:bg-blue-50"
-                >
-                  Get Started
-                </button>
-              </div>
-
-              {/* Enterprise */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Enterprise</h3>
-                  <p className="mt-1 text-xs text-slate-500">
-                    250+ employees • Unlimited devices
-                  </p>
-                  <div className="mt-4 flex items-baseline gap-1">
-                    <span className="text-2xl font-bold">
-                      {pricingPeriod === 'yearly' ? '₹1,19,999' : '₹12,999'}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {pricingPeriod === 'yearly' ? '/yr' : '/mo'}
-                    </span>
-                  </div>
-                  {pricingPeriod === 'yearly' && (
-                    <div className="mt-2 inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 text-[11px] font-medium">
-                      Save 2 months
-                    </div>
-                  )}
-                  <ul className="mt-4 space-y-2 text-xs text-slate-600">
-                    <li>✓ Everything in Business</li>
-                    <li>✓ Dedicated support line</li>
-                    <li>✓ Custom onboarding</li>
-                    <li>✓ SLA guarantee</li>
-                  </ul>
-                </div>
-                <a
-                  href={WHATSAPP_LINK}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-6 w-full inline-flex items-center justify-center rounded-xl border border-[#1a56db] text-[#1a56db] py-2.5 text-sm font-semibold hover:bg-blue-50"
-                >
-                  Contact Us on WhatsApp
-                </a>
-              </div>
             </div>
           </div>
         </section>
@@ -914,13 +714,6 @@ export default function LoginPage() {
                 className="text-left hover:text-white"
               >
                 How it Works
-              </button>
-              <button
-                type="button"
-                onClick={() => handleScrollToSection('pricing')}
-                className="text-left hover:text-white"
-              >
-                Pricing
               </button>
               <button
                 type="button"

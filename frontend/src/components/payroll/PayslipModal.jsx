@@ -10,6 +10,120 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+const MONTH_LONG = [
+  'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER',
+];
+
+function parseDateYMD(value) {
+  if (!value) return null;
+  const s = String(value);
+  const m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const monthIndex = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  if (Number.isNaN(year) || Number.isNaN(monthIndex) || Number.isNaN(day)) return null;
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  return { year, monthIndex, day };
+}
+
+function formatJoinDate(value) {
+  const d = parseDateYMD(value);
+  if (!d) return '—';
+  return `${d.day} ${MONTH_SHORT[d.monthIndex]} ${d.year}`;
+}
+
+function formatHours(value) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  const num = Number(value);
+  // Keep at most 2 decimals; trim trailing zeros (e.g. 1.20 -> 1.2, 1.00 -> 1).
+  return num.toFixed(2).replace(/\.?0+$/, '');
+}
+
+function groupDayNumbersByMonth(dateValues) {
+  const map = new Map(); // key: `${year}-${monthIndex}`
+  for (const raw of dateValues || []) {
+    const d = parseDateYMD(raw);
+    if (!d) continue;
+    const key = `${d.year}-${d.monthIndex}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        year: d.year,
+        monthIndex: d.monthIndex,
+        monthName: MONTH_LONG[d.monthIndex],
+        days: new Set(),
+      });
+    }
+    map.get(key).days.add(d.day);
+  }
+
+  return [...map.values()]
+    .map((g) => ({ ...g, days: [...g.days].sort((a, b) => a - b) }))
+    .sort((a, b) => (a.year - b.year) || (a.monthIndex - b.monthIndex));
+}
+
+function renderGroupedDayNumbers(dateValues) {
+  const groups = groupDayNumbersByMonth(dateValues);
+  if (!groups.length) return '—';
+
+  return groups.map((g) => (
+    <span key={g.key} className="block">
+      {g.year} {g.monthName}:
+      {' '}
+      {g.days.map((day, i) => (
+        <span key={`${g.key}-${day}`}>
+          <span className="font-bold">{day}</span>
+          {i < g.days.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+    </span>
+  ));
+}
+
+function groupLateDetailsByMonth(lateDetails) {
+  const map = new Map(); // key: `${year}-${monthIndex}`
+  for (const item of lateDetails || []) {
+    const d = parseDateYMD(item?.date);
+    if (!d) continue;
+    const key = `${d.year}-${d.monthIndex}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        year: d.year,
+        monthIndex: d.monthIndex,
+        monthName: MONTH_LONG[d.monthIndex],
+        days: new Set(),
+      });
+    }
+    map.get(key).days.add(d.day);
+  }
+
+  return [...map.values()]
+    .map((g) => ({ ...g, days: [...g.days].sort((a, b) => a - b) }))
+    .sort((a, b) => (a.year - b.year) || (a.monthIndex - b.monthIndex));
+}
+
+function renderGroupedLateDetails(lateDetails) {
+  const groups = groupLateDetailsByMonth(lateDetails);
+  if (!groups.length) return '—';
+
+  return groups.map((g) => (
+    <span key={g.key} className="block">
+      {g.year} {g.monthName}:
+      {' '}
+      {g.days.map((day, i) => (
+        <span key={`${g.key}-${day}`}>
+          <span className="font-bold">{day}</span>
+          {i < g.days.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+    </span>
+  ));
+}
+
 export default function PayslipModal({
   open,
   onClose,
@@ -71,7 +185,7 @@ export default function PayslipModal({
       ['Employee Code', payrollRow.employee_code],
       ['Designation', attendanceDetails?.designation || ''],
       ['Department', attendanceDetails?.department || ''],
-      ['Date of Joining', attendanceDetails?.join_date || ''],
+      ['Date of Joining', formatJoinDate(attendanceDetails?.join_date)],
       ['Shift', attendanceDetails?.shift_name || ''],
     ];
     lines.forEach(([label, value], idx) => {
@@ -86,13 +200,14 @@ export default function PayslipModal({
     y += 10;
     doc.setFont(undefined, 'normal');
     const att = breakdown.attendance;
+    const overtimeHours = formatHours(att?.overtimeHours);
     const attLines = [
       ['Working Days', att?.workingDays ?? '—'],
       ['Days Present', att?.presentDays ?? '—'],
       ['Days Absent', att?.absenceDays ?? '—'],
       ['Half Days', attendanceDetails?.halfDayCount ?? '—'],
       ['Late Arrivals', attendanceDetails?.lateCount ?? '—'],
-      ['Overtime Hours', att?.overtimeHours ?? '—'],
+      ['Overtime Hours', overtimeHours === '—' ? '—' : `${overtimeHours} hrs`],
     ];
     attLines.forEach(([label, value], idx) => {
       const rowY = y + idx * 12;
@@ -156,6 +271,7 @@ export default function PayslipModal({
   const handleShareWhatsappSummary = () => {
     const att = breakdown.attendance;
     const b = breakdown.breakdown;
+    const overtimeHours = formatHours(att?.overtimeHours);
     const payslipText = `
 PAYSLIP — ${periodLabel}
 ${company?.name || ''}
@@ -166,7 +282,7 @@ ATTENDANCE
 Present: ${att?.presentDays ?? '—'} days
 Absent: ${att?.absenceDays ?? '—'} days
 Late: ${attendanceDetails?.lateCount ?? '—'} times
-Overtime: ${att?.overtimeHours ?? '—'} hrs
+Overtime: ${overtimeHours === '—' ? '—' : `${overtimeHours} hrs`}
 
 SALARY
 Gross: ₹${formatMoney(b.grossSalary)}
@@ -249,7 +365,7 @@ punchpay.in
             <div className="space-y-1.5">
               <div className="flex justify-between">
                 <span className="font-medium text-slate-600">Date of Joining</span>
-                <span>{attendanceDetails?.join_date || '—'}</span>
+                <span>{formatJoinDate(attendanceDetails?.join_date)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="font-medium text-slate-600">Shift</span>
@@ -261,7 +377,7 @@ punchpay.in
               </div>
               <div className="flex justify-between">
                 <span className="font-medium text-slate-600">Overtime Hours</span>
-                <span>{breakdown.attendance?.overtimeHours ?? '—'}</span>
+                <span>{formatHours(breakdown.attendance?.overtimeHours)}</span>
               </div>
             </div>
           </section>
@@ -300,35 +416,20 @@ punchpay.in
               <div className="flex justify-between">
                 <span>Overtime Hours</span>
                 <span className="font-medium text-emerald-700">
-                  {breakdown.attendance?.overtimeHours ?? '—'} hrs
+                  {(() => {
+                    const v = formatHours(breakdown.attendance?.overtimeHours);
+                    return v === '—' ? '—' : `${v} hrs`;
+                  })()}
                 </span>
               </div>
             </div>
             <div className="mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
-              <p className="mt-0.5">
-                {(attendanceDetails?.absentDates || []).length
-                  ? attendanceDetails.absentDates.join(', ')
-                  : '—'}
-              </p>
+              <p className="mt-0.5">{renderGroupedDayNumbers(attendanceDetails?.absentDates || [])}</p>
               <p className="mt-2 font-semibold">Late Arrival Dates:</p>
-              <p className="mt-0.5">
-                {(attendanceDetails?.lateDetails || []).length
-                  ? attendanceDetails.lateDetails
-                      .map((d) =>
-                        d.minutes
-                          ? `${d.date} - ${d.minutes} mins late`
-                          : d.date
-                      )
-                      .join(', ')
-                  : '—'}
-              </p>
+              <p className="mt-0.5">{renderGroupedLateDetails(attendanceDetails?.lateDetails || [])}</p>
               <p className="mt-2 font-semibold">Half Day Dates:</p>
-              <p className="mt-0.5">
-                {(attendanceDetails?.halfDayDates || []).length
-                  ? attendanceDetails.halfDayDates.join(', ')
-                  : '—'}
-              </p>
+              <p className="mt-0.5">{renderGroupedDayNumbers(attendanceDetails?.halfDayDates || [])}</p>
             </div>
           </section>
 

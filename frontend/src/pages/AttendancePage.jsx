@@ -3,9 +3,39 @@ import { authFetch } from '../utils/api';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+// Always return YYYY-MM-DD in LOCAL time (avoid toISOString() day shifting).
+function formatDateYMDLocal(d) {
+  const year = d.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function formatYMDLocalFromParts(year, month1Based, day) {
+  return `${year}-${pad2(month1Based)}-${pad2(day)}`;
+}
+
+function formatDateDisplayFromYMD(ymd) {
+  const s = String(ymd || '');
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '—';
+  const year = Number(m[1]);
+  const month0 = Number(m[2]) - 1;
+  const day = Number(m[3]);
+  // Use local Date for display; this avoids the 'YYYY-MM-DD' UTC parsing ambiguity.
+  return new Date(year, month0, day).toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 function todayStr() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return formatDateYMDLocal(new Date());
 }
 
 function formatTimeForInput(d) {
@@ -108,24 +138,47 @@ export default function AttendancePage() {
 
   useEffect(() => {
     let isMounted = true;
-    setDailyLoading(true);
-    authFetch(`/api/attendance/daily?date=${dateStr}`, {
-      headers: { 'Content-Type': 'application/json' },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load today');
-        return res.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      setError(null);
+      setDailyLoading(true);
+      authFetch(`/api/attendance/daily?date=${dateStr}`, {
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
       })
-      .then((json) => {
-        if (isMounted) setDailyData(Array.isArray(json.data) ? json.data : []);
-      })
-      .catch(() => {
-        if (isMounted) setDailyData([]);
-      })
-      .finally(() => {
-        if (isMounted) setDailyLoading(false);
-      });
-    return () => { isMounted = false; };
+        .then(async (res) => {
+          if (res.ok) return res.json();
+          // express-rate-limit returns JSON body with the configured message.
+          let msg = 'Failed to load today';
+          try {
+            const j = await res.json();
+            msg = j?.message?.message || j?.message || j?.error || msg;
+          } catch {
+            msg = res.statusText || msg;
+          }
+          const e = new Error(msg);
+          e.status = res.status;
+          throw e;
+        })
+        .then((json) => {
+          if (isMounted) setDailyData(Array.isArray(json.data) ? json.data : []);
+        })
+        .catch((err) => {
+          if (!isMounted) return;
+          if (err?.name === 'AbortError') return;
+          setDailyData([]);
+          setError(err?.message || 'Unable to load daily attendance');
+        })
+        .finally(() => {
+          if (isMounted) setDailyLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      isMounted = false;
+      controller.abort();
+      clearTimeout(timeout);
+    };
   }, [dateStr, refreshKey]);
 
   const todaySummary = useMemo(() => {
@@ -192,9 +245,9 @@ export default function AttendancePage() {
   const goNext = () => setMonthYear((m) => getMonthYear(1));
 
   const handleSelectDate = (dayNum) => {
-    const d = new Date(year, month - 1, dayNum);
-    const iso = d.toISOString().slice(0, 10);
-    setSelectedDate(iso);
+    const next = formatYMDLocalFromParts(year, month, dayNum);
+    if (next === selectedDate) return;
+    setSelectedDate(next);
   };
 
   const handleManualSubmit = (e) => {
@@ -379,11 +432,7 @@ export default function AttendancePage() {
           <div className="mt-4 border-t border-slate-100 pt-4">
             <h3 className="text-xs font-semibold text-slate-700 mb-2">
               Punch timings for{' '}
-              {new Date(dateStr).toLocaleDateString('en-IN', {
-                day: 'numeric',
-                month: 'short',
-                year: 'numeric',
-              })}
+              {formatDateDisplayFromYMD(dateStr)}
             </h3>
             <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-100">
               <table className="w-full text-[11px]">
@@ -622,7 +671,7 @@ export default function AttendancePage() {
                         dayNum === new Date().getDate() &&
                         month === new Date().getMonth() + 1 &&
                         year === new Date().getFullYear();
-                      const cellDate = new Date(year, month - 1, dayNum).toISOString().slice(0, 10);
+                      const cellDate = formatYMDLocalFromParts(year, month, dayNum);
                       const isSelected = cellDate === selectedDate;
                       let bg = 'bg-slate-50 text-slate-400';
                       if (present) {
