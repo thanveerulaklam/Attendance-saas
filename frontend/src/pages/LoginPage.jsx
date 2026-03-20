@@ -45,11 +45,14 @@ export default function LoginPage() {
   const [demoBusiness, setDemoBusiness] = useState('');
   const [demoPhone, setDemoPhone] = useState('');
   const [demoEmployees, setDemoEmployees] = useState('');
+  const [demoSubmitting, setDemoSubmitting] = useState(false);
+  const [demoError, setDemoError] = useState('');
 
   const heroRef = useRef(null);
   const statsRef = useRef(null);
   const featuresRef = useRef(null);
   const howItWorksRef = useRef(null);
+  const pricingRef = useRef(null);
   const testimonialsRef = useRef(null);
   const loginRef = useRef(null);
   const demoRef = useRef(null);
@@ -58,6 +61,7 @@ export default function LoginPage() {
   const statsInView = useInView(statsRef);
   const featuresInView = useInView(featuresRef);
   const howItWorksInView = useInView(howItWorksRef);
+  const pricingInView = useInView(pricingRef);
   const testimonialsInView = useInView(testimonialsRef);
   const loginInView = useInView(loginRef);
   const demoInView = useInView(demoRef);
@@ -120,9 +124,35 @@ export default function LoginPage() {
     }
   };
 
-  const handleDemoSubmit = (e) => {
+  const handleDemoSubmit = async (e) => {
     e.preventDefault();
-    setDemoSubmitted(true);
+    setDemoError('');
+    setDemoSubmitting(true);
+    try {
+      const payload = {
+        full_name: demoName.trim(),
+        business_name: demoBusiness.trim(),
+        phone_number: demoPhone.trim(),
+        employees_range: demoEmployees,
+      };
+
+      const res = await fetch(`${API_BASE}/api/demo-enquiries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to request demo');
+      }
+
+      setDemoSubmitted(true);
+    } catch (err) {
+      setDemoError(err.message || 'Failed to request demo');
+    } finally {
+      setDemoSubmitting(false);
+    }
   };
 
   return (
@@ -151,6 +181,13 @@ export default function LoginPage() {
                 className="text-slate-600 hover:text-blue-600"
               >
                 How it Works
+              </button>
+              <button
+                type="button"
+                onClick={() => handleScrollToSection('pricing')}
+                className="text-slate-600 hover:text-blue-600"
+              >
+                Pricing
               </button>
             </div>
             <button
@@ -434,6 +471,69 @@ export default function LoginPage() {
           </div>
         </section>
 
+        {/* Pricing */}
+        <section
+          id="pricing"
+          ref={pricingRef}
+          className={`bg-white py-20 px-6 transition-all duration-700 ${
+            pricingInView ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+          }`}
+        >
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center">
+              <h2 className="text-3xl font-bold text-slate-900">Transparent Pricing</h2>
+              <p className="mt-2 text-slate-500">
+                One-time pricing with annual maintenance (AMC). No monthly subscriptions.
+              </p>
+            </div>
+
+            <div className="mt-12 overflow-x-auto">
+              <div className="min-w-[720px] rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-600">
+                      <th className="px-4 py-3 font-semibold">Slab</th>
+                      <th className="px-4 py-3 font-semibold">Employees</th>
+                      <th className="px-4 py-3 font-semibold">One-Time</th>
+                      <th className="px-4 py-3 font-semibold">Annual AMC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-slate-100">
+                      <td className="px-4 py-3 font-semibold text-slate-900">Starter</td>
+                      <td className="px-4 py-3 text-slate-700">Up to 50</td>
+                      <td className="px-4 py-3 text-slate-900 font-semibold">₹75,000</td>
+                      <td className="px-4 py-3 text-emerald-700 font-medium">₹12,000/year</td>
+                    </tr>
+                    <tr className="border-b border-slate-100">
+                      <td className="px-4 py-3 font-semibold text-slate-900">Growth</td>
+                      <td className="px-4 py-3 text-slate-700">Up to 150</td>
+                      <td className="px-4 py-3 text-slate-900 font-semibold">₹1,50,000</td>
+                      <td className="px-4 py-3 text-emerald-700 font-medium">₹20,000/year</td>
+                    </tr>
+                    <tr className="border-b border-slate-100">
+                      <td className="px-4 py-3 font-semibold text-slate-900">Business</td>
+                      <td className="px-4 py-3 text-slate-700">Up to 300</td>
+                      <td className="px-4 py-3 text-slate-900 font-semibold">₹2,50,000</td>
+                      <td className="px-4 py-3 text-emerald-700 font-medium">₹35,000/year</td>
+                    </tr>
+                    <tr>
+                      <td className="px-4 py-3 font-semibold text-slate-900">Enterprise</td>
+                      <td className="px-4 py-3 text-slate-700">300+</td>
+                      <td className="px-4 py-3 text-slate-900 font-semibold">₹3,50,000+</td>
+                      <td className="px-4 py-3 text-emerald-700 font-medium">₹50,000/year</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-5 text-center text-[11px] text-slate-500">
+              Maintenance (AMC) is billed annually. Pricing above is the market rate; contact us for exact device/site requirements.
+            </div>
+          </div>
+        </section>
+
         {/* Testimonials */}
         <section
           ref={testimonialsRef}
@@ -470,15 +570,30 @@ export default function LoginPage() {
                   name: 'Priya R.',
                   role: 'Retail Shop Owner, Udumalpet',
                 },
+                {
+                  quote:
+                    'PunchPay made attendance-to-payroll smooth for our team. Our monthly salary runs are quick and accurate.',
+                  name: 'Anish Kumar',
+                  role: 'Uma Traders, Udumalpet',
+                },
+                {
+                  quote:
+                    'Setup was fast and the team is responsive. PunchPay helps us stay organized with clear attendance and payroll reports.',
+                  name: 'Badhurul Zaman',
+                  role: 'Kuriinji Thunikkadai, Udumalpet',
+                },
+                {
+                  quote:
+                    'The reports are clean and easy for our accountant. Payroll generation happens in minutes every month.',
+                  name: 'Vigneshwaran',
+                  role: 'SSNV Spinning Mills, Udumlapet',
+                },
               ].map((t) => (
                 <article key={t.name} className="bg-white rounded-2xl p-6 shadow-sm">
                   <div className="text-yellow-400 text-sm mb-2">★★★★★</div>
                   <p className="text-sm text-slate-700 mb-4 leading-relaxed">{t.quote}</p>
                   <div className="text-sm font-semibold text-slate-900">{t.name}</div>
                   <div className="text-xs text-slate-500">{t.role}</div>
-                  <div className="mt-2 text-[11px] text-slate-400">
-                    (Sample — real review coming soon)
-                  </div>
                 </article>
               ))}
             </div>
@@ -642,18 +757,24 @@ export default function LoginPage() {
                       required
                     >
                       <option value="">Select employee count</option>
-                      <option value="1-30">1 – 30 employees</option>
-                      <option value="31-100">31 – 100 employees</option>
-                      <option value="101-250">101 – 250 employees</option>
-                      <option value="250+">250+ employees</option>
+                      <option value="up-to-50">Up to 50</option>
+                      <option value="up-to-150">Up to 150</option>
+                      <option value="up-to-300">Up to 300</option>
+                      <option value="300+">300+</option>
                     </select>
                   </div>
                   <button
                     type="submit"
                     className="w-full bg-[#1a56db] text-white py-3 rounded-xl text-sm font-semibold hover:bg-blue-700"
+                    disabled={demoSubmitting}
                   >
-                    Request Free Demo →
+                    {demoSubmitting ? 'Requesting...' : 'Request Free Demo →'}
                   </button>
+                  {demoError && (
+                    <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                      {demoError}
+                    </div>
+                  )}
                 </form>
               ) : (
                 <div className="text-center space-y-4">
@@ -717,6 +838,13 @@ export default function LoginPage() {
               </button>
               <button
                 type="button"
+                onClick={() => handleScrollToSection('pricing')}
+                className="text-left hover:text-white"
+              >
+                Pricing
+              </button>
+              <button
+                type="button"
                 onClick={() => handleScrollToSection('login-section')}
                 className="text-left hover:text-white"
               >
@@ -728,7 +856,7 @@ export default function LoginPage() {
             <div className="text-slate-300 font-semibold text-sm mb-3">Contact</div>
             <div className="flex flex-col gap-2 text-xs text-slate-400">
               <div>📱 WhatsApp: +{WHATSAPP_NUMBER}</div>
-              <div>📧 hello@punchpay.in</div>
+              <div>📧 info@mzonetechnologies.com</div>
               <div>🌐 punchpay.in</div>
             </div>
           </div>

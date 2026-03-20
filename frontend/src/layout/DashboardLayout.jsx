@@ -21,6 +21,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [company, setCompany] = useState(null);
+  const adminNavItems = user?.role === 'admin' ? [{ to: '/enquiries', label: 'Enquiries' }] : [];
   const subscription = getSubscriptionStatus(company);
   const showBanner = company && (
     !subscription.allowed ||
@@ -75,7 +76,7 @@ export default function DashboardLayout() {
         </div>
 
         <nav className="flex-1 space-y-1 text-sm">
-          {navItems.map((item) => (
+          {[...navItems, ...adminNavItems].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
