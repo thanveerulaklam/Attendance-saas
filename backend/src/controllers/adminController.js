@@ -107,6 +107,44 @@ async function getAdminOverview(req, res, next) {
 }
 
 /**
+ * GET /api/admin/demo-enquiries
+ * List stored demo enquiries submitted from the landing page.
+ * Requires X-Approval-Secret or Authorization: Bearer <ADMIN_APPROVAL_SECRET>.
+ */
+async function listDemoEnquiries(req, res, next) {
+  try {
+    const page = req.query?.page != null ? Number(req.query.page) : 1;
+    const limit = req.query?.limit != null ? Number(req.query.limit) : 20;
+    const pageNum = Math.max(1, Number.isFinite(page) ? page : 1);
+    const limitNum = Math.min(100, Math.max(1, Number.isFinite(limit) ? limit : 20));
+    const offset = (pageNum - 1) * limitNum;
+
+    const countResult = await pool.query(`SELECT COUNT(*) AS total FROM demo_enquiries`);
+    const total = Number(countResult.rows[0]?.total || 0);
+
+    const result = await pool.query(
+      `SELECT id, full_name, business_name, phone_number, employees_range, source, notes, created_at
+       FROM demo_enquiries
+       ORDER BY created_at DESC
+       LIMIT $1 OFFSET $2`,
+      [limitNum, offset]
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        data: result.rows,
+        page: pageNum,
+        limit: limitNum,
+        total,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/admin/company-billing
  * Update plan and billing metadata for a company.
  * Body: {
@@ -317,6 +355,7 @@ async function unlockCompany(req, res, next) {
 module.exports = {
   listPendingCompanies,
   getAdminOverview,
+  listDemoEnquiries,
   updateCompanyBilling,
   approveCompany,
   declineCompany,

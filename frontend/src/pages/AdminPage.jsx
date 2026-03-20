@@ -22,6 +22,9 @@ export default function AdminPage() {
   const [keyError, setKeyError] = useState('');
   const [toast, setToast] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  const [enquiries, setEnquiries] = useState([]);
+  const [enquiriesLoading, setEnquiriesLoading] = useState(false);
+  const [enquiriesError, setEnquiriesError] = useState('');
   const [billingModalCompany, setBillingModalCompany] = useState(null);
   const [billingForm, setBillingForm] = useState({
     plan_code: 'starter',
@@ -101,6 +104,41 @@ export default function AdminPage() {
       loadOverview();
     }
   }, [adminKey, loadPending, loadOverview]);
+
+  const loadEnquiries = useCallback(async () => {
+    if (!adminKey) return;
+    setEnquiriesLoading(true);
+    setEnquiriesError('');
+    try {
+      const res = await adminFetch(`/demo-enquiries?page=1&limit=20`, {}, adminKey);
+      if (res.status === 401) {
+        setKeyError('Invalid admin key');
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+        setAdminKey('');
+        setEnquiries([]);
+        return;
+      }
+      if (res.status === 503) {
+        setEnquiriesError('Server: set ADMIN_APPROVAL_SECRET in backend .env and restart the API.');
+        setEnquiries([]);
+        return;
+      }
+      if (!res.ok) throw new Error('Failed to load demo enquiries');
+      const json = await res.json();
+      const list = Array.isArray(json?.data?.data) ? json.data.data : [];
+      setEnquiries(list);
+    } catch (err) {
+      setEnquiriesError(err.message || 'Unable to load enquiries');
+      setEnquiries([]);
+    } finally {
+      setEnquiriesLoading(false);
+    }
+  }, [adminKey]);
+
+  useEffect(() => {
+    if (!adminKey) return;
+    loadEnquiries();
+  }, [adminKey, loadEnquiries]);
 
   const handleKeySubmit = (e) => {
     e.preventDefault();
@@ -688,6 +726,57 @@ export default function AdminPage() {
                           </button>
                         </div>
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mt-6">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
+            <h2 className="text-sm font-semibold text-slate-900">Demo enquiries</h2>
+            <p className="text-xs text-slate-500">Latest free-demo requests from the landing page.</p>
+          </div>
+          {enquiriesLoading ? (
+            <div className="p-8 text-center text-slate-500">Loading…</div>
+          ) : enquiriesError ? (
+            <div className="p-4 text-sm text-rose-700 bg-rose-50 border-t border-rose-200">{enquiriesError}</div>
+          ) : enquiries.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">No enquiries yet.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-slate-900">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Name</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Business</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Phone</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Employees</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Created</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {enquiries.map((q) => (
+                    <tr key={q.id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-medium text-slate-900">{q.full_name || '—'}</td>
+                      <td className="px-4 py-3 text-slate-600">{q.business_name || '—'}</td>
+                      <td className="px-4 py-3 text-slate-600">{q.phone_number || '—'}</td>
+                      <td className="px-4 py-3 text-slate-600">{q.employees_range || '—'}</td>
+                      <td className="px-4 py-3 text-slate-500">
+                        {q.created_at
+                          ? new Date(q.created_at).toLocaleString(undefined, {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{q.notes || '—'}</td>
                     </tr>
                   ))}
                 </tbody>

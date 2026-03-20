@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const {
   listPendingCompanies,
   getAdminOverview,
+  listDemoEnquiries,
   updateCompanyBilling,
   approveCompany,
   declineCompany,
@@ -34,6 +35,7 @@ router.use(requireApprovalSecret);
 
 router.get('/pending-companies', listPendingCompanies);
 router.get('/overview', getAdminOverview);
+router.get('/demo-enquiries', listDemoEnquiries);
 router.post('/company-billing', updateCompanyBilling);
 router.post('/approve-company', approveCompany);
 router.post('/decline-company', declineCompany);
