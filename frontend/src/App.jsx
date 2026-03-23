@@ -15,6 +15,11 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import EnquiriesPage from './pages/EnquiriesPage';
 import AdminPage from './pages/AdminPage';
+import ToolsHomePage from './pages/tools/ToolsHomePage';
+import SalaryCalculator from './pages/tools/SalaryCalculator';
+import PFESICalculator from './pages/tools/PFESICalculator';
+import PayslipGenerator from './pages/tools/PayslipGenerator';
+import PayrollCostCalculator from './pages/tools/PayrollCostCalculator';
 
 function RootRedirect() {
   const { isAuthenticated, loading } = useAuth();
@@ -31,6 +36,11 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/admin" element={<AdminPage />} />
+          <Route path="/tools" element={<ToolsHomePage />} />
+          <Route path="/tools/salary-calculator" element={<SalaryCalculator />} />
+          <Route path="/tools/pf-esi-calculator" element={<PFESICalculator />} />
+          <Route path="/tools/payslip-generator" element={<PayslipGenerator />} />
+          <Route path="/tools/payroll-cost-calculator" element={<PayrollCostCalculator />} />
           <Route
             element={
               <ProtectedRoute>
