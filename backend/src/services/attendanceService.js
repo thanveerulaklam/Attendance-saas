@@ -369,6 +369,20 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
   };
 }
 
+function getHoursBasedDailyPresence(dayLogs, computedStatus, isCurrentDate) {
+  if (!isCurrentDate) {
+    return Boolean(computedStatus?.present);
+  }
+  if (!Array.isArray(dayLogs) || dayLogs.length === 0) {
+    return false;
+  }
+  const sorted = [...dayLogs].sort(
+    (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
+  );
+  const lastPunch = sorted[sorted.length - 1];
+  return String(lastPunch?.punch_type || '').toLowerCase() === 'in';
+}
+
 /**
  * Ensure auto OUT punches are inserted for a given date for all employees in the company.
  * This is used so that both daily attendance views and payroll calculations see a closed day
@@ -533,6 +547,11 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
   const dayNum = parseInt(d, 10);
   const dayStart = new Date(Date.UTC(year, month - 1, dayNum, 0, 0, 0));
   const dayEnd = new Date(Date.UTC(year, month - 1, dayNum + 1, 0, 0, 0));
+  const today = new Date();
+  const isCurrentDate =
+    today.getUTCFullYear() === year &&
+    today.getUTCMonth() + 1 === month &&
+    today.getUTCDate() === dayNum;
 
   await ensureAutoOutForDate(companyId, dateStr);
 
@@ -602,6 +621,12 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
         shiftConfig.attendanceMode === 'hours_based'
           ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart)
           : computeDayStatus(dayLogs, shiftConfig, dayStart);
+      const isProvisionalHoursBased =
+        shiftConfig.attendanceMode === 'hours_based' && isCurrentDate;
+      const presentForDaily =
+        shiftConfig.attendanceMode === 'hours_based'
+          ? getHoursBasedDailyPresence(dayLogs, status, isCurrentDate)
+          : status.present;
       const punches = dayLogs.map((l) => ({
         id: l.id,
         punch_time: l.punch_time,
@@ -612,7 +637,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
         employee_id: emp.id,
         name: emp.name,
         employee_code: emp.employee_code,
-        present: status.present,
+        present: presentForDaily,
         late: status.late,
         overtime_hours: Math.round(status.overtimeHours * 100) / 100,
         full_day: status.fullDay,
@@ -635,6 +660,7 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
           : null,
         minutes_late:
           status.minutesLate != null ? Math.round(status.minutesLate) : 0,
+        is_provisional: isProvisionalHoursBased,
         punches,
       };
     });
@@ -1077,4 +1103,5 @@ module.exports = {
   ensureAutoOutForMonth,
   computeDayStatus,
   computeHoursBasedDayStatus,
+  getHoursBasedDailyPresence,
 };
