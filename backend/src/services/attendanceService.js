@@ -283,6 +283,9 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
   let totalMinutesInside = 0;
   let lastIn = null;
   let firstInTime = null;
+  const dayEndMs = dayStart.getTime() + 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const maxSessionMinutes = 24 * 60;
 
   for (const log of sorted) {
     const t = new Date(log.punch_time);
@@ -292,10 +295,20 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
       lastIn = t;
     } else if (type === 'out' && lastIn) {
       const diffMinutes = (t - lastIn) / (60 * 1000);
-      if (diffMinutes >= 0 && diffMinutes <= 600) {
+      if (diffMinutes >= 0 && diffMinutes <= maxSessionMinutes) {
         totalMinutesInside += diffMinutes;
       }
       lastIn = null;
+    }
+  }
+
+  // If employee is still inside (IN without matching OUT), count ongoing time
+  // up to now for today's date, otherwise up to day-end for historical dates.
+  if (lastIn) {
+    const activeSessionEndMs = Math.min(dayEndMs, nowMs);
+    const diffMinutes = (activeSessionEndMs - lastIn.getTime()) / (60 * 1000);
+    if (diffMinutes >= 0 && diffMinutes <= maxSessionMinutes) {
+      totalMinutesInside += diffMinutes;
     }
   }
 
@@ -1062,4 +1075,6 @@ module.exports = {
   deletePunch,
   ensureAutoOutForDate,
   ensureAutoOutForMonth,
+  computeDayStatus,
+  computeHoursBasedDayStatus,
 };

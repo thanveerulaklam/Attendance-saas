@@ -143,13 +143,14 @@ function computeHoursInsideForDay(dayLogs) {
   const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
   let totalMinutes = 0;
   let lastIn = null;
+  const maxSessionMinutes = 24 * 60;
 
   for (const log of sorted) {
     if (log.punchType === 'in') {
       lastIn = log.punchTime;
     } else if (log.punchType === 'out' && lastIn) {
       const diffMin = (log.punchTime - lastIn) / (60 * 1000);
-      if (diffMin >= 0 && diffMin <= 600) {
+      if (diffMin >= 0 && diffMin <= maxSessionMinutes) {
         totalMinutes += diffMin;
       }
       lastIn = null;

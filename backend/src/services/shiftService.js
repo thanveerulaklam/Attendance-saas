@@ -27,6 +27,8 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        lunch_over_deduction_amount,
        no_leave_incentive,
        paid_leave_days,
+       attendance_mode,
+       required_hours_per_day,
        created_at
      FROM shifts
      WHERE company_id = $1
@@ -53,6 +55,8 @@ async function createShift(companyId, data) {
     lunchOverDeductionAmount,
     noLeaveIncentive,
     paidLeaveDays,
+    attendanceMode,
+    requiredHoursPerDay,
   } = parsed;
 
   if (!name || !startTime || !endTime) {
@@ -75,9 +79,11 @@ async function createShift(companyId, data) {
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
        no_leave_incentive,
-       paid_leave_days
+       paid_leave_days,
+       attendance_mode,
+       required_hours_per_day
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING
        id,
        company_id,
@@ -93,6 +99,8 @@ async function createShift(companyId, data) {
        lunch_over_deduction_amount,
        no_leave_incentive,
        paid_leave_days,
+       attendance_mode,
+       required_hours_per_day,
        created_at`,
     [
       companyId,
@@ -108,6 +116,8 @@ async function createShift(companyId, data) {
       lunchOverDeductionAmount,
       noLeaveIncentive,
       paidLeaveDays,
+      attendanceMode,
+      requiredHoursPerDay,
     ]
   );
 
@@ -142,6 +152,14 @@ function parseShiftData(data) {
   const paidLeaveDays = Number.isFinite(Number(data.paid_leave_days))
     ? Math.max(0, Number(data.paid_leave_days))
     : 0;
+  const attendanceMode =
+    String(data.attendance_mode || '').toLowerCase() === 'hours_based'
+      ? 'hours_based'
+      : 'shift_based';
+  const requiredHoursPerDayRaw = Number(data.required_hours_per_day);
+  const requiredHoursPerDay = Number.isFinite(requiredHoursPerDayRaw)
+    ? Math.min(24, Math.max(1, requiredHoursPerDayRaw))
+    : 8;
   const weeklyOffDays = Array.isArray(data.weekly_off_days)
     ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : [];
@@ -159,6 +177,8 @@ function parseShiftData(data) {
     lunchOverDeductionAmount,
     noLeaveIncentive,
     paidLeaveDays,
+    attendanceMode,
+    requiredHoursPerDay,
   };
 }
 
@@ -183,8 +203,10 @@ async function updateShift(companyId, shiftId, data) {
        lunch_over_deduction_minutes = $10,
        lunch_over_deduction_amount = $11,
        no_leave_incentive = $12,
-       paid_leave_days = $13
-     WHERE company_id = $1 AND id = $14
+       paid_leave_days = $13,
+       attendance_mode = $14,
+       required_hours_per_day = $15
+     WHERE company_id = $1 AND id = $16
      RETURNING
        id,
        company_id,
@@ -200,6 +222,8 @@ async function updateShift(companyId, shiftId, data) {
        lunch_over_deduction_amount,
        no_leave_incentive,
        paid_leave_days,
+       attendance_mode,
+       required_hours_per_day,
        created_at`,
     [
       companyId,
@@ -215,6 +239,8 @@ async function updateShift(companyId, shiftId, data) {
       parsed.lunchOverDeductionAmount,
       parsed.noLeaveIncentive,
       parsed.paidLeaveDays,
+      parsed.attendanceMode,
+      parsed.requiredHoursPerDay,
       shiftId,
     ]
   );
