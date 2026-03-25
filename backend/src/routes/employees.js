@@ -2,6 +2,7 @@ const express = require('express');
 const {
   createEmployee,
   getEmployees,
+  getDepartments,
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
@@ -26,6 +27,9 @@ router.post('/', withEmployeeAuth, createEmployee);
 
 // GET /api/employees
 router.get('/', withEmployeeAuth, getEmployees);
+
+// GET /api/employees/departments
+router.get('/departments', withEmployeeAuth, getDepartments);
 
 // GET /api/employees/:id
 router.get('/:id', withEmployeeAuth, getEmployeeById);

@@ -530,7 +530,7 @@ async function ensureAutoOutForMonth(companyId, employeeId, year, month) {
  * @param {number} [employeeId] - optional filter
  * @returns {Promise<Array<{ employee_id, name, employee_code, present, late, overtime_hours }>>}
  */
-async function getDailyAttendance(companyId, dateStr, employeeId = null) {
+async function getDailyAttendance(companyId, dateStr, employeeId = null, department = null) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   if (!match) {
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
@@ -544,22 +544,25 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
   const client = await pool.connect();
   try {
     let employeesResult;
+    const dept = department ? String(department).trim() : null;
+    let employeesQuery = `SELECT id, name, employee_code, shift_id
+      FROM employees
+      WHERE company_id = $1 AND status = 'active'`;
+    const params = [companyId];
+
     if (employeeId) {
-      employeesResult = await client.query(
-        `SELECT id, name, employee_code, shift_id
-         FROM employees
-         WHERE company_id = $1 AND id = $2 AND status = 'active'`,
-        [companyId, employeeId]
-      );
-    } else {
-      employeesResult = await client.query(
-        `SELECT id, name, employee_code, shift_id
-         FROM employees
-         WHERE company_id = $1 AND status = 'active'
-         ORDER BY name`,
-        [companyId]
-      );
+      employeesQuery += ` AND id = $${params.length + 1}`;
+      params.push(employeeId);
     }
+
+    if (dept) {
+      employeesQuery += ` AND department = $${params.length + 1}`;
+      params.push(dept);
+    }
+
+    if (!employeeId) employeesQuery += ' ORDER BY name';
+
+    employeesResult = await client.query(employeesQuery, params);
 
     const employees = employeesResult.rows;
     if (employees.length === 0) {
@@ -661,7 +664,13 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
  * @param {number} month
  * @param {number} [employeeId] - optional filter
  */
-async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
+async function getMonthlyAttendance(
+  companyId,
+  year,
+  month,
+  employeeId = null,
+  department = null
+) {
   const y = Number(year);
   const m = Number(month);
   if (!y || !m || m < 1 || m > 12) {
@@ -675,22 +684,25 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
   const client = await pool.connect();
   try {
     let employeesResult;
+    const dept = department ? String(department).trim() : null;
+    let employeesQuery = `SELECT id, name, employee_code, shift_id
+      FROM employees
+      WHERE company_id = $1 AND status = 'active'`;
+    const params = [companyId];
+
     if (employeeId) {
-      employeesResult = await client.query(
-        `SELECT id, name, employee_code, shift_id
-         FROM employees
-         WHERE company_id = $1 AND id = $2 AND status = 'active'`,
-        [companyId, employeeId]
-      );
-    } else {
-      employeesResult = await client.query(
-        `SELECT id, name, employee_code, shift_id
-         FROM employees
-         WHERE company_id = $1 AND status = 'active'
-         ORDER BY name`,
-        [companyId]
-      );
+      employeesQuery += ` AND id = $${params.length + 1}`;
+      params.push(employeeId);
     }
+
+    if (dept) {
+      employeesQuery += ` AND department = $${params.length + 1}`;
+      params.push(dept);
+    }
+
+    if (!employeeId) employeesQuery += ' ORDER BY name';
+
+    employeesResult = await client.query(employeesQuery, params);
 
     const employees = employeesResult.rows;
     if (employees.length === 0) {

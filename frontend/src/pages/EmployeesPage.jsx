@@ -31,6 +31,7 @@ export default function EmployeesPage() {
   const [showModal, setShowModal] = useState(openFromOnboarding);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [toast, setToast] = useState(null);
+  const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
 
   const shiftNameById = Object.fromEntries(
     (shifts || []).map((s) => [String(s.id), s.shift_name])
@@ -93,6 +94,23 @@ export default function EmployeesPage() {
       .then((res) => res.json())
       .then((json) => setShifts(json.data || []))
       .catch(() => setShifts([]));
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    authFetch('/api/employees/departments')
+      .then((res) => res.json())
+      .then((json) => {
+        if (!isMounted) return;
+        setDepartmentSuggestions(json.data || []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setDepartmentSuggestions([]);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleSearchChange = (value) => {
@@ -406,6 +424,7 @@ export default function EmployeesPage() {
             setEditingEmployee(null);
           }}
           onCreated={handleEmployeeCreated}
+          departmentSuggestions={departmentSuggestions}
         />
       )}
     </div>

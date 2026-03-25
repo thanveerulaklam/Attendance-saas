@@ -64,6 +64,10 @@ async function createEmployee(companyId, data) {
   const dailyTravelAllowance =
     payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
   const esiAmount = payload.esi_amount != null ? payload.esi_amount : 0;
+  const department = payload.department != null ? payload.department : null;
+  const phoneNumber = payload.phone_number != null ? payload.phone_number : null;
+  const aadharNumber = payload.aadhar_number != null ? payload.aadhar_number : null;
+  const esiNumber = payload.esi_number != null ? payload.esi_number : null;
 
   try {
     // Enforce per-plan active employee limits before creating a new active employee
@@ -76,6 +80,10 @@ async function createEmployee(companyId, data) {
         company_id,
         name,
         employee_code,
+        department,
+        phone_number,
+        aadhar_number,
+        esi_number,
         basic_salary,
         join_date,
         status,
@@ -83,12 +91,16 @@ async function createEmployee(companyId, data) {
         daily_travel_allowance,
         esi_amount
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at`,
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING id, company_id, name, employee_code, department, phone_number, aadhar_number, esi_number, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at`,
       [
         companyId,
         payload.name,
         payload.employee_code,
+        department,
+        phoneNumber,
+        aadharNumber,
+        esiNumber,
         payload.basic_salary,
         payload.join_date,
         payload.status,
@@ -143,6 +155,10 @@ async function getEmployees(companyId, { page = 1, limit = 10, search } = {}) {
         company_id,
         name,
         employee_code,
+        department,
+        phone_number,
+        aadhar_number,
+        esi_number,
         basic_salary,
         join_date,
         status,
@@ -176,6 +192,10 @@ async function getEmployeeById(companyId, id) {
         company_id,
         name,
         employee_code,
+        department,
+        phone_number,
+        aadhar_number,
+        esi_number,
         basic_salary,
         join_date,
         status,
@@ -226,7 +246,7 @@ async function updateEmployee(companyId, id, data) {
       UPDATE employees
       SET ${fields.join(', ')}
       WHERE company_id = $1 AND id = $2
-      RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at
+      RETURNING id, company_id, name, employee_code, department, phone_number, aadhar_number, esi_number, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at
     `;
 
     const result = await client.query(query, values);
@@ -256,7 +276,7 @@ async function deactivateEmployee(companyId, id) {
     `UPDATE employees
      SET status = 'inactive'
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, name, employee_code, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at`,
+     RETURNING id, company_id, name, employee_code, department, phone_number, aadhar_number, esi_number, basic_salary, join_date, status, shift_id, daily_travel_allowance, esi_amount, created_at`,
     [companyId, id]
   );
 
@@ -273,5 +293,23 @@ module.exports = {
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
+  getEmployeeDepartments,
 };
+
+/**
+ * Returns distinct, previously-used departments for the company.
+ */
+async function getEmployeeDepartments(companyId) {
+  const result = await pool.query(
+    `SELECT DISTINCT department
+     FROM employees
+     WHERE company_id = $1
+       AND department IS NOT NULL
+       AND department <> ''
+     ORDER BY department ASC`,
+    [companyId]
+  );
+
+  return result.rows.map((r) => r.department);
+}
 

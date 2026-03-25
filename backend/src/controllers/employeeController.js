@@ -42,6 +42,19 @@ const getEmployees = asyncHandler(async (req, res) => {
 });
 
 /**
+ * GET /api/employees/departments
+ */
+const getDepartments = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const departments = await employeeService.getEmployeeDepartments(companyId);
+
+  return res.status(200).json({
+    success: true,
+    data: departments,
+  });
+});
+
+/**
  * GET /api/employees/:id
  */
 const getEmployeeById = asyncHandler(async (req, res) => {
@@ -94,6 +107,7 @@ const deactivateEmployee = asyncHandler(async (req, res) => {
 module.exports = {
   createEmployee,
   getEmployees,
+  getDepartments,
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,

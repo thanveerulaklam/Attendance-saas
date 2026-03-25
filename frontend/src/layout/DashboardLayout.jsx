@@ -21,7 +21,10 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [company, setCompany] = useState(null);
-  const adminNavItems = user?.role === 'admin' ? [{ to: '/enquiries', label: 'Enquiries' }] : [];
+  const isSuperAdmin =
+    user?.role === 'admin' &&
+    (user?.company_id == null || Number(user?.company_id) === 0);
+  const adminNavItems = isSuperAdmin ? [{ to: '/enquiries', label: 'Enquiries' }] : [];
   const subscription = getSubscriptionStatus(company);
   const showBanner = company && (
     !subscription.allowed ||

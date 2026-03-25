@@ -81,6 +81,38 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'department')) {
+    if (payload.department == null || payload.department === '') {
+      // optional: store as NULL
+    } else if (typeof payload.department !== 'string') {
+      errors.department = 'Department must be a string.';
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
+    if (payload.phone_number == null || payload.phone_number === '') {
+      // optional: store as NULL
+    } else if (typeof payload.phone_number !== 'string') {
+      errors.phone_number = 'Phone number must be a string.';
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'aadhar_number')) {
+    if (payload.aadhar_number == null || payload.aadhar_number === '') {
+      // optional: store as NULL
+    } else if (typeof payload.aadhar_number !== 'string') {
+      errors.aadhar_number = 'Aadhaar number must be a string.';
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_number')) {
+    if (payload.esi_number == null || payload.esi_number === '') {
+      // optional: store as NULL
+    } else if (typeof payload.esi_number !== 'string') {
+      errors.esi_number = 'ESI number must be a string.';
+    }
+  }
+
   ensureNoErrors(errors);
 
   const result = {
@@ -106,6 +138,35 @@ const validateCreateEmployee = (payload = {}) => {
     const v = payload.esi_amount;
     result.esi_amount = v == null || v === '' ? 0 : Number(v);
   }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'department')) {
+    result.department =
+      payload.department == null || payload.department === ''
+        ? null
+        : payload.department.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
+    result.phone_number =
+      payload.phone_number == null || payload.phone_number === ''
+        ? null
+        : payload.phone_number.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'aadhar_number')) {
+    result.aadhar_number =
+      payload.aadhar_number == null || payload.aadhar_number === ''
+        ? null
+        : payload.aadhar_number.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_number')) {
+    result.esi_number =
+      payload.esi_number == null || payload.esi_number === ''
+        ? null
+        : payload.esi_number.trim();
+  }
+
   return result;
 };
 
@@ -201,6 +262,46 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.esi_amount = 'ESI amount must be a non-negative number.';
     } else {
       clean.esi_amount = Number(v);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'department')) {
+    if (payload.department == null || payload.department === '') {
+      clean.department = null;
+    } else if (typeof payload.department !== 'string') {
+      errors.department = 'Department must be a string.';
+    } else {
+      clean.department = payload.department.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
+    if (payload.phone_number == null || payload.phone_number === '') {
+      clean.phone_number = null;
+    } else if (typeof payload.phone_number !== 'string') {
+      errors.phone_number = 'Phone number must be a string.';
+    } else {
+      clean.phone_number = payload.phone_number.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'aadhar_number')) {
+    if (payload.aadhar_number == null || payload.aadhar_number === '') {
+      clean.aadhar_number = null;
+    } else if (typeof payload.aadhar_number !== 'string') {
+      errors.aadhar_number = 'Aadhaar number must be a string.';
+    } else {
+      clean.aadhar_number = payload.aadhar_number.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_number')) {
+    if (payload.esi_number == null || payload.esi_number === '') {
+      clean.esi_number = null;
+    } else if (typeof payload.esi_number !== 'string') {
+      errors.esi_number = 'ESI number must be a string.';
+    } else {
+      clean.esi_number = payload.esi_number.trim();
     }
   }
 

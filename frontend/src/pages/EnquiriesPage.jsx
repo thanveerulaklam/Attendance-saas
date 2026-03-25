@@ -19,7 +19,9 @@ function formatDateTime(iso) {
 
 export default function EnquiriesPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
+  const isSuperAdmin =
+    user?.role === 'admin' &&
+    (user?.company_id == null || Number(user?.company_id) === 0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -54,19 +56,19 @@ export default function EnquiriesPage() {
   };
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isSuperAdmin) return;
     load(page);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, isAdmin]);
+  }, [page, isSuperAdmin]);
 
   const pageRows = useMemo(() => enquiries || [], [enquiries]);
 
-  if (!isAdmin) {
+  if (!isSuperAdmin) {
     return (
       <div className="space-y-4">
         <header>
           <h1 className="text-lg font-semibold text-slate-900">Enquiries</h1>
-          <p className="text-xs text-slate-500">Only admins can view enquiries.</p>
+          <p className="text-xs text-slate-500">Only super admin can view enquiries.</p>
         </header>
         <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
           You don&apos;t have permission to view this page.

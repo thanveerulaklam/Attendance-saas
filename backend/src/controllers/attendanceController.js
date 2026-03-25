@@ -14,7 +14,7 @@ const {
 async function getDaily(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { date, employee_id: employeeId } = req.query || {};
+    const { date, employee_id: employeeId, department } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -31,7 +31,8 @@ async function getDaily(req, res, next) {
     }
 
     const eid = employeeId ? Number(employeeId) : null;
-    const data = await getDailyAttendance(companyId, date.trim(), eid);
+    const dept = department ? String(department).trim() : null;
+    const data = await getDailyAttendance(companyId, date.trim(), eid, dept);
 
     return res.json({
       success: true,
@@ -48,7 +49,7 @@ async function getDaily(req, res, next) {
 async function getMonthly(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { year, month, employee_id: employeeId } = req.query || {};
+    const { year, month, employee_id: employeeId, department } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -67,7 +68,8 @@ async function getMonthly(req, res, next) {
     }
 
     const eid = employeeId ? Number(employeeId) : null;
-    const data = await getMonthlyAttendance(companyId, y, m, eid);
+    const dept = department ? String(department).trim() : null;
+    const data = await getMonthlyAttendance(companyId, y, m, eid, dept);
 
     return res.json({
       success: true,

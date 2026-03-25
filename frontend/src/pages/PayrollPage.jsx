@@ -145,6 +145,13 @@ export default function PayrollPage() {
           const monthlyRes = await authFetch(`/api/attendance/monthly?${monthlyParams}`, {
             headers: { 'Content-Type': 'application/json' },
           });
+          const holidayParams = new URLSearchParams({
+            year: String(detailRow.year),
+            month: String(detailRow.month),
+          });
+          const holidaysRes = await authFetch(`/api/holidays?${holidayParams}`, {
+            headers: { 'Content-Type': 'application/json' },
+          });
           const empMeta = {
             designation: null,
             department: null,
@@ -161,17 +168,23 @@ export default function PayrollPage() {
             const monthlyJson = await monthlyRes.json();
             const data = monthlyJson.data;
             const employee = Array.isArray(data?.employees) ? data.employees[0] : null;
+            const holidayJson = holidaysRes.ok ? await holidaysRes.json() : { data: [] };
+            const holidayDateSet = new Set(
+              (holidayJson.data || [])
+                .map((h) => (h?.holiday_date || h?.date || '').slice(0, 10))
+                .filter(Boolean)
+            );
             if (employee) {
               const days = employee.days || [];
               empMeta.absentDates = days
-                .filter((d) => !d.present)
+                .filter((d) => !d.present && !holidayDateSet.has(d.date))
                 .map((d) => d.date);
               empMeta.halfDayDates = days
-                .filter((d) => d.half_day)
+                .filter((d) => d.half_day && !holidayDateSet.has(d.date))
                 .map((d) => d.date);
               empMeta.halfDayCount = empMeta.halfDayDates.length;
               empMeta.lateDetails = days
-                .filter((d) => d.late)
+                .filter((d) => d.late && !holidayDateSet.has(d.date))
                 .map((d) => ({
                   date: d.date,
                   minutes: d.minutes_late || null,

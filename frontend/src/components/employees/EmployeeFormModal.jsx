@@ -6,12 +6,22 @@ const STATUS_OPTIONS = [
   { value: 'inactive', label: 'Inactive' },
 ];
 
-export default function EmployeeFormModal({ open, onClose, onCreated, employee }) {
+export default function EmployeeFormModal({
+  open,
+  onClose,
+  onCreated,
+  employee,
+  departmentSuggestions = [],
+}) {
   const isEdit = Boolean(employee?.id);
 
   const [name, setName] = useState('');
   const [employeeCode, setEmployeeCode] = useState('');
   const [basicSalary, setBasicSalary] = useState('');
+  const [department, setDepartment] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [aadharNumber, setAadharNumber] = useState('');
+  const [esiNumber, setEsiNumber] = useState('');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
   const [joinDate, setJoinDate] = useState('');
@@ -43,6 +53,10 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
       if (employee) {
         setName(employee.name || '');
         setEmployeeCode(employee.employee_code || '');
+        setDepartment(employee.department || '');
+        setPhoneNumber(employee.phone_number || '');
+        setAadharNumber(employee.aadhar_number || '');
+        setEsiNumber(employee.esi_number || '');
         setBasicSalary(
           employee.basic_salary != null ? String(employee.basic_salary) : ''
         );
@@ -64,6 +78,10 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
       } else {
         setName('');
         setEmployeeCode('');
+        setDepartment('');
+        setPhoneNumber('');
+        setAadharNumber('');
+        setEsiNumber('');
         setBasicSalary('');
         setDailyTravelAllowance('');
         setEsiAmount('');
@@ -105,6 +123,25 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
       nextErrors.esiAmount = 'ESI amount must be 0 or more';
     }
 
+    if (phoneNumber.trim() !== '') {
+      const normalizedPhone = phoneNumber.trim().replace(/[\s-]/g, '');
+      if (!/^\+?\d{10,15}$/.test(normalizedPhone)) {
+        nextErrors.phoneNumber =
+          'Phone number must be 10-15 digits (optionally starting with +).';
+      }
+    }
+
+    if (aadharNumber.trim() !== '') {
+      const normalizedAadhar = aadharNumber.trim().replace(/\s+/g, '');
+      if (!/^\d{12}$/.test(normalizedAadhar)) {
+        nextErrors.aadharNumber = 'Aadhaar number must be exactly 12 digits.';
+      }
+    }
+
+    if (esiNumber.trim() !== '' && esiNumber.trim().length > 30) {
+      nextErrors.esiNumber = 'ESI number is too long (max 30 characters).';
+    }
+
     if (!joinDate) {
       nextErrors.joinDate = 'Join date is required';
     }
@@ -125,9 +162,16 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
       setSubmitting(true);
       setToast(null);
 
+      const normalizedPhone = phoneNumber.trim().replace(/[\s-]/g, '');
+      const normalizedAadhar = aadharNumber.trim().replace(/\s+/g, '');
+
       const payload = {
         name: name.trim(),
         employee_code: employeeCode.trim(),
+        department: department.trim() === '' ? null : department.trim(),
+        phone_number: normalizedPhone === '' ? null : normalizedPhone,
+        aadhar_number: normalizedAadhar === '' ? null : normalizedAadhar,
+        esi_number: esiNumber.trim() === '' ? null : esiNumber.trim(),
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
         esi_amount: esiAmount.trim() === '' ? 0 : Number(esiAmount),
@@ -277,6 +321,83 @@ export default function EmployeeFormModal({ open, onClose, onCreated, employee }
               </label>
               {errors.basicSalary && (
                 <p className="mt-1 text-[11px] text-rose-600">{errors.basicSalary}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Department (optional)
+                <input
+                  type="text"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  list="department-suggestions"
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="Engineering"
+                />
+              </label>
+              <datalist id="department-suggestions">
+                {(departmentSuggestions || []).map((d) => (
+                  <option key={String(d)} value={d} />
+                ))}
+              </datalist>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Phone number (optional)
+                <input
+                  type="text"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="+91 98765 43210"
+                />
+              </label>
+              {errors.phoneNumber && (
+                <p className="mt-1 text-[11px] text-rose-600">
+                  {errors.phoneNumber}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Aadhaar number (optional)
+                <input
+                  type="text"
+                  value={aadharNumber}
+                  onChange={(e) => setAadharNumber(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="1234 5678 9012"
+                />
+              </label>
+              {errors.aadharNumber && (
+                <p className="mt-1 text-[11px] text-rose-600">
+                  {errors.aadharNumber}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                ESI number (optional)
+                <input
+                  type="text"
+                  value={esiNumber}
+                  onChange={(e) => setEsiNumber(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="ESI Reg. No."
+                />
+              </label>
+              {errors.esiNumber && (
+                <p className="mt-1 text-[11px] text-rose-600">
+                  {errors.esiNumber}
+                </p>
               )}
             </div>
           </div>

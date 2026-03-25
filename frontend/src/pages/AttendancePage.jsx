@@ -62,9 +62,11 @@ function getMonthYear(offset = 0) {
 export default function AttendancePage() {
   const [monthYear, setMonthYear] = useState(() => getMonthYear(0));
   const [employeeId, setEmployeeId] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [employees, setEmployees] = useState([]);
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
+  const [departmentOptions, setDepartmentOptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dailyLoading, setDailyLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -122,10 +124,33 @@ export default function AttendancePage() {
 
   useEffect(() => {
     let isMounted = true;
+    authFetch('/api/employees/departments', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load departments');
+        return res.json();
+      })
+      .then((json) => {
+        if (!isMounted) return;
+        setDepartmentOptions(json.data || []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setDepartmentOptions([]);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
     setError(null);
     setLoading(true);
     const params = new URLSearchParams({ year, month });
     if (employeeId) params.set('employee_id', employeeId);
+    if (departmentFilter !== 'all') params.set('department', departmentFilter);
     authFetch(`/api/attendance/monthly?${params}`, {
       headers: { 'Content-Type': 'application/json' },
     })
@@ -146,7 +171,7 @@ export default function AttendancePage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [year, month, employeeId, refreshKey]);
+  }, [year, month, employeeId, departmentFilter, refreshKey]);
 
   useEffect(() => {
     let isMounted = true;
@@ -154,7 +179,9 @@ export default function AttendancePage() {
     const timeout = setTimeout(() => {
       setError(null);
       setDailyLoading(true);
-      authFetch(`/api/attendance/daily?date=${dateStr}`, {
+      const params = new URLSearchParams({ date: dateStr });
+      if (departmentFilter !== 'all') params.set('department', departmentFilter);
+      authFetch(`/api/attendance/daily?${params.toString()}`, {
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
       })
@@ -191,7 +218,7 @@ export default function AttendancePage() {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [dateStr, refreshKey]);
+  }, [dateStr, departmentFilter, refreshKey]);
 
   const todaySummary = useMemo(() => {
     if (!dailyData || dailyData.length === 0) {
@@ -378,13 +405,27 @@ export default function AttendancePage() {
               Attendance for {formatDateLongIstYmd(dateStr)}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={openManualModal}
-            className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
-          >
-            Mark manual attendance
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+            >
+              <option value="all">All departments</option>
+              {(departmentOptions || []).map((d) => (
+                <option key={String(d)} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={openManualModal}
+              className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
+            >
+              Mark manual attendance
+            </button>
+          </div>
         </div>
         {dailyLoading ? (
           <div className="mt-3 h-16 rounded-lg bg-slate-50 animate-pulse" />
