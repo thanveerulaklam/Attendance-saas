@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 process.env.TZ = 'Asia/Kolkata';
 
+/** Must load before zk-attendance-sdk: IST device time → UTC ISO (same as root connector). */
+require('./patchZkSdkIst');
+
 /**
  * Biometric connector: pulls attendance logs from eSSL SilkBio 101 TC (ZKTeco protocol)
  * and pushes them to this project's POST /api/device/push.
@@ -18,7 +21,7 @@ process.env.TZ = 'Asia/Kolkata';
  */
 
 require('dotenv').config();
-const ZKAttendanceClient = require('zk-attendance-sdk');
+const ZKAttendanceClient = require('zk-attendance-sdk'); // after patchZkSdkIst
 
 const DEVICE_IP = process.env.BIOMETRIC_DEVICE_IP || '192.168.1.50';
 const DEVICE_PORT = parseInt(process.env.BIOMETRIC_DEVICE_PORT || '4370', 10);
@@ -136,7 +139,8 @@ async function fetchAndPush() {
       .filter((r) => r.deviceUserId != null && r.recordTime != null)
       .map((r) => ({
         employee_code: String(r.deviceUserId).trim(),
-        punch_time: new Date(r.recordTime).toISOString(),
+        punch_time:
+          typeof r.recordTime === 'string' ? r.recordTime : new Date(r.recordTime).toISOString(),
         punch_type: 'in',
       }));
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 process.env.TZ = 'Asia/Kolkata';
 
+/** Must load before zk-attendance-sdk: fixes device punch time as IST (see patchZkSdkIst.js). */
+require('./patchZkSdkIst');
+
 /**
  * Attendance Connector - runs in background, syncs biometric device to cloud.
  * Install once, runs automatically at Windows/Mac startup.
@@ -149,7 +152,8 @@ async function fetchAndPush() {
       .filter((r) => r.deviceUserId != null && r.recordTime != null)
       .map((r) => ({
         employee_code: String(r.deviceUserId).trim(),
-        punch_time: new Date(r.recordTime).toISOString(),
+        // recordTime is ISO UTC string from patched SDK (IST wall clock from device)
+        punch_time: typeof r.recordTime === 'string' ? r.recordTime : new Date(r.recordTime).toISOString(),
         punch_type: 'in',
       }));
 

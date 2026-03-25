@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableDelayedExpansion
-REM Run this ONCE as Administrator. Put this file in the SAME folder as connector.exe and config.json.
+REM Run this ONCE as Administrator. Put this file in the SAME folder as the connector binary and config.json.
+REM After `npm run build`: use connector-win.exe (multi-target). Older builds: connector.exe.
 
 REM Always use the folder where this script lives (Run as admin can start in System32)
 cd /d "%~dp0"
@@ -16,17 +17,21 @@ if %errorlevel% neq 0 goto :not_admin
 echo %date% %time% - Running as Administrator >> "%LOG_FILE%"
 echo Installing Attendance Connector to run at Windows startup...
 
-set "CONNECTOR_EXE=%CONNECTOR_DIR%connector.exe"
 set "RUN_SCRIPT=%CONNECTOR_DIR%run-windows.bat"
 set "TASK_NAME=AttendanceConnector"
 
-if not exist "%CONNECTOR_EXE%" (
-    echo %date% %time% - ERROR: connector.exe not found >> "%LOG_FILE%"
-    echo ERROR: connector.exe not found in %CONNECTOR_DIR%
+REM pkg multi-target `npm run build` -> connector-win.exe; single-target `build:win` -> connector.exe
+set "CONNECTOR_EXE="
+if exist "%CONNECTOR_DIR%connector-win.exe" set "CONNECTOR_EXE=%CONNECTOR_DIR%connector-win.exe"
+if not defined CONNECTOR_EXE if exist "%CONNECTOR_DIR%connector.exe" set "CONNECTOR_EXE=%CONNECTOR_DIR%connector.exe"
+
+if not defined CONNECTOR_EXE (
+    echo %date% %time% - ERROR: connector-win.exe or connector.exe not found >> "%LOG_FILE%"
+    echo ERROR: connector-win.exe or connector.exe not found in %CONNECTOR_DIR%
     goto :pause_section
 )
 
-echo %date% %time% - connector.exe found >> "%LOG_FILE%"
+echo %date% %time% - Connector binary found: %CONNECTOR_EXE% >> "%LOG_FILE%"
 
 if not exist "%CONNECTOR_DIR%config.json" (
     echo %date% %time% - ERROR: config.json not found >> "%LOG_FILE%"
