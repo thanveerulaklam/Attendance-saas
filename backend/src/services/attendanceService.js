@@ -376,6 +376,10 @@ function getHoursBasedDailyPresence(dayLogs, computedStatus, isCurrentDate) {
   if (!Array.isArray(dayLogs) || dayLogs.length === 0) {
     return false;
   }
+  // If half-day or full-day thresholds are already met, count as present even when the last punch is OUT.
+  if (computedStatus?.present) {
+    return true;
+  }
   const sorted = [...dayLogs].sort(
     (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
   );
