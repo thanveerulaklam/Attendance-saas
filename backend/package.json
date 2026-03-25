@@ -9,8 +9,7 @@
     "migrate": "node ./scripts/migrate.js",
     "seed": "node ./scripts/seed.js",
     "connector": "node ./scripts/biometric-connector.js",
-    "connector:once": "node ./scripts/biometric-connector.js --once",
-    "manual-test-punches": "node ./scripts/manual-test-hours-based-punches.js"
+    "connector:once": "node ./scripts/biometric-connector.js --once"
   },
   "engines": {
     "node": ">=18.0.0"
