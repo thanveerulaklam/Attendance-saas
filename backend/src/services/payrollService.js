@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { istYmdFromDate, todayIstYmd, SQL_PUNCH_IST_DATE, addDaysIst } = require('../utils/istDate');
 const { getHolidayDatesForMonth } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
@@ -114,11 +115,9 @@ async function getShiftForEmployee(client, companyId, employeeId) {
   return getDefaultShiftForCompany(client, companyId);
 }
 
-/** Add or subtract days from YYYY-MM-DD, return YYYY-MM-DD. */
+/** Add or subtract days from YYYY-MM-DD (IST calendar), return YYYY-MM-DD. */
 function addDays(isoDateStr, delta) {
-  const d = new Date(isoDateStr + 'T12:00:00.000Z');
-  d.setUTCDate(d.getUTCDate() + delta);
-  return d.toISOString().slice(0, 10);
+  return addDaysIst(isoDateStr, delta);
 }
 
 /**
@@ -126,15 +125,17 @@ function addDays(isoDateStr, delta) {
  * and absence for dates that have already occurred. Avoids penalizing staff for future days.
  */
 function getLastDateToConsider(year, month, asOfDate) {
-  const now = new Date();
-  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
+  const todayStr = todayIstYmd();
+  const [ty, tm] = todayStr.split('-').map(Number);
+  const isCurrentMonth = year === ty && month === tm;
   const lastDayOfMonth = new Date(year, month, 0).getDate();
   const lastDayStr = `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
   if (!isCurrentMonth || !asOfDate) {
     return lastDayStr;
   }
-  const asOfStr = typeof asOfDate === 'string' ? asOfDate.slice(0, 10) : asOfDate.toISOString().slice(0, 10);
+  const asOfStr =
+    typeof asOfDate === 'string' ? asOfDate.slice(0, 10) : istYmdFromDate(asOfDate);
   return asOfStr < lastDayStr ? asOfStr : lastDayStr;
 }
 
@@ -165,7 +166,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
   try {
     await ensureAutoOutForMonth(companyId, employeeId, year, month);
 
-    const { start, end, daysInMonth } = getMonthBounds(year, month);
+    const { daysInMonth } = getMonthBounds(year, month);
+    const monthFirstStr = `${year}-${String(month).padStart(2, '0')}-01`;
+    const monthLastStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
 
@@ -175,10 +178,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
          FROM attendance_logs
          WHERE company_id = $1
            AND employee_id = $2
-           AND punch_time >= $3
-           AND punch_time < $4
+           AND ${SQL_PUNCH_IST_DATE} >= $3::date
+           AND ${SQL_PUNCH_IST_DATE} <= $4::date
          ORDER BY punch_time ASC`,
-        [companyId, employeeId, start.toISOString(), end.toISOString()]
+        [companyId, employeeId, monthFirstStr, monthLastStr]
       ),
       getHolidayDatesForMonth(companyId, year, month),
     ]);
@@ -200,7 +203,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     for (const row of logsResult.rows) {
       const punchTime = new Date(row.punch_time);
-      const key = punchTime.toISOString().slice(0, 10);
+      const key = istYmdFromDate(punchTime);
       if (!logsByDay.has(key)) {
         logsByDay.set(key, []);
       }
@@ -374,10 +377,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         punch_type: l.punchType,
       }));
 
-      const [yy, mo, dd] = dayKey.split('-').map(Number);
-      const dayStart = new Date(Date.UTC(yy, mo - 1, dd, 0, 0, 0));
       const status = require('./attendanceService').computeDayStatus
-        ? require('./attendanceService').computeDayStatus(logsForStatus, shift, dayStart)
+        ? require('./attendanceService').computeDayStatus(logsForStatus, shift, dayKey)
         : (() => {
             let workedMs = 0;
             let lastIn = null;
@@ -562,9 +563,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       throw new AppError('Cannot generate payroll for inactive employee', 400);
     }
 
-    const now = new Date();
-    const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
-    const asOfDate = isCurrentMonth ? now.toISOString().slice(0, 10) : null;
+    const todayStr = todayIstYmd();
+    const [ty, tm, td] = todayStr.split('-').map(Number);
+    const isCurrentMonth = year === ty && month === tm;
+    const asOfDate = isCurrentMonth ? todayStr : null;
     const summary = await getAttendanceSummary(companyId, employeeId, year, month, {
       treatHolidayAdjacentAbsenceAsWorking,
       asOfDate,
@@ -576,7 +578,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const hourlyRate = dailyRate / 8;
 
     const lastDayOfMonth = new Date(year, month, 0).getDate();
-    const isMonthComplete = !isCurrentMonth || now.getDate() >= lastDayOfMonth;
+    const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
 
     const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
     const presentWorkingDays = summary.presentWorkingDays ?? 0;
@@ -732,9 +734,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 async function getPayrollBreakdown(companyId, employeeId, year, month, options = {}) {
   const { includeOvertime = true, treatHolidayAdjacentAbsenceAsWorking = false } = options;
 
-  const now = new Date();
-  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
-  const asOfDate = isCurrentMonth ? now.toISOString().slice(0, 10) : null;
+  const todayStr = todayIstYmd();
+  const [ty, tm, td] = todayStr.split('-').map(Number);
+  const isCurrentMonth = year === ty && month === tm;
+  const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
     `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount
@@ -759,7 +762,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const hourlyRate = dailyRate / 8;
 
   const lastDayOfMonth = new Date(year, month, 0).getDate();
-  const isMonthComplete = !isCurrentMonth || now.getDate() >= lastDayOfMonth;
+  const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
 
   const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
   const presentWorkingDays = summary.presentWorkingDays ?? 0;

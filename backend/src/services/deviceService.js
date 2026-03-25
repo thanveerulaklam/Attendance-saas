@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { istYmdFromDate } = require('../utils/istDate');
 const crypto = require('crypto');
 const { getCompanyById, isSubscriptionAllowed } = require('./companyService');
 const auditService = require('./auditService');
@@ -126,10 +127,7 @@ async function regenerateApiKey(companyId, id) {
  * Mutates logs[].punchType so caller can insert with correct types.
  */
 function inferPunchTypesFromSequence(validLogs, employeeMap, existingRows) {
-  const toDateKey = (ts) => {
-    const d = new Date(ts);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-  };
+  const toDateKey = (ts) => istYmdFromDate(ts);
 
   const byEmployeeDay = new Map();
   for (const row of existingRows) {

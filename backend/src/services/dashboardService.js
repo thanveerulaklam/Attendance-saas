@@ -1,11 +1,11 @@
 const { getDailyAttendance } = require('./attendanceService');
+const { todayIstYmd, addDaysIst } = require('../utils/istDate');
 
 /**
  * Get dashboard summary for a company: KPIs + 7-day attendance trend + today's absent.
  */
 async function getDashboardSummary(companyId) {
-  const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = todayIstYmd();
 
   const dailyResult = await getDailyAttendance(companyId, todayStr, null);
   const totalEmployees = (dailyResult || []).length;
@@ -34,10 +34,12 @@ async function getDashboardSummary(companyId) {
 
   const trendDays = [];
   for (let i = 6; i >= 0; i -= 1) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    trendDays.push({ date: dateStr, label: d.toLocaleDateString('en-US', { weekday: 'short' }) });
+    const dateStr = addDaysIst(todayStr, -i);
+    const label = new Date(`${dateStr}T12:00:00+05:30`).toLocaleDateString('en-US', {
+      weekday: 'short',
+      timeZone: 'Asia/Kolkata',
+    });
+    trendDays.push({ date: dateStr, label });
   }
 
   const trend = [];

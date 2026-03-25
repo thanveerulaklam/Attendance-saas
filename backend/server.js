@@ -1,3 +1,5 @@
+process.env.TZ = 'Asia/Kolkata';
+
 require('dotenv').config();
 const { validateEnv } = require('./src/config/validateEnv');
 const app = require('./src/app');

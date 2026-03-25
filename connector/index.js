@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+process.env.TZ = 'Asia/Kolkata';
+
 /**
  * Attendance Connector - runs in background, syncs biometric device to cloud.
  * Install once, runs automatically at Windows/Mac startup.
@@ -53,7 +55,10 @@ const MIN_BREAK_MINUTES = 30;
 function assignInOut(logs) {
   const byUserAndDay = new Map();
   for (const log of logs) {
-    const key = `${log.employee_code}|${log.punch_time.slice(0, 10)}`;
+    const dayKey = new Date(log.punch_time).toLocaleDateString('en-CA', {
+      timeZone: 'Asia/Kolkata',
+    });
+    const key = `${log.employee_code}|${dayKey}`;
     if (!byUserAndDay.has(key)) byUserAndDay.set(key, []);
     byUserAndDay.get(key).push(log);
   }

@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { authFetch } from '../utils/api';
+import { formatIstTime, IST } from '../utils/istDisplay';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -23,19 +24,27 @@ function formatDateDisplayFromYMD(ymd) {
   const s = String(ymd || '');
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return '—';
-  const year = Number(m[1]);
-  const month0 = Number(m[2]) - 1;
-  const day = Number(m[3]);
-  // Use local Date for display; this avoids the 'YYYY-MM-DD' UTC parsing ambiguity.
-  return new Date(year, month0, day).toLocaleDateString('en-IN', {
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`).toLocaleDateString('en-IN', {
+    timeZone: IST,
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   });
 }
 
+function formatDateLongIstYmd(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '—';
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`).toLocaleDateString('en-IN', {
+    timeZone: IST,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 function todayStr() {
-  return formatDateYMDLocal(new Date());
+  return new Date().toLocaleDateString('en-CA', { timeZone: IST });
 }
 
 function formatTimeForInput(d) {
@@ -363,12 +372,7 @@ export default function AttendancePage() {
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Daily summary</h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Attendance for{' '}
-              {new Date(dateStr).toLocaleDateString('en-IN', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-              })}
+              Attendance for {formatDateLongIstYmd(dateStr)}
             </p>
           </div>
           <button
@@ -452,12 +456,7 @@ export default function AttendancePage() {
                     const timingsStr = punches.length
                       ? punches
                           .map((p) => {
-                            const t = new Date(p.punch_time);
-                            const timeStr = t.toLocaleTimeString('en-US', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              hour12: true,
-                            });
+                            const timeStr = formatIstTime(p.punch_time);
                             const isAuto =
                               (p.device_id || '').toLowerCase() === 'auto_out' &&
                               (p.punch_type || '').toLowerCase() === 'out';
@@ -505,12 +504,7 @@ export default function AttendancePage() {
                     }
                     let firstPunchLabel = '';
                     if (row.first_in_time) {
-                      const t = new Date(row.first_in_time);
-                      const timeStr = t.toLocaleTimeString('en-US', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        hour12: true,
-                      });
+                      const timeStr = formatIstTime(row.first_in_time);
                       const minsLate = Number(row.minutes_late || 0);
                       const lateStr =
                         row.late && minsLate > 0
@@ -800,13 +794,7 @@ export default function AttendancePage() {
                   .filter((r) => r.late)
                   .map((row) => {
                     const firstIn = (row.punches || []).find((p) => (p.punch_type || '').toLowerCase() === 'in');
-                    const arrivalTime = firstIn
-                      ? new Date(firstIn.punch_time).toLocaleTimeString('en-US', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          hour12: true,
-                        })
-                      : '—';
+                    const arrivalTime = firstIn ? formatIstTime(firstIn.punch_time) : '—';
                     return (
                       <li
                         key={row.employee_id}

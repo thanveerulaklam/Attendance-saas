@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { authFetch } from '../utils/api';
+import { formatIstTime } from '../utils/istDisplay';
 import OnboardingChecklist from '../components/onboarding/OnboardingChecklist';
 
 export default function DashboardPage() {
@@ -101,13 +102,7 @@ export default function DashboardPage() {
           ) : (summary?.todayOnLunch?.length ?? 0) > 0 ? (
             <ul className="mt-2 space-y-2 max-h-40 overflow-y-auto">
               {summary.todayOnLunch.map((emp) => {
-                const outAt = emp.punched_out_at
-                  ? new Date(emp.punched_out_at).toLocaleTimeString('en-US', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                    })
-                  : '';
+                const outAt = emp.punched_out_at ? formatIstTime(emp.punched_out_at) : '';
                 return (
                   <li
                     key={emp.name + (emp.employee_code || '')}

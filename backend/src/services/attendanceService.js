@@ -1,5 +1,12 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const {
+  istYmdFromDate,
+  istYmdParts,
+  istDayBounds,
+  todayIstYmd,
+  SQL_PUNCH_IST_DATE,
+} = require('../utils/istDate');
 
 // Company timezone for shift/late calculations. Server may run in UTC, but punches and shifts are in company local time.
 // Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
@@ -128,9 +135,9 @@ function normalizePunchTypesByOrder(dayLogs) {
  * Compute present, late, overtime, full-day, left-during-lunch, and lunch duration for one day's logs.
  * Expects 4-punch pattern: 1=IN, 2=OUT (lunch start), 3=IN (lunch end), 4=OUT (end of day).
  * shiftConfig: { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted }
- * dayStart: Date at 00:00:00 UTC for the day
+ * calendarDateStr: YYYY-MM-DD attendance day in IST
  */
-function computeDayStatus(dayLogs, shiftConfig, dayStart) {
+function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
   const empty = {
     present: false,
     late: false,
@@ -202,16 +209,11 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
   // Server may run in UTC; "9:30" must mean 9:30 AM company local, not UTC.
   let shiftStartMs;
   if (firstInTime != null) {
-    const d = new Date(firstInTime);
-    const y = d.getUTCFullYear();
-    const m = d.getUTCMonth() + 1;
-    const day = d.getUTCDate();
-    shiftStartMs = getShiftStartMsForDate(y, m, day, shiftConfig.startHour, shiftConfig.startMinute);
+    const { year: y, month: mo, day: dd } = istYmdParts(firstInTime);
+    shiftStartMs = getShiftStartMsForDate(y, mo, dd, shiftConfig.startHour, shiftConfig.startMinute);
   } else {
-    const y = dayStart.getUTCFullYear();
-    const m = dayStart.getUTCMonth() + 1;
-    const day = dayStart.getUTCDate();
-    shiftStartMs = getShiftStartMsForDate(y, m, day, shiftConfig.startHour, shiftConfig.startMinute);
+    const [y, mo, dd] = calendarDateStr.split('-').map(Number);
+    shiftStartMs = getShiftStartMsForDate(y, mo, dd, shiftConfig.startHour, shiftConfig.startMinute);
   }
   const late =
     present &&
@@ -259,7 +261,7 @@ function computeDayStatus(dayLogs, shiftConfig, dayStart) {
   };
 }
 
-function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
+function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
   const empty = {
     present: false,
     late: false,
@@ -283,7 +285,7 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
   let totalMinutesInside = 0;
   let lastIn = null;
   let firstInTime = null;
-  const dayEndMs = dayStart.getTime() + 24 * 60 * 60 * 1000;
+  const dayEndMs = bounds.end.getTime();
   const nowMs = Date.now();
   const maxSessionMinutes = 24 * 60;
 
@@ -333,14 +335,11 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart) {
   let late = false;
   let minutesLate = 0;
   if (firstInTime) {
-    const d = new Date(firstInTime);
-    const y = d.getUTCFullYear();
-    const m = d.getUTCMonth() + 1;
-    const day = d.getUTCDate();
+    const { year: y, month: mo, day: dd } = istYmdParts(firstInTime);
     const shiftStartMs = getShiftStartMsForDate(
       y,
-      m,
-      day,
+      mo,
+      dd,
       shiftConfig.startHour,
       shiftConfig.startMinute
     );
@@ -409,14 +408,8 @@ async function ensureAutoOutForDate(companyId, dateStr) {
   const month = parseInt(m, 10);
   const dayNum = parseInt(d, 10);
 
-  const dayStart = new Date(Date.UTC(year, month - 1, dayNum, 0, 0, 0));
-  const dayEnd = new Date(Date.UTC(year, month - 1, dayNum + 1, 0, 0, 0));
-
   const now = new Date();
-  const todayY = now.getUTCFullYear();
-  const todayM = now.getUTCMonth() + 1;
-  const todayD = now.getUTCDate();
-  const isToday = year === todayY && month === todayM && dayNum === todayD;
+  const isToday = todayIstYmd() === dateStr;
 
   const client = await pool.connect();
   try {
@@ -442,10 +435,9 @@ async function ensureAutoOutForDate(companyId, dateStr) {
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
-         AND punch_time >= $3
-         AND punch_time < $4
+         AND ${SQL_PUNCH_IST_DATE} = $3::date
        ORDER BY punch_time ASC`,
-      [companyId, employeeIds, dayStart.toISOString(), dayEnd.toISOString()]
+      [companyId, employeeIds, dateStr]
     );
 
     const logsByEmployee = new Map();
@@ -490,9 +482,8 @@ async function ensureAutoOutForDate(companyId, dateStr) {
           continue;
         }
       } else if (shiftConfig.overtimeAllowed) {
-        const dayUtc = Date.UTC(year, month - 1, dayNum);
-        const todayUtc = Date.UTC(todayY, todayM - 1, todayD);
-        if (todayUtc <= dayUtc) {
+        const todayStr = todayIstYmd();
+        if (todayStr <= dateStr) {
           continue;
         }
       }
@@ -545,17 +536,8 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
   }
 
-  const [, y, m, d] = match;
-  const year = parseInt(y, 10);
-  const month = parseInt(m, 10);
-  const dayNum = parseInt(d, 10);
-  const dayStart = new Date(Date.UTC(year, month - 1, dayNum, 0, 0, 0));
-  const dayEnd = new Date(Date.UTC(year, month - 1, dayNum + 1, 0, 0, 0));
-  const today = new Date();
-  const isCurrentDate =
-    today.getUTCFullYear() === year &&
-    today.getUTCMonth() + 1 === month &&
-    today.getUTCDate() === dayNum;
+  const bounds = istDayBounds(dateStr);
+  const isCurrentDate = todayIstYmd() === dateStr;
 
   await ensureAutoOutForDate(companyId, dateStr);
 
@@ -596,10 +578,9 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
-         AND punch_time >= $3
-         AND punch_time < $4
+         AND ${SQL_PUNCH_IST_DATE} = $3::date
        ORDER BY punch_time ASC`,
-      [companyId, ids, dayStart.toISOString(), dayEnd.toISOString()]
+      [companyId, ids, dateStr]
     );
 
     const logsByEmployee = new Map();
@@ -623,8 +604,8 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null) {
         shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       const status =
         shiftConfig.attendanceMode === 'hours_based'
-          ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart)
-          : computeDayStatus(dayLogs, shiftConfig, dayStart);
+          ? computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds)
+          : computeDayStatus(dayLogs, shiftConfig, dateStr);
       const isProvisionalHoursBased =
         shiftConfig.attendanceMode === 'hours_based' && isCurrentDate;
       const presentForDaily =
@@ -688,8 +669,8 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
   }
 
   const daysInMonth = new Date(y, m, 0).getDate();
-  const monthStart = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0));
-  const monthEnd = new Date(Date.UTC(y, m, 1, 0, 0, 0));
+  const monthFirstStr = `${y}-${String(m).padStart(2, '0')}-01`;
+  const monthLastStr = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
   const client = await pool.connect();
   try {
@@ -728,17 +709,17 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
-         AND punch_time >= $3
-         AND punch_time < $4
+         AND ${SQL_PUNCH_IST_DATE} >= $3::date
+         AND ${SQL_PUNCH_IST_DATE} <= $4::date
        ORDER BY punch_time ASC`,
-      [companyId, ids, monthStart.toISOString(), monthEnd.toISOString()]
+      [companyId, ids, monthFirstStr, monthLastStr]
     );
 
     const logsByEmployeeAndDay = new Map();
     for (const row of logsResult.rows) {
       const eid = row.employee_id;
       const punchTime = new Date(row.punch_time);
-      const key = punchTime.toISOString().slice(0, 10);
+      const key = istYmdFromDate(punchTime);
       if (!logsByEmployeeAndDay.has(eid)) {
         logsByEmployeeAndDay.set(eid, new Map());
       }
@@ -754,14 +735,14 @@ async function getMonthlyAttendance(companyId, year, month, employeeId = null) {
       const byDay = logsByEmployeeAndDay.get(emp.id) || new Map();
       const days = [];
       for (let d = 1; d <= daysInMonth; d += 1) {
-        const dayStart = new Date(Date.UTC(y, m - 1, d, 0, 0, 0));
-        const key = dayStart.toISOString().slice(0, 10);
+        const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const rawDayLogs = byDay.get(key) || [];
         const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
+        const dayBounds = istDayBounds(key);
         const status =
           shiftConfig.attendanceMode === 'hours_based'
-            ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart)
-            : computeDayStatus(dayLogs, shiftConfig, dayStart);
+            ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayBounds)
+            : computeDayStatus(dayLogs, shiftConfig, key);
         days.push({
           date: key,
           day: d,
