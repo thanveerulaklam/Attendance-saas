@@ -24,7 +24,7 @@ import PayrollCostCalculator from './pages/tools/PayrollCostCalculator';
 function RootRedirect() {
   const { isAuthenticated, loading } = useAuth();
   if (loading) return null;
-  return <Navigate to={isAuthenticated ? '/dashboard' : '/login'} replace />;
+  return <Navigate to={isAuthenticated ? '/attendance' : '/login'} replace />;
 }
 
 function App() {

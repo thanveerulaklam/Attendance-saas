@@ -77,6 +77,9 @@ export default function AttendancePage() {
   const [editPunchError, setEditPunchError] = useState(null);
   const [lateModalOpen, setLateModalOpen] = useState(false);
   const [absentModalOpen, setAbsentModalOpen] = useState(false);
+  const [presentModalOpen, setPresentModalOpen] = useState(false);
+  const [fullDayModalOpen, setFullDayModalOpen] = useState(false);
+  const [leftLunchModalOpen, setLeftLunchModalOpen] = useState(false);
   const [editPunchData, setEditPunchData] = useState(null); // { employeeName, date, punches: [{ id, punch_time, punch_type }] }
   const [editPunchEdits, setEditPunchEdits] = useState([]); // [{ id, time, punch_type }] for form
   const [manualForm, setManualForm] = useState({
@@ -387,10 +390,19 @@ export default function AttendancePage() {
           <div className="mt-3 h-16 rounded-lg bg-slate-50 animate-pulse" />
         ) : (
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <div className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => todaySummary.present > 0 && setPresentModalOpen(true)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                todaySummary.present > 0
+                  ? 'bg-emerald-50 border-emerald-100 hover:bg-emerald-100/60 cursor-pointer'
+                  : 'bg-emerald-50 border-emerald-100 cursor-default'
+              }`}
+              disabled={todaySummary.present === 0}
+            >
               <p className="text-[10px] font-medium text-emerald-700">Present</p>
               <p className="text-lg font-semibold text-emerald-800">{todaySummary.present}</p>
-            </div>
+            </button>
             <button
               type="button"
               onClick={() => todaySummary.absent > 0 && setAbsentModalOpen(true)}
@@ -417,14 +429,32 @@ export default function AttendancePage() {
               <p className="text-[10px] font-medium text-amber-700">Late</p>
               <p className="text-lg font-semibold text-amber-800">{todaySummary.late}</p>
             </button>
-            <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => todaySummary.fullDay > 0 && setFullDayModalOpen(true)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                todaySummary.fullDay > 0
+                  ? 'bg-blue-50 border-blue-100 hover:bg-blue-100/60 cursor-pointer'
+                  : 'bg-blue-50 border-blue-100 cursor-default'
+              }`}
+              disabled={todaySummary.fullDay === 0}
+            >
               <p className="text-[10px] font-medium text-blue-700">Full day</p>
               <p className="text-lg font-semibold text-blue-800">{todaySummary.fullDay}</p>
-            </div>
-            <div className="rounded-lg bg-rose-50 border border-rose-100 px-3 py-2">
+            </button>
+            <button
+              type="button"
+              onClick={() => todaySummary.leftDuringLunch > 0 && setLeftLunchModalOpen(true)}
+              className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                todaySummary.leftDuringLunch > 0
+                  ? 'bg-rose-50 border-rose-100 hover:bg-rose-100/60 cursor-pointer'
+                  : 'bg-rose-50 border-rose-100 cursor-default'
+              }`}
+              disabled={todaySummary.leftDuringLunch === 0}
+            >
               <p className="text-[10px] font-medium text-rose-700">Left at lunch</p>
               <p className="text-lg font-semibold text-rose-800">{todaySummary.leftDuringLunch}</p>
-            </div>
+            </button>
           </div>
         )}
         <p className="mt-2 text-[11px] text-slate-400">
@@ -811,6 +841,190 @@ export default function AttendancePage() {
               <button
                 type="button"
                 onClick={() => setLateModalOpen(false)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Present staff modal */}
+      {presentModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setPresentModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-sm flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Staff present today</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {dateStr} — {todaySummary.present} {todaySummary.present === 1 ? 'employee' : 'employees'} marked present
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
+              <ul className="space-y-2">
+                {(dailyData || [])
+                  .filter((r) => r.present)
+                  .map((row) => {
+                    const status = row.full_day
+                      ? 'Full day'
+                      : row.left_during_lunch
+                        ? 'Left at lunch'
+                        : 'Present';
+                    const statusWithLate = row.late ? `${status} (late)` : status;
+                    return (
+                      <li
+                        key={row.employee_id}
+                        className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 px-3 py-2"
+                      >
+                        <span className="font-medium text-slate-800">
+                          {row.name}
+                          {row.employee_code ? (
+                            <span className="text-[11px] text-slate-500"> ({row.employee_code})</span>
+                          ) : null}
+                        </span>
+                        <span className="text-[11px] text-emerald-700 font-medium">{statusWithLate}</span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setPresentModalOpen(false)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full day staff modal */}
+      {fullDayModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setFullDayModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-sm flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Staff full day today</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {dateStr} — {todaySummary.fullDay} marked full day
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
+              <ul className="space-y-2">
+                {(dailyData || [])
+                  .filter((r) => r.present && r.full_day)
+                  .map((row) => {
+                    const punches = row.punches || [];
+                    const firstIn = punches
+                      .filter((p) => (p.punch_type || '').toLowerCase() === 'in')
+                      .sort((a, b) => new Date(a.punch_time) - new Date(b.punch_time))[0];
+                    const lastOut = punches
+                      .filter((p) => (p.punch_type || '').toLowerCase() === 'out')
+                      .sort((a, b) => new Date(b.punch_time) - new Date(a.punch_time))[0];
+                    return (
+                      <li
+                        key={row.employee_id}
+                        className="flex items-center justify-between rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2"
+                      >
+                        <span className="font-medium text-slate-800">
+                          {row.name}
+                          {row.employee_code ? (
+                            <span className="text-[11px] text-slate-500"> ({row.employee_code})</span>
+                          ) : null}
+                        </span>
+                        <span className="text-[11px] text-blue-700 font-medium">
+                          {firstIn ? formatIstTime(firstIn.punch_time) : '—'} →{' '}
+                          {lastOut ? formatIstTime(lastOut.punch_time) : '—'}
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setFullDayModalOpen(false)}
+                className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Left at lunch staff modal */}
+      {leftLunchModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => setLeftLunchModalOpen(false)}
+        >
+          <div
+            className="flex w-full max-w-sm flex-col rounded-xl border border-slate-200 bg-white shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 border-b border-slate-100 px-5 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Staff left at lunch</h3>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {dateStr} — {todaySummary.leftDuringLunch} left during lunch
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
+              <ul className="space-y-2">
+                {(dailyData || [])
+                  .filter((r) => r.present && r.left_during_lunch)
+                  .map((row) => {
+                    const punches = row.punches || [];
+                    const firstIn = punches
+                      .filter((p) => (p.punch_type || '').toLowerCase() === 'in')
+                      .sort((a, b) => new Date(a.punch_time) - new Date(b.punch_time))[0];
+                    const lastOut = punches
+                      .filter((p) => (p.punch_type || '').toLowerCase() === 'out')
+                      .sort((a, b) => new Date(b.punch_time) - new Date(a.punch_time))[0];
+                    const lunchLabel =
+                      row.lunch_minutes != null
+                        ? row.lunch_over_minutes != null && row.lunch_over_minutes > 0
+                          ? `${row.lunch_minutes}m (+${row.lunch_over_minutes} over)`
+                          : `${row.lunch_minutes}m`
+                        : '—';
+                    return (
+                      <li
+                        key={row.employee_id}
+                        className="flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50/50 px-3 py-2"
+                      >
+                        <span className="font-medium text-slate-800">
+                          {row.name}
+                          {row.employee_code ? (
+                            <span className="text-[11px] text-slate-500"> ({row.employee_code})</span>
+                          ) : null}
+                        </span>
+                        <span className="text-[11px] text-rose-700 font-medium">
+                          {firstIn ? formatIstTime(firstIn.punch_time) : '—'} / {lastOut ? formatIstTime(lastOut.punch_time) : '—'} • {lunchLabel}
+                        </span>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </div>
+            <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setLeftLunchModalOpen(false)}
                 className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
               >
                 Close

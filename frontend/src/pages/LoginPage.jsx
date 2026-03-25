@@ -106,7 +106,7 @@ export default function LoginPage() {
               }
             : null
         );
-        navigate('/dashboard', { replace: true });
+        navigate('/attendance', { replace: true });
       } else {
         setError('Invalid response from server');
       }
@@ -258,8 +258,8 @@ export default function LoginPage() {
               <div className="bg-white rounded-2xl shadow-xl p-6 border border-slate-100 max-w-md ml-auto">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <div className="text-sm font-medium text-slate-900">PunchPay Dashboard</div>
-                    <div className="text-xs text-slate-500">Live attendance & payroll summary</div>
+                    <div className="text-sm font-medium text-slate-900">PunchPay Attendance</div>
+                    <div className="text-xs text-slate-500">Live attendance overview</div>
                   </div>
                   <div className="h-8 w-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xs font-semibold">
                     A

@@ -53,8 +53,18 @@ export default function RegisterPage() {
       const token = json.data?.token;
       const userData = json.data?.user;
       if (token) {
-        setAuthToken(token, userData ? { user_id: userData.id, company_id: userData.company_id, email: userData.email, role: userData.role } : null);
-        navigate('/dashboard', { replace: true });
+        setAuthToken(
+          token,
+          userData
+            ? {
+                user_id: userData.id,
+                company_id: userData.company_id,
+                email: userData.email,
+                role: userData.role,
+              }
+            : null
+        );
+        navigate('/attendance', { replace: true });
       } else {
         setError('Invalid response from server');
       }

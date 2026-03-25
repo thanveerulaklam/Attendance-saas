@@ -47,7 +47,15 @@ schtasks /delete /tn "%TASK_NAME%" /f 2>nul
 
 REM Create task: run at SYSTEM startup, as LOCAL SYSTEM
 echo %date% %time% - Creating scheduled task >> "%LOG_FILE%"
-schtasks /create /tn "%TASK_NAME%" /tr "%RUN_SCRIPT%" /sc onstart /ru SYSTEM /f 2>> "%LOG_FILE%"
+REM Task Scheduler can be picky about running .bat directly; wrap with cmd.exe /c.
+if not exist "%RUN_SCRIPT%" (
+    echo %date% %time% - ERROR: run-windows.bat not found at "%RUN_SCRIPT%" >> "%LOG_FILE%"
+    goto :pause_section
+)
+echo %date% %time% - Scheduled cmd command: cmd.exe /c "%RUN_SCRIPT%" >> "%LOG_FILE%"
+REM Use the same style that previously worked (schedule the .bat directly).
+REM If RUN_SCRIPT path has spaces, Task Scheduler still handles quotes because we pass the full quoted path.
+schtasks /create /tn "%TASK_NAME%" /tr "%RUN_SCRIPT%" /sc onstart /ru SYSTEM /f >> "%LOG_FILE%" 2>>&1
 
 REM Check result immediately (next command overwrites errorlevel)
 if errorlevel 1 goto :task_failed
@@ -60,7 +68,8 @@ echo SUCCESS: Connector will start automatically when Windows starts.
 echo Log file: %CONNECTOR_DIR%connector.log
 echo.
 echo Starting the connector now...
-schtasks /run /tn "%TASK_NAME%"
+schtasks /run /tn "%TASK_NAME%" >> "%LOG_FILE%" 2>>&1
+timeout /t 5 /nobreak >nul
 echo.
 echo If you don't see connector.log after a few seconds, open Task Scheduler and check "AttendanceConnector".
 goto :pause_section

@@ -5,15 +5,15 @@ import { getSubscriptionStatus } from '../utils/subscription';
 import { authFetch } from '../utils/api';
 import WhatsAppHelpButton from '../components/WhatsAppHelpButton';
 
+// Keep /dashboard route available, but hide it from the sidebar for now.
 const navItems = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/employees', label: 'Employees' },
   { to: '/attendance', label: 'Attendance' },
+  { to: '/advances', label: 'Advance' },
   { to: '/payroll', label: 'Payroll' },
-  { to: '/advances', label: 'Advances' },
   { to: '/reports', label: 'Reports' },
-  { to: '/shifts', label: 'Shifts' },
-  { to: '/devices', label: 'Devices' },
+  { to: '/employees', label: 'Employee' },
+  { to: '/shifts', label: 'Shift' },
+  { to: '/devices', label: 'Device' },
   { to: '/settings/company', label: 'Company' },
 ];
 
@@ -104,7 +104,9 @@ export default function DashboardLayout() {
         {/* Top bar */}
         <header className="h-16 border-b border-slate-200 bg-white/70 backdrop-blur flex items-center justify-between px-6">
           <div>
-            <h1 className="text-lg font-semibold text-slate-900">{company?.name || 'Dashboard'}</h1>
+            <h1 className="text-lg font-semibold text-slate-900">
+              {company?.name || 'PunchPay'}
+            </h1>
             <p className="text-xs text-slate-500">Realtime insights into attendance and payroll</p>
           </div>
           <div className="flex items-center gap-4">
