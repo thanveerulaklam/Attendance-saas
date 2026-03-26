@@ -330,6 +330,34 @@
           </table>
         </div>
       </div>
+
+      <div class="section">
+        <div class="row">
+          <div class="col">
+            <strong class="small">Collections queue</strong>
+            <div class="small muted mt-2">Expired + expiring in 30 days + pending/overdue payments.</div>
+          </div>
+        </div>
+        <div id="collections-wrapper" class="table-wrapper mt-2">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Company</th>
+                <th>Subscription end</th>
+                <th>Payment status</th>
+                <th>Active staff</th>
+                <th style="text-align: right">Quick action</th>
+              </tr>
+            </thead>
+            <tbody id="collections-body">
+              <tr>
+                <td colspan="6" class="muted small">No data loaded.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -430,6 +458,24 @@
           var d = new Date(iso);
           if (isNaN(d.getTime())) return iso;
           return d.toLocaleDateString();
+        }
+
+        function getSubscriptionUrgency(subscriptionEndDate) {
+          if (!subscriptionEndDate) {
+            return { isUrgent: false, isExpired: false, daysLeft: null };
+          }
+          var today = new Date();
+          today.setHours(0, 0, 0, 0);
+          var end = new Date(subscriptionEndDate);
+          if (isNaN(end.getTime())) {
+            return { isUrgent: false, isExpired: false, daysLeft: null };
+          }
+          end.setHours(0, 0, 0, 0);
+          var diffMs = end.getTime() - today.getTime();
+          var daysLeft = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+          var isExpired = daysLeft < 0;
+          var isUrgent = isExpired || daysLeft <= 30;
+          return { isUrgent: isUrgent, isExpired: isExpired, daysLeft: daysLeft };
         }
 
         function renderOverview(data) {
@@ -560,6 +606,7 @@
 
           list.forEach(function (c) {
             var tr = document.createElement("tr");
+            var subUrgency = getSubscriptionUrgency(c.subscription_end_date);
 
             function makeTd(text) {
               var td = document.createElement("td");
@@ -616,7 +663,9 @@
 
             var tdSub = document.createElement("td");
             tdSub.innerHTML =
-              "<div class='small'>" +
+              "<div class='small " +
+              (subUrgency.isUrgent ? "text-rose-600" : "") +
+              "'>" +
               (c.subscription_start_date && c.subscription_end_date
                 ? formatDate(c.subscription_start_date) +
                   " → " +
@@ -624,7 +673,17 @@
                 : "Not set") +
               "</div><div class='small muted'>" +
               (c.is_active === false ? "Inactive" : "Active/within grace") +
-              "</div>";
+              "</div>" +
+              (subUrgency.isUrgent
+                ? "<div class='small' style='color:#f87171'>" +
+                  (subUrgency.isExpired
+                    ? "Expired — renew or lock now"
+                    : "Expiring in " +
+                      subUrgency.daysLeft +
+                      " day" +
+                      (subUrgency.daysLeft === 1 ? "" : "s")) +
+                  "</div>"
+                : "");
             tr.appendChild(tdSub);
 
             var tdDetails = document.createElement("td");
@@ -680,10 +739,75 @@
               openBillingDialog(c);
             };
 
+            var renewBtn = document.createElement("button");
+            renewBtn.className = "btn-primary small";
+            renewBtn.style.marginLeft = "4px";
+            renewBtn.textContent = "Renew 1y";
+            renewBtn.onclick = function () {
+              callAdmin("/renew-company-subscription", {
+                method: "POST",
+                body: JSON.stringify({ company_id: c.id, action: "renew_1_year" }),
+              })
+                .then(function (json) {
+                  showToast("success", (json && json.message) || "Subscription renewed.");
+                  refreshAll();
+                })
+                .catch(function () {});
+            };
+
             tdControls.appendChild(lockBtn);
             tdControls.appendChild(editBtn);
+            tdControls.appendChild(renewBtn);
             tr.appendChild(tdControls);
 
+            body.appendChild(tr);
+          });
+        }
+
+        function renderCollections(list) {
+          var body = document.getElementById("collections-body");
+          if (!body) return;
+          body.innerHTML = "";
+          if (!list || !list.length) {
+            var tr = document.createElement("tr");
+            var td = document.createElement("td");
+            td.colSpan = 6;
+            td.className = "muted small";
+            td.textContent = "No companies in queue.";
+            tr.appendChild(td);
+            body.appendChild(tr);
+            return;
+          }
+          list.forEach(function (c) {
+            var tr = document.createElement("tr");
+            function td(v) {
+              var x = document.createElement("td");
+              x.textContent = v;
+              return x;
+            }
+            tr.appendChild(td(c.id));
+            tr.appendChild(td(c.name || "—"));
+            tr.appendChild(td(c.subscription_end_date ? formatDate(c.subscription_end_date) : "Not set"));
+            tr.appendChild(td(c.payment_status || "paid"));
+            tr.appendChild(td(c.active_staff || 0));
+            var tdActions = document.createElement("td");
+            tdActions.style.textAlign = "right";
+            var btn = document.createElement("button");
+            btn.className = "btn-primary small";
+            btn.textContent = "Renew 1m";
+            btn.onclick = function () {
+              callAdmin("/renew-company-subscription", {
+                method: "POST",
+                body: JSON.stringify({ company_id: c.id, action: "renew_30_days" }),
+              })
+                .then(function (json) {
+                  showToast("success", (json && json.message) || "Subscription updated.");
+                  refreshAll();
+                })
+                .catch(function () {});
+            };
+            tdActions.appendChild(btn);
+            tr.appendChild(tdActions);
             body.appendChild(tr);
           });
         }
@@ -716,8 +840,12 @@
               lines.push("Effective employee limit: " + (d.effective_employee_limit == null ? "none (unlimited)" : d.effective_employee_limit));
               lines.push("Plan-derived limit: " + (d.plan_derived_employee_limit == null ? "none" : d.plan_derived_employee_limit));
               lines.push("Override column: " + (d.company.employee_limit_override == null ? "null (use plan)" : d.company.employee_limit_override));
+              lines.push("Branch limit override: " + (d.company.branch_limit_override == null ? "null (no cap)" : d.company.branch_limit_override));
               lines.push("");
               lines.push("Stats: active employees " + (d.stats.total_active_employees || 0) + ", devices " + (d.stats.total_devices || 0));
+              lines.push("Last login: " + (d.stats.last_login_at ? formatDateTime(d.stats.last_login_at) : "—"));
+              lines.push("Last device sync: " + (d.stats.last_device_sync_at ? formatDateTime(d.stats.last_device_sync_at) : "—"));
+              lines.push("Last payroll run: " + (d.stats.last_payroll_generated_at ? formatDateTime(d.stats.last_payroll_generated_at) : "—"));
               lines.push("");
               lines.push("Branches:");
               (d.branches || []).forEach(function (b) {
@@ -741,6 +869,23 @@
               );
               html.push(
                 ' <button type="button" class="btn-secondary small" id="limit-override-clear">Use plan default</button>'
+              );
+              html.push("</div>");
+
+              html.push('<div class="modal-section"><strong>Branch limit override</strong>');
+              html.push(
+                '<p class="muted small">Set max ADDITIONAL branches beyond the initial Main branch. Leave empty for no cap.</p>'
+              );
+              html.push(
+                '<input type="number" min="0" id="branch-limit-override-input" placeholder="e.g. 3" style="max-width:200px" value="' +
+                  (d.company.branch_limit_override != null ? String(d.company.branch_limit_override) : "") +
+                  '" />'
+              );
+              html.push(
+                ' <button type="button" class="btn-primary small" id="branch-limit-override-save">Save branch limit</button>'
+              );
+              html.push(
+                ' <button type="button" class="btn-secondary small" id="branch-limit-override-clear">No cap</button>'
               );
               html.push("</div>");
 
@@ -804,6 +949,7 @@
                   })
                     .then(function (j) {
                       showToast("success", (j && j.message) || "Limit updated.");
+                      if (j && j.data && j.data.warning) showToast("error", j.data.warning);
                       openCompanyDetailsModal(companyId, companyName);
                     })
                     .catch(function () {});
@@ -821,6 +967,44 @@
                   })
                     .then(function (j) {
                       showToast("success", (j && j.message) || "Reverted to plan limit.");
+                      openCompanyDetailsModal(companyId, companyName);
+                    })
+                    .catch(function () {});
+                };
+              }
+
+              var saveBranchLimit = document.getElementById("branch-limit-override-save");
+              if (saveBranchLimit) {
+                saveBranchLimit.onclick = function () {
+                  var v = document.getElementById("branch-limit-override-input");
+                  var raw = v && v.value != null ? String(v.value).trim() : "";
+                  callAdmin("/set-company-branch-limit", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      company_id: companyId,
+                      branch_limit_override: raw === "" ? null : Number(raw),
+                    }),
+                  })
+                    .then(function (j) {
+                      showToast("success", (j && j.message) || "Branch limit updated.");
+                      if (j && j.data && j.data.warning) showToast("error", j.data.warning);
+                      openCompanyDetailsModal(companyId, companyName);
+                    })
+                    .catch(function () {});
+                };
+              }
+              var clearBranchLimit = document.getElementById("branch-limit-override-clear");
+              if (clearBranchLimit) {
+                clearBranchLimit.onclick = function () {
+                  callAdmin("/set-company-branch-limit", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      company_id: companyId,
+                      branch_limit_override: null,
+                    }),
+                  })
+                    .then(function (j) {
+                      showToast("success", (j && j.message) || "Branch cap removed.");
                       openCompanyDetailsModal(companyId, companyName);
                     })
                     .catch(function () {});
@@ -860,6 +1044,23 @@
                     .catch(function () {});
                 };
               });
+              callAdmin("/company-audit?company_id=" + encodeURIComponent(companyId) + "&page=1&limit=10", { method: "GET" })
+                .then(function (auditJson) {
+                  var entries = (auditJson && auditJson.data && auditJson.data.data) || [];
+                  var wrap = document.createElement("div");
+                  wrap.className = "modal-section";
+                  wrap.innerHTML = "<strong>Superadmin action history</strong>";
+                  var pre = document.createElement("pre");
+                  pre.className = "mono";
+                  pre.textContent = entries.length
+                    ? entries.map(function (e) {
+                        return formatDateTime(e.created_at) + " - " + e.action_type;
+                      }).join("\n")
+                    : "No actions yet.";
+                  wrap.appendChild(pre);
+                  bodyEl.appendChild(wrap);
+                })
+                .catch(function () {});
             })
             .catch(function () {
               bodyEl.innerHTML = "<p class='toast-error'>Failed to load details.</p>";
@@ -974,16 +1175,21 @@
           Promise.all([
             callAdmin("/overview", { method: "GET" }),
             callAdmin("/pending-companies", { method: "GET" }),
+            callAdmin("/collections-queue?days=30", { method: "GET" }),
           ])
             .then(function (results) {
               var overviewJson = results[0] && results[0].data;
               var pendingJson = results[1] && results[1].data;
+              var collectionsJson = results[2] && results[2].data;
               if (overviewJson) {
                 renderOverview(overviewJson);
                 renderCompanies(overviewJson.companies || []);
               }
               if (pendingJson) {
                 renderPending(pendingJson);
+              }
+              if (collectionsJson) {
+                renderCollections(collectionsJson);
               }
             })
             .catch(function () {});

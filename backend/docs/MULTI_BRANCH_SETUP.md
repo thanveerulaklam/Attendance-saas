@@ -1,6 +1,6 @@
 # Multi-branch setup guide
 
-One **company account** can have many **branches** (locations). The **company admin** sees all branches. **HR users** only see data for branches you assign. **Superadmin** (you) controls HR branch access, default branch per HR user, and per-company **employee limits** (for pricing).
+One **company account** can have many **branches** (locations). The **company admin** sees all branches. **HR users** only see data for branches you assign. **Superadmin** (you) controls HR branch access, default branch per HR user, and per-company **employee + branch limits** (for pricing/control).
 
 ---
 
@@ -88,6 +88,25 @@ Use the **Admin** secret (`ADMIN_APPROVAL_SECRET`) and either:
 
   Use `null` to clear the override and go back to the plan-based limit.
 
+### E. Branch limit override (access control)
+
+- `POST /api/admin/set-company-branch-limit`  
+  Body:
+
+  ```json
+  {
+    "company_id": 1,
+    "branch_limit_override": 3
+  }
+  ```
+
+`branch_limit_override` means the maximum number of ADDITIONAL branches beyond the initial Main branch.
+
+Use `0` to allow no extra branches (only the initial Main branch).
+Use `null` to remove cap (no explicit branch limit).
+  When company admin tries to create branch above the limit, API returns:
+  `You have reached your branch limit for this account. Please contact support to add more branches.`
+
 ---
 
 ## 4. API reference for the tenant app (branch pickers)
@@ -108,5 +127,6 @@ Use the **Admin** secret (`ADMIN_APPROVAL_SECRET`) and either:
 - [ ] Employees and devices assigned to the correct branch.
 - [ ] Superadmin set each HR user’s `branch_ids` + `default_branch_id`.
 - [ ] Superadmin set `employee_limit_override` when the contract headcount differs from the plan default.
+- [ ] Superadmin set `branch_limit_override` for each company as per commercial terms.
 
 For automated / manual QA items, see `MULTI_BRANCH_TEST_CHECKLIST.md`.

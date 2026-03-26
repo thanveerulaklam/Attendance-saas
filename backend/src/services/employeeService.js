@@ -7,7 +7,7 @@ const {
 
 // Employee limits per plan. Null means "no limit" for that plan.
 const PLAN_EMPLOYEE_LIMITS = {
-  starter: 30,
+  starter: 50,
   growth: 100,
   business: 250,
   enterprise: 500,

@@ -12,6 +12,24 @@ function adminFetch(path, options = {}, key) {
   return fetch(`/api/admin${path}`, { ...options, headers });
 }
 
+function getSubscriptionUrgency(subscriptionEndDate) {
+  if (!subscriptionEndDate) {
+    return { isUrgent: false, isExpired: false, daysLeft: null };
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(subscriptionEndDate);
+  if (Number.isNaN(end.getTime())) {
+    return { isUrgent: false, isExpired: false, daysLeft: null };
+  }
+  end.setHours(0, 0, 0, 0);
+  const diffMs = end.getTime() - today.getTime();
+  const daysLeft = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  const isExpired = daysLeft < 0;
+  const isUrgent = isExpired || daysLeft <= 30;
+  return { isUrgent, isExpired, daysLeft };
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [keyInput, setKeyInput] = useState('');
@@ -40,6 +58,11 @@ export default function AdminPage() {
   const [billingSaving, setBillingSaving] = useState(false);
   const [lockBusyId, setLockBusyId] = useState(null);
   const [detailsCompany, setDetailsCompany] = useState(null);
+  const [collectionsQueue, setCollectionsQueue] = useState([]);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueFilter, setQueueFilter] = useState('all');
+  const [renewBusyId, setRenewBusyId] = useState(null);
+  const [detailsAudit, setDetailsAudit] = useState([]);
 
   const loadPending = useCallback(async () => {
     if (!adminKey) return;
@@ -139,6 +162,44 @@ export default function AdminPage() {
     if (!adminKey) return;
     loadEnquiries();
   }, [adminKey, loadEnquiries]);
+
+  const loadCollectionsQueue = useCallback(async () => {
+    if (!adminKey) return;
+    setQueueLoading(true);
+    try {
+      const res = await adminFetch('/collections-queue?days=30', {}, adminKey);
+      if (!res.ok) throw new Error('Failed to load collections queue');
+      const json = await res.json();
+      setCollectionsQueue(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      setCollectionsQueue([]);
+    } finally {
+      setQueueLoading(false);
+    }
+  }, [adminKey]);
+
+  useEffect(() => {
+    if (!adminKey) return;
+    loadCollectionsQueue();
+  }, [adminKey, loadCollectionsQueue]);
+
+  useEffect(() => {
+    const loadDetailsAudit = async () => {
+      if (!adminKey || !detailsCompany?.id) {
+        setDetailsAudit([]);
+        return;
+      }
+      try {
+        const res = await adminFetch(`/company-audit?company_id=${detailsCompany.id}&page=1&limit=10`, {}, adminKey);
+        if (!res.ok) throw new Error('Failed to load audit');
+        const json = await res.json();
+        setDetailsAudit(Array.isArray(json?.data?.data) ? json.data.data : []);
+      } catch {
+        setDetailsAudit([]);
+      }
+    };
+    loadDetailsAudit();
+  }, [adminKey, detailsCompany]);
 
   const handleKeySubmit = (e) => {
     e.preventDefault();
@@ -245,6 +306,7 @@ export default function AdminPage() {
         message: json.message || `Company ${verb}ed.`,
       });
       loadOverview();
+      loadCollectionsQueue();
     } catch (err) {
       setToast({
         type: 'error',
@@ -252,6 +314,26 @@ export default function AdminPage() {
       });
     } finally {
       setLockBusyId(null);
+    }
+  };
+
+  const handleRenewAction = async (company, action) => {
+    if (!company) return;
+    setRenewBusyId(company.id);
+    try {
+      const res = await adminFetch('/renew-company-subscription', {
+        method: 'POST',
+        body: JSON.stringify({ company_id: company.id, action }),
+      }, adminKey);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Renewal action failed');
+      setToast({ type: 'success', message: json.message || 'Subscription updated.' });
+      loadOverview();
+      loadCollectionsQueue();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed renewal action' });
+    } finally {
+      setRenewBusyId(null);
     }
   };
 
@@ -379,6 +461,12 @@ export default function AdminPage() {
   const list = Array.isArray(pending) ? pending : [];
   const totals = overview?.totals || {};
   const companies = Array.isArray(overview?.companies) ? overview.companies : [];
+  const filteredQueue = collectionsQueue.filter((item) => {
+    if (queueFilter === 'expired') return getSubscriptionUrgency(item.subscription_end_date).isExpired;
+    if (queueFilter === 'overdue') return item.payment_status === 'overdue';
+    if (queueFilter === 'pending') return item.payment_status === 'pending';
+    return true;
+  });
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8">
@@ -507,6 +595,7 @@ export default function AdminPage() {
                     const subEnd = c.subscription_end_date
                       ? new Date(c.subscription_end_date).toLocaleDateString()
                       : null;
+                    const urgency = getSubscriptionUrgency(c.subscription_end_date);
                     const createdAt = c.created_at
                       ? new Date(c.created_at).toLocaleDateString()
                       : null;
@@ -598,12 +687,27 @@ export default function AdminPage() {
                         <td className="px-4 py-2.5 text-slate-700">
                           {subStart && subEnd ? (
                             <div className="flex flex-col">
-                              <span className="text-xs text-slate-500">
+                              <span
+                                className={`text-xs ${
+                                  urgency.isUrgent ? 'text-rose-700 font-semibold' : 'text-slate-500'
+                                }`}
+                              >
                                 {subStart} → {subEnd}
                               </span>
-                              <span className="text-xs text-slate-500">
+                              <span
+                                className={`text-xs ${
+                                  urgency.isUrgent ? 'text-rose-600' : 'text-slate-500'
+                                }`}
+                              >
                                 {c.is_active === false ? 'Inactive' : 'Active/within grace'}
                               </span>
+                              {urgency.isUrgent && (
+                                <span className="text-[11px] text-rose-600 font-medium">
+                                  {urgency.isExpired
+                                    ? 'Expired — renew or lock now'
+                                    : `Expiring in ${urgency.daysLeft} day${urgency.daysLeft === 1 ? '' : 's'}`}
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <span className="text-xs text-slate-500 italic">Not set</span>
@@ -611,40 +715,121 @@ export default function AdminPage() {
                         </td>
                         <td className="px-4 py-2.5 text-slate-600">{createdAt || '—'}</td>
                         <td className="px-4 py-2.5">
-                          {c.status === 'active' || c.status === 'locked' ? (
+                          <div className="flex flex-col gap-1">
+                            {c.status === 'active' || c.status === 'locked' ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleLockToggle(
+                                    c,
+                                    c.status === 'locked' ? 'unlock' : 'lock'
+                                  );
+                                }}
+                                disabled={lockBusyId === c.id}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
+                                  c.status === 'locked'
+                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                    : 'bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-100'
+                                } disabled:opacity-50`}
+                              >
+                                {c.status === 'locked'
+                                  ? lockBusyId === c.id
+                                    ? 'Unlocking…'
+                                    : 'Unlock'
+                                  : lockBusyId === c.id
+                                    ? 'Locking…'
+                                    : 'Lock'}
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-slate-400 italic">
+                                No actions
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleLockToggle(
-                                  c,
-                                  c.status === 'locked' ? 'unlock' : 'lock'
-                                );
+                                handleRenewAction(c, 'renew_30_days');
                               }}
-                              disabled={lockBusyId === c.id}
-                              className={`rounded-lg px-3 py-1.5 text-xs font-medium border ${
-                                c.status === 'locked'
-                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
-                                  : 'bg-slate-50 border-slate-300 text-slate-700 hover:bg-slate-100'
-                              } disabled:opacity-50`}
+                              disabled={renewBusyId === c.id}
+                              className="rounded border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                             >
-                              {c.status === 'locked'
-                                ? lockBusyId === c.id
-                                  ? 'Unlocking…'
-                                  : 'Unlock'
-                                : lockBusyId === c.id
-                                  ? 'Locking…'
-                                  : 'Lock'}
+                              Renew 1m
                             </button>
-                          ) : (
-                            <span className="text-[11px] text-slate-400 italic">
-                              No actions
-                            </span>
-                          )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRenewAction(c, 'renew_1_year');
+                              }}
+                              disabled={renewBusyId === c.id}
+                              className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                            >
+                              Renew 1y
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Collections queue</h2>
+              <p className="text-xs text-slate-500">Expired, expiring in 30 days, pending/overdue.</p>
+            </div>
+            <select
+              value={queueFilter}
+              onChange={(e) => setQueueFilter(e.target.value)}
+              className="rounded border border-slate-300 px-2 py-1 text-xs"
+            >
+              <option value="all">All</option>
+              <option value="expired">Expired</option>
+              <option value="overdue">Overdue</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+          {queueLoading ? (
+            <div className="p-4 text-sm text-slate-500">Loading queue…</div>
+          ) : filteredQueue.length === 0 ? (
+            <div className="p-4 text-sm text-slate-500">No companies in collections queue.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[700px] text-sm text-slate-900">
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-2 text-left">Company</th>
+                    <th className="px-4 py-2 text-left">Subscription end</th>
+                    <th className="px-4 py-2 text-left">Payment status</th>
+                    <th className="px-4 py-2 text-left">Active staff</th>
+                    <th className="px-4 py-2 text-left">Quick action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredQueue.map((q) => (
+                    <tr key={q.id}>
+                      <td className="px-4 py-2">{q.name || `Company #${q.id}`}</td>
+                      <td className="px-4 py-2">{q.subscription_end_date ? new Date(q.subscription_end_date).toLocaleDateString() : 'Not set'}</td>
+                      <td className="px-4 py-2">{q.payment_status || 'paid'}</td>
+                      <td className="px-4 py-2">{q.active_staff || 0}</td>
+                      <td className="px-4 py-2">
+                        <button
+                          type="button"
+                          onClick={() => handleRenewAction(q, 'renew_1_year')}
+                          className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700"
+                        >
+                          Renew year
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -954,6 +1139,22 @@ export default function AdminPage() {
                     </div>
                   </div>
                 </div>
+                <div className="md:col-span-3">
+                  <h3 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">
+                    Superadmin action history
+                  </h3>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 max-h-44 overflow-auto">
+                    {detailsAudit.length === 0 ? (
+                      <p className="text-xs text-slate-500">No actions found.</p>
+                    ) : (
+                      detailsAudit.map((a) => (
+                        <div key={a.id} className="text-xs text-slate-700 py-1 border-b border-slate-200 last:border-b-0">
+                          {new Date(a.created_at).toLocaleString()} - {a.action_type}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -980,7 +1181,7 @@ export default function AdminPage() {
                       onChange={handleBillingChange}
                       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
                     >
-                      <option value="starter">Starter (up to 30)</option>
+                      <option value="starter">Starter (up to 50)</option>
                       <option value="growth">Growth (up to 100)</option>
                       <option value="business">Business (up to 250)</option>
                       <option value="enterprise">Enterprise (up to 500)</option>

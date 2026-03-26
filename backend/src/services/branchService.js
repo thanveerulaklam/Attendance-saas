@@ -42,6 +42,32 @@ async function createBranch(companyId, { name, address }) {
 
   const addr = address != null && String(address).trim() !== '' ? String(address).trim() : null;
 
+  const capResult = await pool.query(
+    `SELECT branch_limit_override FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  if (capResult.rowCount === 0) {
+    throw new AppError('Company not found', 404);
+  }
+  const capRaw = capResult.rows[0].branch_limit_override;
+  // branch_limit_override = max ADDITIONAL branches beyond the initial Main branch.
+  // NULL => no explicit cap; otherwise 0 means "no extra branches".
+  const branchExtraCap = capRaw == null ? null : Number(capRaw);
+  if (branchExtraCap != null) {
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM branches WHERE company_id = $1`,
+      [companyId]
+    );
+    const currentCount = Number(countResult.rows[0]?.total || 0);
+    const maxTotalBranches = 1 + branchExtraCap;
+    if (currentCount >= maxTotalBranches) {
+      throw new AppError(
+        'You have reached your branch limit for this account. Please contact support to add more branches.',
+        403
+      );
+    }
+  }
+
   const result = await pool.query(
     `INSERT INTO branches (company_id, name, address)
      VALUES ($1, $2, $3)
