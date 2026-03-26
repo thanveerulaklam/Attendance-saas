@@ -494,6 +494,8 @@ export default function AdminPage() {
     if (queueFilter === 'pending') return item.payment_status === 'pending';
     return true;
   });
+  const detailsDerived = detailsCompany ? deriveSubscriptionDates(detailsCompany) : { start: null, end: null };
+  const detailsEndLabel = detailsDerived.end ? detailsDerived.end.toLocaleDateString() : null;
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8">
@@ -1076,11 +1078,6 @@ export default function AdminPage() {
                     Plan & billing
                   </h3>
                   <dl className="space-y-1.5 text-xs text-slate-600">
-                    {(() => {
-                      const derived = deriveSubscriptionDates(detailsCompany);
-                      const detailEnd = derived.end ? derived.end.toLocaleDateString() : null;
-                      return (
-                        <>
                     <div className="flex justify-between gap-4">
                       <dt className="text-slate-500">Plan</dt>
                       <dd className="text-right">
@@ -1100,16 +1097,14 @@ export default function AdminPage() {
                     <div className="flex justify-between gap-4">
                       <dt className="text-slate-500">Valid till</dt>
                       <dd className="text-right">
-                        {detailEnd || 'Auto on first billing save'}
+                        {detailsEndLabel || 'Auto on first billing save'}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
                       <dt className="text-slate-500">Last payment</dt>
                       <dd className="text-right">
                         {detailsCompany.last_payment_date
-                          ? new Date(
-                              detailsCompany.last_payment_date
-                            ).toLocaleDateString()
+                          ? new Date(detailsCompany.last_payment_date).toLocaleDateString()
                           : 'Not set'}
                       </dd>
                     </div>
@@ -1130,23 +1125,15 @@ export default function AdminPage() {
                     <div className="flex justify-between gap-4">
                       <dt className="text-slate-500">Subscription period</dt>
                       <dd className="text-right">
-                        {detailsCompany.subscription_start_date &&
-                        detailEnd ? (
+                        {detailsCompany.subscription_start_date && detailsEndLabel ? (
                           <>
-                            {new Date(
-                              detailsCompany.subscription_start_date
-                            ).toLocaleDateString()}{' '}
-                            →{' '}
-                            {detailEnd}
+                            {new Date(detailsCompany.subscription_start_date).toLocaleDateString()} → {detailsEndLabel}
                           </>
                         ) : (
                           'Starts on activation, valid for 1 year'
                         )}
                       </dd>
                     </div>
-                        </>
-                      );
-                    })()}
                   </dl>
                   <div className="mt-3">
                     <div className="text-xs font-medium text-slate-700 mb-1">
