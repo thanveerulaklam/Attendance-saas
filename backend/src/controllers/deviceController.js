@@ -11,6 +11,12 @@ const {
 const auditService = require('../services/auditService');
 const { getCompanyById, isSubscriptionAllowed } = require('../services/companyService');
 
+const branchContext = (req) => ({
+  role: req.user?.role,
+  allowedBranchIds: req.allowedBranchIds,
+  defaultBranchId: req.defaultBranchId,
+});
+
 /**
  * GET /api/device
  * Auth: admin or hr
@@ -27,7 +33,7 @@ async function getDevices(req, res, next) {
     }
 
     const { page, limit } = req.query || {};
-    const result = await listDevices(companyId, { page, limit });
+    const result = await listDevices(companyId, { page, limit }, req.allowedBranchIds);
 
     return res.json({
       success: true,
@@ -57,9 +63,14 @@ async function createDeviceHandler(req, res, next) {
       });
     }
 
-    const device = await createDevice(companyId, {
-      name: req.body?.name,
-    });
+    const device = await createDevice(
+      companyId,
+      {
+        name: req.body?.name,
+        branch_id: req.body?.branch_id,
+      },
+      branchContext(req)
+    );
 
     auditService.log(companyId, req.user?.user_id, 'device.create', 'device', device.id, { name: device.name }).catch(() => {});
 
@@ -89,9 +100,15 @@ async function updateDeviceHandler(req, res, next) {
       });
     }
 
-    const device = await updateDevice(companyId, id, {
-      name: req.body?.name,
-    });
+    const device = await updateDevice(
+      companyId,
+      id,
+      {
+        name: req.body?.name,
+        branch_id: req.body?.branch_id,
+      },
+      branchContext(req)
+    );
 
     auditService.log(companyId, req.user?.user_id, 'device.update', 'device', id, { name: device.name }).catch(() => {});
 
@@ -122,7 +139,7 @@ async function toggleDeviceActiveHandler(req, res, next) {
       });
     }
 
-    const device = await toggleDeviceActive(companyId, id, isActive);
+    const device = await toggleDeviceActive(companyId, id, isActive, branchContext(req));
 
     auditService.log(companyId, req.user?.user_id, isActive ? 'device.activate' : 'device.deactivate', 'device', id, { name: device.name }).catch(() => {});
 
@@ -151,7 +168,7 @@ async function regenerateApiKeyHandler(req, res, next) {
       });
     }
 
-    const device = await regenerateApiKey(companyId, id);
+    const device = await regenerateApiKey(companyId, id, branchContext(req));
 
     auditService.log(companyId, req.user?.user_id, 'device.regenerate_key', 'device', id, { name: device.name }).catch(() => {});
 

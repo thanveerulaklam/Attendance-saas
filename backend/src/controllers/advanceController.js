@@ -17,7 +17,12 @@ async function list(req, res, next) {
       });
     }
 
-    const data = await listAdvances(companyId, { year, month, employee_id: employeeId });
+    const data = await listAdvances(companyId, {
+      year,
+      month,
+      employee_id: employeeId,
+      allowedBranchIds: req.allowedBranchIds,
+    });
 
     return res.json({
       success: true,
@@ -44,7 +49,7 @@ async function upsert(req, res, next) {
       });
     }
 
-    const record = await upsertAdvance(companyId, body);
+    const record = await upsertAdvance(companyId, body, req.allowedBranchIds);
 
     auditService
       .log(companyId, req.user?.user_id, 'advance.upsert', 'employee_advance', record.id, {

@@ -41,6 +41,11 @@ async function registerCompany(company, admin) {
     );
     const userRow = userResult.rows[0];
 
+    await client.query(
+      `INSERT INTO branches (company_id, name) VALUES ($1, 'Main')`,
+      [companyId]
+    );
+
     await client.query('COMMIT');
 
     // No token: company is pending approval. You approve after payment, then they can log in.

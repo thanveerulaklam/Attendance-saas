@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
 
 function maskKey(apiKey) {
@@ -26,6 +26,31 @@ export default function DevicesPage() {
   const [busyId, setBusyId] = useState(null);
   const [showFullKeyId, setShowFullKeyId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [branches, setBranches] = useState([]);
+  const [newBranchId, setNewBranchId] = useState('');
+
+  const branchNameById = useMemo(() => {
+    const m = {};
+    (branches || []).forEach((b) => {
+      m[String(b.id)] = b.name || `Branch #${b.id}`;
+    });
+    return m;
+  }, [branches]);
+
+  const loadBranches = async () => {
+    try {
+      const res = await authFetch('/api/company/branches', {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      const list = Array.isArray(json.data) ? json.data : [];
+      setBranches(list);
+      setNewBranchId((prev) => prev || (list[0] ? String(list[0].id) : ''));
+    } catch {
+      setBranches([]);
+    }
+  };
 
   const loadDevices = async () => {
     try {
@@ -48,6 +73,7 @@ export default function DevicesPage() {
 
   useEffect(() => {
     loadDevices();
+    loadBranches();
   }, []);
 
   const handleCreate = async (event) => {
@@ -55,10 +81,24 @@ export default function DevicesPage() {
     if (!newName.trim()) return;
     try {
       setCreating(true);
+      const resolvedBranch =
+        newBranchId ||
+        (branches.length === 1 ? String(branches[0].id) : '');
+      if (!resolvedBranch) {
+        setToast({
+          type: 'error',
+          message: 'Select a branch for this device',
+        });
+        return;
+      }
+
       const res = await authFetch('/api/device', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newName.trim() }),
+        body: JSON.stringify({
+          name: newName.trim(),
+          branch_id: Number(resolvedBranch),
+        }),
       });
       if (!res.ok) {
         throw new Error('Failed to register device');
@@ -249,6 +289,16 @@ export default function DevicesPage() {
                       </h2>
                       <p className="mt-0.5 text-[11px] text-slate-500">
                         ID #{device.id}
+                        {device.branch_id != null && (
+                          <>
+                            {' '}
+                            ·{' '}
+                            <span className="text-slate-600">
+                              {branchNameById[String(device.branch_id)] ||
+                                `Branch #${device.branch_id}`}
+                            </span>
+                          </>
+                        )}
                       </p>
                     </div>
                     <span
@@ -357,6 +407,31 @@ export default function DevicesPage() {
                   placeholder="e.g. Main gate biometric"
                 />
               </div>
+              {branches.length > 0 && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Branch
+                  </label>
+                  <select
+                    value={newBranchId}
+                    onChange={(e) => setNewBranchId(e.target.value)}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  >
+                    {branches.length > 1 && (
+                      <option value="">Select branch</option>
+                    )}
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    Punches from this device are tagged to this branch. Use one device per location.
+                  </p>
+                </div>
+              )}
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -368,7 +443,12 @@ export default function DevicesPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={creating || !newName.trim()}
+                  disabled={
+                    creating ||
+                    !newName.trim() ||
+                    branches.length === 0 ||
+                    (branches.length > 1 && !newBranchId)
+                  }
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
                 >
                   {creating ? 'Saving…' : 'Save device'}

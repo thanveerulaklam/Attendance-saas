@@ -1,7 +1,14 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 
-async function listAdvances(companyId, { year, month, employee_id: employeeId } = {}) {
+async function listAdvances(
+  companyId,
+  { year, month, employee_id: employeeId, allowedBranchIds = null } = {}
+) {
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    return [];
+  }
+
   const conditions = ['a.company_id = $1'];
   const params = [companyId];
   let idx = 2;
@@ -19,6 +26,11 @@ async function listAdvances(companyId, { year, month, employee_id: employeeId } 
   if (employeeId != null && employeeId !== '') {
     conditions.push(`a.employee_id = $${idx}`);
     params.push(Number(employeeId));
+    idx += 1;
+  }
+  if (allowedBranchIds != null) {
+    conditions.push(`e.branch_id = ANY($${idx}::bigint[])`);
+    params.push(allowedBranchIds);
     idx += 1;
   }
 
@@ -57,7 +69,7 @@ function parseAdvanceDate(input) {
   return str;
 }
 
-async function upsertAdvance(companyId, data) {
+async function upsertAdvance(companyId, data, allowedBranchIds = null) {
   const employeeId = Number(data.employee_id);
   const year = Number(data.year);
   const month = Number(data.month);
@@ -74,6 +86,22 @@ async function upsertAdvance(companyId, data) {
   }
   if (!Number.isFinite(amountNum) || amountNum < 0) {
     throw new AppError('amount must be a non-negative number', 400);
+  }
+
+  const empBr = await pool.query(
+    `SELECT branch_id FROM employees WHERE company_id = $1 AND id = $2`,
+    [companyId, employeeId]
+  );
+  if (empBr.rowCount === 0) {
+    throw new AppError('Employee not found for this company', 404);
+  }
+  if (allowedBranchIds != null) {
+    if (
+      allowedBranchIds.length === 0 ||
+      !allowedBranchIds.includes(Number(empBr.rows[0].branch_id))
+    ) {
+      throw new AppError('Employee not found for this company', 404);
+    }
   }
 
   const result = await pool.query(

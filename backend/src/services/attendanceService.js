@@ -14,6 +14,48 @@ const {
 // Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 
+function employeesBranchFilterSql(allowedBranchIds, paramIndex) {
+  if (allowedBranchIds == null) {
+    return { clause: '', params: [], nextIndex: paramIndex };
+  }
+  if (allowedBranchIds.length === 0) {
+    return { clause: ' AND FALSE', params: [], nextIndex: paramIndex };
+  }
+  return {
+    clause: ` AND branch_id = ANY($${paramIndex}::bigint[])`,
+    params: [allowedBranchIds],
+    nextIndex: paramIndex + 1,
+  };
+}
+
+async function assertEmployeeInAttendanceScope(client, companyId, employeeId, allowedBranchIds) {
+  if (allowedBranchIds == null) return;
+  const r = await client.query(
+    `SELECT branch_id FROM employees WHERE company_id = $1 AND id = $2 AND status = 'active'`,
+    [companyId, employeeId]
+  );
+  if (r.rowCount === 0) {
+    throw new AppError('Employee not found or inactive', 404);
+  }
+  if (allowedBranchIds.length === 0 || !allowedBranchIds.includes(Number(r.rows[0].branch_id))) {
+    throw new AppError('Employee not found or inactive', 404);
+  }
+}
+
+async function assertAttendanceLogInScope(client, companyId, logId, allowedBranchIds) {
+  if (allowedBranchIds == null) return;
+  const r = await client.query(
+    `SELECT branch_id FROM attendance_logs WHERE company_id = $1 AND id = $2`,
+    [companyId, logId]
+  );
+  if (r.rowCount === 0) {
+    throw new AppError('Punch record not found', 404);
+  }
+  if (allowedBranchIds.length === 0 || !allowedBranchIds.includes(Number(r.rows[0].branch_id))) {
+    throw new AppError('Punch record not found', 404);
+  }
+}
+
 const TZ_OFFSETS = {
   'Asia/Kolkata': '+05:30',
   'Asia/Calcutta': '+05:30',
@@ -425,8 +467,15 @@ function getHoursBasedDailyPresence(dayLogs, computedStatus, isCurrentDate) {
  * @param {string} dateStr - YYYY-MM-DD
  * @param {number} [employeeId] - optional filter
  * @returns {Promise<Array<{ employee_id, name, employee_code, present, late, overtime_hours }>>}
+ * @param {number[]|null} allowedBranchIds - null = all branches (admin)
  */
-async function getDailyAttendance(companyId, dateStr, employeeId = null, department = null) {
+async function getDailyAttendance(
+  companyId,
+  dateStr,
+  employeeId = null,
+  department = null,
+  allowedBranchIds = null
+) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   if (!match) {
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
@@ -444,14 +493,21 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null, departm
       WHERE company_id = $1 AND status = 'active'`;
     const params = [companyId];
 
+    const bfEmp = employeesBranchFilterSql(allowedBranchIds, 2);
+    employeesQuery += bfEmp.clause;
+    params.push(...bfEmp.params);
+    let nextIdx = bfEmp.nextIndex;
+
     if (employeeId) {
-      employeesQuery += ` AND id = $${params.length + 1}`;
+      employeesQuery += ` AND id = $${nextIdx}`;
       params.push(employeeId);
+      nextIdx += 1;
     }
 
     if (dept) {
-      employeesQuery += ` AND department = $${params.length + 1}`;
+      employeesQuery += ` AND department = $${nextIdx}`;
       params.push(dept);
+      nextIdx += 1;
     }
 
     if (!employeeId) employeesQuery += ' ORDER BY name';
@@ -590,7 +646,8 @@ async function getMonthlyAttendance(
   year,
   month,
   employeeId = null,
-  department = null
+  department = null,
+  allowedBranchIds = null
 ) {
   const y = Number(year);
   const m = Number(month);
@@ -611,14 +668,21 @@ async function getMonthlyAttendance(
       WHERE company_id = $1 AND status = 'active'`;
     const params = [companyId];
 
+    const bfEmpM = employeesBranchFilterSql(allowedBranchIds, 2);
+    employeesQuery += bfEmpM.clause;
+    params.push(...bfEmpM.params);
+    let nextIdxM = bfEmpM.nextIndex;
+
     if (employeeId) {
-      employeesQuery += ` AND id = $${params.length + 1}`;
+      employeesQuery += ` AND id = $${nextIdxM}`;
       params.push(employeeId);
+      nextIdxM += 1;
     }
 
     if (dept) {
-      employeesQuery += ` AND department = $${params.length + 1}`;
+      employeesQuery += ` AND department = $${nextIdxM}`;
       params.push(dept);
+      nextIdxM += 1;
     }
 
     if (!employeeId) employeesQuery += ' ORDER BY name';
@@ -751,7 +815,11 @@ async function getMonthlyAttendance(
  * @param {object} params - { employeeId, punch_time? (ISO), date? (YYYY-MM-DD), time? (HH:mm), punchType ('in'|'out') }
  * @returns {Promise<{ inserted: number, punch: object }>}
  */
-async function addManualPunch(companyId, { employeeId, punch_time: punchTimeParam, date, time, punchType }) {
+async function addManualPunch(
+  companyId,
+  { employeeId, punch_time: punchTimeParam, date, time, punchType },
+  allowedBranchIds = null
+) {
   const punchTypeNorm = String(punchType || '').toLowerCase();
   if (punchTypeNorm !== 'in' && punchTypeNorm !== 'out') {
     throw new AppError('punch_type must be "in" or "out"', 400);
@@ -789,19 +857,22 @@ async function addManualPunch(companyId, { employeeId, punch_time: punchTimePara
   const client = await pool.connect();
   try {
     const empCheck = await client.query(
-      `SELECT id FROM employees WHERE company_id = $1 AND id = $2 AND status = 'active'`,
+      `SELECT id, branch_id FROM employees WHERE company_id = $1 AND id = $2 AND status = 'active'`,
       [companyId, empId]
     );
     if (empCheck.rowCount === 0) {
       throw new AppError('Employee not found or inactive', 404);
     }
+    await assertEmployeeInAttendanceScope(client, companyId, empId, allowedBranchIds);
+
+    const branchId = Number(empCheck.rows[0].branch_id);
 
     const result = await client.query(
-      `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id)
-       VALUES ($1, $2, $3, $4, 'manual')
+      `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id, branch_id)
+       VALUES ($1, $2, $3, $4, 'manual', $5)
        ON CONFLICT (employee_id, punch_time) DO NOTHING
        RETURNING id, employee_id, punch_time, punch_type`,
-      [companyId, empId, punchTime.toISOString(), punchTypeNorm]
+      [companyId, empId, punchTime.toISOString(), punchTypeNorm, branchId]
     );
 
     if (result.rowCount === 0) {
@@ -823,7 +894,7 @@ async function addManualPunch(companyId, { employeeId, punch_time: punchTimePara
  * @param {object} params - { employeeId, date (YYYY-MM-DD) }
  * @returns {Promise<{ inserted: number, punches: Array }>}
  */
-async function addManualFullDay(companyId, { employeeId, date }) {
+async function addManualFullDay(companyId, { employeeId, date }, allowedBranchIds = null) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
   if (!match) {
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
@@ -851,12 +922,14 @@ async function addManualFullDay(companyId, { employeeId, date }) {
   const client = await pool.connect();
   try {
     const empCheck = await client.query(
-      `SELECT id FROM employees WHERE company_id = $1 AND id = $2 AND status = 'active'`,
+      `SELECT id, branch_id FROM employees WHERE company_id = $1 AND id = $2 AND status = 'active'`,
       [companyId, empId]
     );
     if (empCheck.rowCount === 0) {
       throw new AppError('Employee not found or inactive', 404);
     }
+    await assertEmployeeInAttendanceScope(client, companyId, empId, allowedBranchIds);
+    const branchId = Number(empCheck.rows[0].branch_id);
 
     let inserted = 0;
     const punches = [];
@@ -870,11 +943,11 @@ async function addManualFullDay(companyId, { employeeId, date }) {
 
     for (const [punchTime, punchType] of toInsert) {
       const result = await client.query(
-        `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id)
-         VALUES ($1, $2, $3, $4, 'manual')
+        `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id, branch_id)
+         VALUES ($1, $2, $3, $4, 'manual', $5)
          ON CONFLICT (employee_id, punch_time) DO NOTHING
          RETURNING id, punch_time, punch_type`,
-        [companyId, empId, punchTime.toISOString(), punchType]
+        [companyId, empId, punchTime.toISOString(), punchType, branchId]
       );
       if (result.rowCount > 0) {
         inserted += 1;
@@ -894,7 +967,7 @@ async function addManualFullDay(companyId, { employeeId, date }) {
  * @param {object} params - { employeeIds: number[], date (YYYY-MM-DD) }
  * @returns {Promise<{ inserted: number, processed: number, results: Array<{ employee_id, inserted }> }>}
  */
-async function addManualFullDayBulk(companyId, { employeeIds, date }) {
+async function addManualFullDayBulk(companyId, { employeeIds, date }, allowedBranchIds = null) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(date || '').trim());
   if (!match) {
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
@@ -910,7 +983,7 @@ async function addManualFullDayBulk(companyId, { employeeIds, date }) {
 
   for (const empId of ids) {
     try {
-      const r = await addManualFullDay(companyId, { employeeId: empId, date });
+      const r = await addManualFullDay(companyId, { employeeId: empId, date }, allowedBranchIds);
       totalInserted += r.inserted;
       results.push({ employee_id: empId, inserted: r.inserted, success: true });
     } catch (err) {
@@ -937,7 +1010,12 @@ async function addManualFullDayBulk(companyId, { employeeIds, date }) {
  * @param {object} params - { punch_time (ISO string), punch_type ('in'|'out')? }
  * @returns {Promise<{ id, punch_time, punch_type }>}
  */
-async function updatePunch(companyId, logId, { punch_time: punchTimeParam, punch_type: punchTypeParam }) {
+async function updatePunch(
+  companyId,
+  logId,
+  { punch_time: punchTimeParam, punch_type: punchTypeParam },
+  allowedBranchIds = null
+) {
   const logIdNum = Number(logId);
   if (!logIdNum || logIdNum < 1) {
     throw new AppError('Valid log id is required', 400);
@@ -972,6 +1050,7 @@ async function updatePunch(companyId, logId, { punch_time: punchTimeParam, punch
     if (existing.rowCount === 0) {
       throw new AppError('Punch record not found', 404);
     }
+    await assertAttendanceLogInScope(client, companyId, logIdNum, allowedBranchIds);
 
     const row = existing.rows[0];
     const newPunchTime = punchTime != null ? punchTime.toISOString() : row.punch_time;
@@ -1006,7 +1085,7 @@ async function updatePunch(companyId, logId, { punch_time: punchTimeParam, punch
  * @param {number} logId - attendance_logs.id
  * @returns {Promise<{ id: number }>}
  */
-async function deletePunch(companyId, logId) {
+async function deletePunch(companyId, logId, allowedBranchIds = null) {
   const logIdNum = Number(logId);
   if (!logIdNum || logIdNum < 1) {
     throw new AppError('Valid log id is required', 400);
@@ -1014,6 +1093,8 @@ async function deletePunch(companyId, logId) {
 
   const client = await pool.connect();
   try {
+    await assertAttendanceLogInScope(client, companyId, logIdNum, allowedBranchIds);
+
     const result = await client.query(
       `DELETE FROM attendance_logs
        WHERE company_id = $1 AND id = $2

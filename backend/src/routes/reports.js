@@ -4,11 +4,16 @@ const {
   payrollCsv,
   overtimeCsv,
 } = require('../controllers/reportsController');
-const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
+const { authenticate, requireRole, enforceCompanyFromToken, attachBranchScopes } = require('../middleware/auth');
 
 const router = express.Router();
 
-const withAuth = [authenticate, requireRole(['admin', 'hr']), enforceCompanyFromToken];
+const withAuth = [
+  authenticate,
+  requireRole(['admin', 'hr']),
+  enforceCompanyFromToken,
+  attachBranchScopes,
+];
 
 router.get('/attendance.csv', withAuth, attendanceCsv);
 router.get('/payroll.csv', withAuth, payrollCsv);

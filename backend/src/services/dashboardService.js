@@ -4,10 +4,10 @@ const { todayIstYmd, addDaysIst } = require('../utils/istDate');
 /**
  * Get dashboard summary for a company: KPIs + 7-day attendance trend + today's absent.
  */
-async function getDashboardSummary(companyId) {
+async function getDashboardSummary(companyId, allowedBranchIds = null) {
   const todayStr = todayIstYmd();
 
-  const dailyResult = await getDailyAttendance(companyId, todayStr, null);
+  const dailyResult = await getDailyAttendance(companyId, todayStr, null, null, allowedBranchIds);
   const totalEmployees = (dailyResult || []).length;
   const todayPresent = (dailyResult || []).filter((r) => r.present).length;
   const todayTotal = (dailyResult || []).length;
@@ -45,7 +45,7 @@ async function getDashboardSummary(companyId) {
   const trend = [];
   for (const { date, label } of trendDays) {
     try {
-      const dayData = await getDailyAttendance(companyId, date, null);
+      const dayData = await getDailyAttendance(companyId, date, null, null, allowedBranchIds);
       const present = (dayData || []).filter((r) => r.present).length;
       const total = (dayData || []).length;
       const pct = total > 0 ? Math.round((present / total) * 100) : 0;

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 function toDateInputValue(d) {
   if (!d) return '';
@@ -8,6 +9,9 @@ function toDateInputValue(d) {
 }
 
 export default function CompanySettingsPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -22,6 +26,29 @@ export default function CompanySettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
+
+  const [branches, setBranches] = useState([]);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchAddress, setNewBranchAddress] = useState('');
+  const [branchSaving, setBranchSaving] = useState(false);
+  const [branchError, setBranchError] = useState(null);
+
+  const loadBranches = async () => {
+    if (!isAdmin) return;
+    try {
+      const res = await authFetch('/api/company/branches');
+      if (!res.ok) throw new Error('Failed to load branches');
+      const json = await res.json();
+      setBranches(Array.isArray(json.data) ? json.data : []);
+    } catch {
+      setBranches([]);
+    }
+  };
+
+  useEffect(() => {
+    loadBranches();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   useEffect(() => {
     let isMounted = true;
@@ -107,6 +134,34 @@ export default function CompanySettingsPage() {
     }
   };
 
+  const handleAddBranch = async (event) => {
+    event.preventDefault();
+    if (!newBranchName.trim() || branchSaving) return;
+    try {
+      setBranchSaving(true);
+      setBranchError(null);
+      const res = await authFetch('/api/company/branches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newBranchName.trim(),
+          address: newBranchAddress.trim() === '' ? undefined : newBranchAddress.trim(),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to create branch');
+      }
+      setNewBranchName('');
+      setNewBranchAddress('');
+      await loadBranches();
+    } catch (err) {
+      setBranchError(err.message || 'Failed to create branch');
+    } finally {
+      setBranchSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <header>
@@ -175,6 +230,64 @@ export default function CompanySettingsPage() {
           </div>
         </form>
       </section>
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Branches</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Add one row per physical location. Employees and devices are assigned to a branch; HR users only see data for branches assigned to them (configured by your service provider).
+          </p>
+          {branchError && (
+            <div className="mt-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+              {branchError}
+            </div>
+          )}
+          {branches.length > 0 && (
+            <ul className="mt-3 space-y-1 text-sm text-slate-700">
+              {branches.map((b) => (
+                <li key={b.id} className="flex flex-wrap gap-2 border-b border-slate-100 py-2 last:border-0">
+                  <span className="font-medium text-slate-900">{b.name}</span>
+                  {b.address && (
+                    <span className="text-xs text-slate-500">{b.address}</span>
+                  )}
+                  <span className="text-[10px] text-slate-400">ID {b.id}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form onSubmit={handleAddBranch} className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">New branch name</label>
+                <input
+                  value={newBranchName}
+                  onChange={(e) => setNewBranchName(e.target.value)}
+                  disabled={branchSaving}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  placeholder="e.g. Bangalore factory"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Address (optional)</label>
+                <input
+                  value={newBranchAddress}
+                  onChange={(e) => setNewBranchAddress(e.target.value)}
+                  disabled={branchSaving}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  placeholder="City / area"
+                />
+              </div>
+            </div>
+            <button
+              type="submit"
+              disabled={branchSaving || !newBranchName.trim()}
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-primary-200 hover:text-primary-700 disabled:opacity-50"
+            >
+              {branchSaving ? 'Adding…' : 'Add branch'}
+            </button>
+          </form>
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
         <h2 className="text-sm font-semibold text-slate-900">Subscription</h2>

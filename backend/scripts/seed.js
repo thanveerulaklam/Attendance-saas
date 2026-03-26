@@ -12,9 +12,11 @@ async function seed() {
     await client.query('DELETE FROM payroll_records');
     await client.query('DELETE FROM attendance_logs');
     await client.query('DELETE FROM shifts');
+    await client.query('DELETE FROM user_branch_assignments');
     await client.query('DELETE FROM employees');
     await client.query('DELETE FROM users');
     await client.query('DELETE FROM devices');
+    await client.query('DELETE FROM branches');
     await client.query('DELETE FROM companies');
 
     const companyResult = await client.query(
@@ -24,6 +26,12 @@ async function seed() {
       ['Demo Company', 'admin@demo-company.com', '+1-555-0000', 'Demo address']
     );
     const companyId = companyResult.rows[0].id;
+
+    const branchResult = await client.query(
+      `INSERT INTO branches (company_id, name) VALUES ($1, 'Main') RETURNING id`,
+      [companyId]
+    );
+    const branchId = branchResult.rows[0].id;
 
     const adminPasswordHash = await bcrypt.hash('Admin@123', 10);
 
@@ -37,13 +45,14 @@ async function seed() {
 
     const employeeResult = await client.query(
       `INSERT INTO employees (
-          company_id, employee_code, name, department, designation,
+          company_id, branch_id, employee_code, name, department, designation,
           basic_salary, join_date, status
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
       [
         companyId,
+        branchId,
         'EMP-001',
         'John Doe',
         'Engineering',
@@ -66,20 +75,20 @@ async function seed() {
     // Demo device for push mode
     const deviceApiKey = 'demo-device-api-key-123';
     const deviceResult = await client.query(
-      `INSERT INTO devices (company_id, name, api_key)
-       VALUES ($1, $2, $3)
+      `INSERT INTO devices (company_id, branch_id, name, api_key)
+       VALUES ($1, $2, $3, $4)
        RETURNING id`,
-      [companyId, 'Demo biometric device', deviceApiKey]
+      [companyId, branchId, 'Demo biometric device', deviceApiKey]
     );
     const deviceId = deviceResult.rows[0].id;
 
     // Example attendance logs for today (in/out)
     await client.query(
-      `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id)
+      `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id, branch_id)
        VALUES
-         ($1, $2, NOW() - INTERVAL '8 hours', 'in', $3),
-         ($1, $2, NOW(), 'out', $3)`,
-      [companyId, employeeId, `DEVICE-${deviceId}`]
+         ($1, $2, NOW() - INTERVAL '8 hours', 'in', $3, $4),
+         ($1, $2, NOW(), 'out', $3, $4)`,
+      [companyId, employeeId, `DEVICE-${deviceId}`, branchId]
     );
 
     // Example payroll record for current month

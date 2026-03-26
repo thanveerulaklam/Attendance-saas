@@ -27,9 +27,13 @@ export default function EmployeeFormModal({
   const [joinDate, setJoinDate] = useState('');
   const [status, setStatus] = useState('active');
   const [shiftId, setShiftId] = useState('');
+  const [branchId, setBranchId] = useState('');
 
   const [shifts, setShifts] = useState([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
+  const [branches, setBranches] = useState([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
+
 
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -45,6 +49,16 @@ export default function EmployeeFormModal({
         })
         .catch(() => setShifts([]))
         .finally(() => setShiftsLoading(false));
+
+      setBranchesLoading(true);
+      authFetch('/api/company/branches')
+        .then((res) => res.json())
+        .then((json) => {
+          const list = json.data || [];
+          setBranches(list);
+        })
+        .catch(() => setBranches([]))
+        .finally(() => setBranchesLoading(false));
     }
   }, [open]);
 
@@ -75,6 +89,9 @@ export default function EmployeeFormModal({
         setShiftId(
           employee.shift_id != null ? String(employee.shift_id) : ''
         );
+        setBranchId(
+          employee.branch_id != null ? String(employee.branch_id) : ''
+        );
       } else {
         setName('');
         setEmployeeCode('');
@@ -88,11 +105,27 @@ export default function EmployeeFormModal({
         setJoinDate('');
         setStatus('active');
         setShiftId('');
+        setBranchId('');
       }
       setErrors({});
       setToast(null);
     }
   }, [open, employee]);
+
+  useEffect(() => {
+    if (!open || !branches.length) return;
+    if (employee?.id) {
+      if (employee.branch_id != null) {
+        setBranchId(String(employee.branch_id));
+      } else {
+        setBranchId(String(branches[0].id));
+      }
+      return;
+    }
+    if (!branchId && branches[0]) {
+      setBranchId(String(branches[0].id));
+    }
+  }, [open, branches, employee, branchId]);
 
   const validate = () => {
     const nextErrors = {};
@@ -150,6 +183,10 @@ export default function EmployeeFormModal({
       nextErrors.status = 'Invalid status';
     }
 
+    if (branches.length > 1 && !branchId.trim()) {
+      nextErrors.branch_id = 'Select a branch';
+    }
+
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -179,6 +216,13 @@ export default function EmployeeFormModal({
         status,
         shift_id: shiftId === '' ? null : Number(shiftId),
       };
+
+      const resolvedBranch =
+        branchId.trim() ||
+        (branches.length === 1 ? String(branches[0].id) : '');
+      if (resolvedBranch) {
+        payload.branch_id = Number(resolvedBranch);
+      }
 
       const url = isEdit ? `/api/employees/${employee.id}` : '/api/employees';
       const method = isEdit ? 'PUT' : 'POST';
@@ -480,6 +524,35 @@ export default function EmployeeFormModal({
               )}
             </div>
           </div>
+
+          {branches.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Branch
+                <select
+                  value={branchId}
+                  onChange={(e) => setBranchId(e.target.value)}
+                  disabled={branchesLoading}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100 disabled:opacity-60"
+                >
+                  {branches.length > 1 && (
+                    <option value="">Select branch</option>
+                  )}
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Employees are tied to one location. HR users only see branches assigned to them; leave as default if you have one branch.
+              </p>
+              {errors.branch_id && (
+                <p className="mt-1 text-[11px] text-rose-600">{errors.branch_id}</p>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-slate-700">

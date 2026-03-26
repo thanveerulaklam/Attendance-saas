@@ -8,18 +8,29 @@ const {
   updatePunchById,
   deletePunchById,
 } = require('../controllers/attendanceController');
-const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
+const {
+  authenticate,
+  requireRole,
+  enforceCompanyFromToken,
+  attachBranchScopes,
+  requireHrBranchForMutation,
+} = require('../middleware/auth');
 
 const router = express.Router();
 
-const withAuth = [authenticate, requireRole(['admin', 'hr']), enforceCompanyFromToken];
+const withAuth = [
+  authenticate,
+  requireRole(['admin', 'hr']),
+  enforceCompanyFromToken,
+  attachBranchScopes,
+];
 
 router.get('/daily', withAuth, getDaily);
 router.get('/monthly', withAuth, getMonthly);
-router.post('/manual-punch', withAuth, createManualPunch);
-router.post('/manual-full-day', withAuth, createManualFullDay);
-router.post('/manual-full-day-bulk', withAuth, createManualFullDayBulk);
-router.patch('/logs/:id', withAuth, updatePunchById);
-router.delete('/logs/:id', withAuth, deletePunchById);
+router.post('/manual-punch', withAuth, requireHrBranchForMutation, createManualPunch);
+router.post('/manual-full-day', withAuth, requireHrBranchForMutation, createManualFullDay);
+router.post('/manual-full-day-bulk', withAuth, requireHrBranchForMutation, createManualFullDayBulk);
+router.patch('/logs/:id', withAuth, requireHrBranchForMutation, updatePunchById);
+router.delete('/logs/:id', withAuth, requireHrBranchForMutation, deletePunchById);
 
 module.exports = router;

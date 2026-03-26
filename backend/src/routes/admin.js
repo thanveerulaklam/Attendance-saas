@@ -9,6 +9,9 @@ const {
   declineCompany,
   lockCompany,
   unlockCompany,
+  getCompanyDetails,
+  setUserBranchAssignments,
+  setCompanyEmployeeLimit,
 } = require('../controllers/adminController');
 const { requireApprovalSecret } = require('../middleware/approvalSecret');
 
@@ -35,6 +38,9 @@ router.use(requireApprovalSecret);
 
 router.get('/pending-companies', listPendingCompanies);
 router.get('/overview', getAdminOverview);
+router.get('/company-details', getCompanyDetails);
+router.post('/set-user-branch-assignments', setUserBranchAssignments);
+router.post('/set-company-employee-limit', setCompanyEmployeeLimit);
 router.get('/demo-enquiries', listDemoEnquiries);
 router.post('/company-billing', updateCompanyBilling);
 router.post('/approve-company', approveCompany);

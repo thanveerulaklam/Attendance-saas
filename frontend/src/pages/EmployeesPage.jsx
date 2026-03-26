@@ -32,9 +32,14 @@ export default function EmployeesPage() {
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [toast, setToast] = useState(null);
   const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
+  const [branches, setBranches] = useState([]);
 
   const shiftNameById = Object.fromEntries(
     (shifts || []).map((s) => [String(s.id), s.shift_name])
+  );
+
+  const branchNameById = Object.fromEntries(
+    (branches || []).map((b) => [String(b.id), b.name || `Branch #${b.id}`])
   );
 
   useEffect(() => {
@@ -94,6 +99,13 @@ export default function EmployeesPage() {
       .then((res) => res.json())
       .then((json) => setShifts(json.data || []))
       .catch(() => setShifts([]));
+  }, []);
+
+  useEffect(() => {
+    authFetch('/api/company/branches')
+      .then((res) => res.json())
+      .then((json) => setBranches(Array.isArray(json.data) ? json.data : []))
+      .catch(() => setBranches([]));
   }, []);
 
   useEffect(() => {
@@ -248,6 +260,7 @@ export default function EmployeesPage() {
                 <tr className="border-b border-slate-200 text-slate-500">
                   <th className="pb-3 pr-4 font-medium">Name</th>
                   <th className="pb-3 pr-4 font-medium">Employee code</th>
+                  <th className="pb-3 pr-4 font-medium">Branch</th>
                   <th className="pb-3 pr-4 font-medium">Basic salary</th>
                   <th className="pb-3 pr-4 font-medium">Join date</th>
                   <th className="pb-3 pr-4 font-medium">Status</th>
@@ -262,7 +275,7 @@ export default function EmployeesPage() {
                     key={idx}
                     className="border-b border-slate-100"
                   >
-                    {Array.from({ length: 7 }).map((_, i) => (
+                    {Array.from({ length: 8 }).map((_, i) => (
                       <td
                         // eslint-disable-next-line react/no-array-index-key
                         key={i}
@@ -304,6 +317,7 @@ export default function EmployeesPage() {
                   <tr className="border-b border-slate-200 text-slate-500">
                     <th className="pb-3 pr-4 font-medium">Name</th>
                     <th className="pb-3 pr-4 font-medium">Employee code</th>
+                    <th className="pb-3 pr-4 font-medium">Branch</th>
                     <th className="pb-3 pr-4 font-medium">Basic salary</th>
                     <th className="pb-3 pr-4 font-medium">Join date</th>
                     <th className="pb-3 pr-4 font-medium">Status</th>
@@ -323,6 +337,10 @@ export default function EmployeesPage() {
                     const shiftName = employee.shift_id != null
                       ? shiftNameById[String(employee.shift_id)] ?? `#${employee.shift_id}`
                       : '—';
+                    const branchLabel =
+                      employee.branch_id != null
+                        ? branchNameById[String(employee.branch_id)] || '—'
+                        : '—';
                     return (
                       <tr
                         key={employee.id}
@@ -333,6 +351,9 @@ export default function EmployeesPage() {
                         </td>
                         <td className="py-3 pr-4 text-slate-600">
                           {employee.employee_code || '—'}
+                        </td>
+                        <td className="py-3 pr-4 text-slate-600 text-sm">
+                          {branchLabel}
                         </td>
                         <td className="py-3 pr-4 tabular-nums text-slate-700">
                           {formatINR(employee.basic_salary)}

@@ -24,7 +24,7 @@ async function attendanceCsv(req, res, next) {
       });
     }
 
-    const csv = await getAttendanceReportCsv(companyId, year, month);
+    const csv = await getAttendanceReportCsv(companyId, year, month, req.allowedBranchIds);
     const filename = `attendance-${year}-${String(month).padStart(2, '0')}.csv`;
     setCsvHeaders(res, filename);
     return res.send(csv);
@@ -48,7 +48,7 @@ async function payrollCsv(req, res, next) {
       });
     }
 
-    const csv = await getPayrollReportCsv(companyId, year, month);
+    const csv = await getPayrollReportCsv(companyId, year, month, req.allowedBranchIds);
     const filename = `payroll-${year}-${String(month).padStart(2, '0')}.csv`;
     setCsvHeaders(res, filename);
     return res.send(csv);
@@ -72,7 +72,7 @@ async function overtimeCsv(req, res, next) {
       });
     }
 
-    const csv = await getOvertimeReportCsv(companyId, year, month);
+    const csv = await getOvertimeReportCsv(companyId, year, month, req.allowedBranchIds);
     const filename = `overtime-${year}-${String(month).padStart(2, '0')}.csv`;
     setCsvHeaders(res, filename);
     return res.send(csv);

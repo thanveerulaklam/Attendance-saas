@@ -26,14 +26,14 @@ function toCsv(headerRow, dataRows) {
  * Monthly attendance report CSV.
  * Columns: Employee Code, Name, Year, Month, Present Days, Absent Days, Late Days, Overtime Hours
  */
-async function getAttendanceReportCsv(companyId, year, month) {
+async function getAttendanceReportCsv(companyId, year, month, allowedBranchIds = null) {
   const y = Number(year);
   const m = Number(month);
   if (!y || !m || m < 1 || m > 12) {
     throw new AppError('Valid year and month are required', 400);
   }
 
-  const data = await getMonthlyAttendance(companyId, y, m, null);
+  const data = await getMonthlyAttendance(companyId, y, m, null, null, allowedBranchIds);
   const header = [
     'Employee Code',
     'Name',
@@ -64,11 +64,35 @@ async function getAttendanceReportCsv(companyId, year, month) {
  * Payroll report CSV from payroll_records.
  * Columns: Employee Code, Name, Year, Month, Present Days, Total Days, Overtime Hours, Gross Salary, Deductions, Net Salary
  */
-async function getPayrollReportCsv(companyId, year, month) {
+async function getPayrollReportCsv(companyId, year, month, allowedBranchIds = null) {
   const y = Number(year);
   const m = Number(month);
   if (!y || !m || m < 1 || m > 12) {
     throw new AppError('Valid year and month are required', 400);
+  }
+
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    const header = [
+      'Employee Code',
+      'Name',
+      'Year',
+      'Month',
+      'Present Days',
+      'Total Days',
+      'Overtime Hours',
+      'Gross Salary',
+      'Deductions',
+      'No Leave Incentive',
+      'Net Salary',
+    ];
+    return toCsv(header, []);
+  }
+
+  const params = [companyId, y, m];
+  let branchClause = '';
+  if (allowedBranchIds != null) {
+    branchClause = ' AND e.branch_id = ANY($4::bigint[])';
+    params.push(allowedBranchIds);
   }
 
   const result = await pool.query(
@@ -88,9 +112,9 @@ async function getPayrollReportCsv(companyId, year, month) {
         e.employee_code
      FROM payroll_records p
      INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
-     WHERE p.company_id = $1 AND p.year = $2 AND p.month = $3
+     WHERE p.company_id = $1 AND p.year = $2 AND p.month = $3${branchClause}
      ORDER BY e.name`,
-    [companyId, y, m]
+    params
   );
 
   const header = [
@@ -126,14 +150,14 @@ async function getPayrollReportCsv(companyId, year, month) {
  * Overtime summary CSV (from monthly attendance data).
  * Columns: Employee Code, Name, Year, Month, Overtime Hours
  */
-async function getOvertimeReportCsv(companyId, year, month) {
+async function getOvertimeReportCsv(companyId, year, month, allowedBranchIds = null) {
   const y = Number(year);
   const m = Number(month);
   if (!y || !m || m < 1 || m > 12) {
     throw new AppError('Valid year and month are required', 400);
   }
 
-  const data = await getMonthlyAttendance(companyId, y, m, null);
+  const data = await getMonthlyAttendance(companyId, y, m, null, null, allowedBranchIds);
   const header = ['Employee Code', 'Name', 'Year', 'Month', 'Overtime Hours'];
   const rows = (data.employees || []).map((emp) => [
     emp.employee_code,

@@ -11,6 +11,8 @@ const {
   authenticate,
   requireRole,
   enforceCompanyFromToken,
+  attachBranchScopes,
+  requireHrBranchForMutation,
 } = require('../middleware/auth');
 
 const router = express.Router();
@@ -20,10 +22,11 @@ const withEmployeeAuth = [
   authenticate,
   requireRole(['admin', 'hr']),
   enforceCompanyFromToken,
+  attachBranchScopes,
 ];
 
 // POST /api/employees
-router.post('/', withEmployeeAuth, createEmployee);
+router.post('/', withEmployeeAuth, requireHrBranchForMutation, createEmployee);
 
 // GET /api/employees
 router.get('/', withEmployeeAuth, getEmployees);
@@ -35,10 +38,10 @@ router.get('/departments', withEmployeeAuth, getDepartments);
 router.get('/:id', withEmployeeAuth, getEmployeeById);
 
 // PUT /api/employees/:id
-router.put('/:id', withEmployeeAuth, updateEmployee);
+router.put('/:id', withEmployeeAuth, requireHrBranchForMutation, updateEmployee);
 
 // PATCH /api/employees/:id/deactivate
-router.patch('/:id/deactivate', withEmployeeAuth, deactivateEmployee);
+router.patch('/:id/deactivate', withEmployeeAuth, requireHrBranchForMutation, deactivateEmployee);
 
 module.exports = router;
 

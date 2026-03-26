@@ -9,9 +9,15 @@ const asyncHandler = (fn) => (req, res, next) =>
  * POST /api/employees
  * Body: { name, employee_code, basic_salary, join_date, status? }
  */
+const branchContext = (req) => ({
+  role: req.user?.role,
+  allowedBranchIds: req.allowedBranchIds,
+  defaultBranchId: req.defaultBranchId,
+});
+
 const createEmployee = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
-  const employee = await employeeService.createEmployee(companyId, req.body || {});
+  const employee = await employeeService.createEmployee(companyId, req.body || {}, branchContext(req));
 
   auditService.log(companyId, req.user?.user_id, 'employee.create', 'employee', employee.id, { name: employee.name }).catch(() => {});
 
@@ -29,11 +35,15 @@ const getEmployees = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
   const { page, limit, search } = req.query || {};
 
-  const result = await employeeService.getEmployees(companyId, {
-    page,
-    limit,
-    search,
-  });
+  const result = await employeeService.getEmployees(
+    companyId,
+    {
+      page,
+      limit,
+      search,
+    },
+    req.allowedBranchIds
+  );
 
   return res.status(200).json({
     success: true,
@@ -46,7 +56,7 @@ const getEmployees = asyncHandler(async (req, res) => {
  */
 const getDepartments = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
-  const departments = await employeeService.getEmployeeDepartments(companyId);
+  const departments = await employeeService.getEmployeeDepartments(companyId, req.allowedBranchIds);
 
   return res.status(200).json({
     success: true,
@@ -61,7 +71,7 @@ const getEmployeeById = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
   const id = Number(req.params.id);
 
-  const employee = await employeeService.getEmployeeById(companyId, id);
+  const employee = await employeeService.getEmployeeById(companyId, id, branchContext(req));
 
   return res.status(200).json({
     success: true,
@@ -77,7 +87,7 @@ const updateEmployee = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
   const id = Number(req.params.id);
 
-  const updated = await employeeService.updateEmployee(companyId, id, req.body || {});
+  const updated = await employeeService.updateEmployee(companyId, id, req.body || {}, branchContext(req));
 
   auditService.log(companyId, req.user?.user_id, 'employee.update', 'employee', id, { name: updated.name }).catch(() => {});
 
@@ -94,7 +104,7 @@ const deactivateEmployee = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
   const id = Number(req.params.id);
 
-  const updated = await employeeService.deactivateEmployee(companyId, id);
+  const updated = await employeeService.deactivateEmployee(companyId, id, branchContext(req));
 
   auditService.log(companyId, req.user?.user_id, 'employee.deactivate', 'employee', id, { name: updated.name }).catch(() => {});
 

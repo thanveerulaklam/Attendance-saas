@@ -176,10 +176,62 @@
       .mt-2 {
         margin-top: 8px;
       }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.75);
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        z-index: 50;
+        padding: 24px;
+        overflow: auto;
+      }
+      .modal-backdrop.open {
+        display: flex;
+      }
+      .modal-panel {
+        max-width: 640px;
+        width: 100%;
+        background: #020617;
+        border: 1px solid #1f2937;
+        border-radius: 16px;
+        padding: 20px;
+        margin-top: 24px;
+        max-height: calc(100vh - 48px);
+        overflow: auto;
+      }
+      .modal-panel h3 {
+        margin: 0 0 12px;
+        font-size: 1.1rem;
+      }
+      .modal-section {
+        margin-top: 16px;
+        padding-top: 12px;
+        border-top: 1px solid #1f2937;
+      }
+      .modal-panel pre,
+      .modal-panel .mono {
+        font-size: 0.75rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
     </style>
   </head>
   <body>
-    <div class="container">
+      <div id="company-details-modal" class="modal-backdrop" aria-hidden="true">
+        <div class="modal-panel" role="dialog" aria-modal="true">
+          <h3 id="company-details-title">Company details</h3>
+          <div id="company-details-body" class="small"></div>
+          <div class="mt-2">
+            <button type="button" id="company-details-close" class="btn-secondary">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="container">
       <h1>PunchPay Super Admin Portal</h1>
       <div class="subtitle">
         For provider use only — manages pending registrations, billing metadata, and
@@ -266,12 +318,13 @@
                 <th>Plan / billing</th>
                 <th>Staff</th>
                 <th>Subscription</th>
+                <th style="text-align: right">Details</th>
                 <th style="text-align: right">Controls</th>
               </tr>
             </thead>
             <tbody id="companies-body">
               <tr>
-                <td colspan="8" class="muted small">No data loaded.</td>
+                <td colspan="9" class="muted small">No data loaded.</td>
               </tr>
             </tbody>
           </table>
@@ -497,7 +550,7 @@
           if (!list || !list.length) {
             var tr = document.createElement("tr");
             var td = document.createElement("td");
-            td.colSpan = 8;
+            td.colSpan = 9;
             td.className = "muted small";
             td.textContent = "No companies found.";
             tr.appendChild(td);
@@ -574,6 +627,17 @@
               "</div>";
             tr.appendChild(tdSub);
 
+            var tdDetails = document.createElement("td");
+            tdDetails.style.textAlign = "right";
+            var detailsBtn = document.createElement("button");
+            detailsBtn.className = "btn-secondary small";
+            detailsBtn.textContent = "Details";
+            detailsBtn.onclick = function () {
+              openCompanyDetailsModal(c.id, c.name);
+            };
+            tdDetails.appendChild(detailsBtn);
+            tr.appendChild(tdDetails);
+
             var tdControls = document.createElement("td");
             tdControls.style.textAlign = "right";
 
@@ -621,6 +685,203 @@
             tr.appendChild(tdControls);
 
             body.appendChild(tr);
+          });
+        }
+
+        function openCompanyDetailsModal(companyId, companyName) {
+          var backdrop = document.getElementById("company-details-modal");
+          var titleEl = document.getElementById("company-details-title");
+          var bodyEl = document.getElementById("company-details-body");
+          if (!backdrop || !bodyEl) return;
+
+          titleEl.textContent = companyName
+            ? 'Details — ' + companyName
+            : 'Company #' + companyId;
+          bodyEl.innerHTML =
+            '<p class="muted small">Loading…</p>';
+          backdrop.classList.add("open");
+          backdrop.setAttribute("aria-hidden", "false");
+
+          callAdmin(
+            "/company-details?company_id=" + encodeURIComponent(companyId),
+            { method: "GET" }
+          )
+            .then(function (json) {
+              var d = json && json.data;
+              if (!d) {
+                bodyEl.textContent = "No data.";
+                return;
+              }
+              var lines = [];
+              lines.push("Effective employee limit: " + (d.effective_employee_limit == null ? "none (unlimited)" : d.effective_employee_limit));
+              lines.push("Plan-derived limit: " + (d.plan_derived_employee_limit == null ? "none" : d.plan_derived_employee_limit));
+              lines.push("Override column: " + (d.company.employee_limit_override == null ? "null (use plan)" : d.company.employee_limit_override));
+              lines.push("");
+              lines.push("Stats: active employees " + (d.stats.total_active_employees || 0) + ", devices " + (d.stats.total_devices || 0));
+              lines.push("");
+              lines.push("Branches:");
+              (d.branches || []).forEach(function (b) {
+                lines.push("  • " + b.name + " (id " + b.id + ") — active staff: " + (b.active_employees || 0));
+              });
+
+              var html = [];
+              html.push("<pre class='mono'>" + lines.join("\n") + "</pre>");
+
+              html.push('<div class="modal-section"><strong>Employee limit override</strong>');
+              html.push(
+                '<p class="muted small">Leave empty to use plan-based limit. Integer = max active employees company-wide.</p>'
+              );
+              html.push(
+                '<input type="number" min="1" id="limit-override-input" placeholder="e.g. 50" style="max-width:200px" value="' +
+                  (d.company.employee_limit_override != null ? String(d.company.employee_limit_override) : "") +
+                  '" />'
+              );
+              html.push(
+                ' <button type="button" class="btn-primary small" id="limit-override-save">Save limit</button>'
+              );
+              html.push(
+                ' <button type="button" class="btn-secondary small" id="limit-override-clear">Use plan default</button>'
+              );
+              html.push("</div>");
+
+              (d.hr_users || []).forEach(function (u, idx) {
+                var uid = "hr-branches-" + u.id;
+                html.push('<div class="modal-section"><strong>HR user: ' + (u.name || u.email) + "</strong>");
+                html.push('<p class="muted small">' + (u.email || "") + "</p>");
+                html.push("<div>Assign branches (ids, comma-separated):</div>");
+                var cur = (u.branch_assignments || []).map(function (a) {
+                  return a.branch_id;
+                });
+                html.push(
+                  '<input type="text" id="' +
+                    uid +
+                    '-ids" style="width:100%;margin-top:4px" value="' +
+                    cur.join(", ") +
+                    '" placeholder="1, 2" />'
+                );
+                html.push("<div class='mt-2'>Default branch id:</div>");
+                html.push(
+                  '<input type="number" min="1" id="' +
+                    uid +
+                    '-def" style="max-width:120px" value="' +
+                    (function () {
+                      var def = (u.branch_assignments || []).filter(function (x) {
+                        return x.is_default;
+                      })[0];
+                      return def ? String(def.branch_id) : cur[0] ? String(cur[0]) : "";
+                    })() +
+                    '" />'
+                );
+                html.push(
+                  ' <button type="button" class="btn-primary small hr-branch-save" data-user-id="' +
+                    u.id +
+                    '" data-box="' +
+                    uid +
+                    '">Save assignments</button>'
+                );
+                html.push("</div>");
+              });
+
+              if (!(d.hr_users || []).length) {
+                html.push(
+                  '<div class="modal-section muted small">No HR users in this company.</div>'
+                );
+              }
+
+              bodyEl.innerHTML = html.join("");
+
+              var saveLimit = document.getElementById("limit-override-save");
+              if (saveLimit) {
+                saveLimit.onclick = function () {
+                  var v = document.getElementById("limit-override-input");
+                  var raw = v && v.value != null ? String(v.value).trim() : "";
+                  callAdmin("/set-company-employee-limit", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      company_id: companyId,
+                      employee_limit_override: raw === "" ? null : Number(raw),
+                    }),
+                  })
+                    .then(function (j) {
+                      showToast("success", (j && j.message) || "Limit updated.");
+                      openCompanyDetailsModal(companyId, companyName);
+                    })
+                    .catch(function () {});
+                };
+              }
+              var clearLimit = document.getElementById("limit-override-clear");
+              if (clearLimit) {
+                clearLimit.onclick = function () {
+                  callAdmin("/set-company-employee-limit", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      company_id: companyId,
+                      employee_limit_override: null,
+                    }),
+                  })
+                    .then(function (j) {
+                      showToast("success", (j && j.message) || "Reverted to plan limit.");
+                      openCompanyDetailsModal(companyId, companyName);
+                    })
+                    .catch(function () {});
+                };
+              }
+
+              var hrBtns = bodyEl.querySelectorAll(".hr-branch-save");
+              hrBtns.forEach(function (btn) {
+                btn.onclick = function () {
+                  var userId = Number(btn.getAttribute("data-user-id"));
+                  var box = btn.getAttribute("data-box");
+                  var idsStr = document.getElementById(box + "-ids");
+                  var defEl = document.getElementById(box + "-def");
+                  var parts = (idsStr && idsStr.value ? idsStr.value : "")
+                    .split(/[,\s]+/)
+                    .map(function (x) {
+                      return Number(x);
+                    })
+                    .filter(function (n) {
+                      return n > 0;
+                    });
+                  var body = {
+                    company_id: companyId,
+                    user_id: userId,
+                    branch_ids: parts,
+                    default_branch_id:
+                      defEl && defEl.value ? Number(defEl.value) : parts[0] || null,
+                  };
+                  callAdmin("/set-user-branch-assignments", {
+                    method: "POST",
+                    body: JSON.stringify(body),
+                  })
+                    .then(function (j) {
+                      showToast("success", (j && j.message) || "Assignments saved.");
+                      openCompanyDetailsModal(companyId, companyName);
+                    })
+                    .catch(function () {});
+                };
+              });
+            })
+            .catch(function () {
+              bodyEl.innerHTML = "<p class='toast-error'>Failed to load details.</p>";
+            });
+        }
+
+        function closeCompanyDetailsModal() {
+          var backdrop = document.getElementById("company-details-modal");
+          if (backdrop) {
+            backdrop.classList.remove("open");
+            backdrop.setAttribute("aria-hidden", "true");
+          }
+        }
+
+        var companyDetailsClose = document.getElementById("company-details-close");
+        if (companyDetailsClose) {
+          companyDetailsClose.addEventListener("click", closeCompanyDetailsModal);
+        }
+        var companyDetailsBackdrop = document.getElementById("company-details-modal");
+        if (companyDetailsBackdrop) {
+          companyDetailsBackdrop.addEventListener("click", function (e) {
+            if (e.target === companyDetailsBackdrop) closeCompanyDetailsModal();
           });
         }
 

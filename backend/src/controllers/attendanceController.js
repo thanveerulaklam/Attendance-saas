@@ -32,7 +32,7 @@ async function getDaily(req, res, next) {
 
     const eid = employeeId ? Number(employeeId) : null;
     const dept = department ? String(department).trim() : null;
-    const data = await getDailyAttendance(companyId, date.trim(), eid, dept);
+    const data = await getDailyAttendance(companyId, date.trim(), eid, dept, req.allowedBranchIds);
 
     return res.json({
       success: true,
@@ -69,7 +69,7 @@ async function getMonthly(req, res, next) {
 
     const eid = employeeId ? Number(employeeId) : null;
     const dept = department ? String(department).trim() : null;
-    const data = await getMonthlyAttendance(companyId, y, m, eid, dept);
+    const data = await getMonthlyAttendance(companyId, y, m, eid, dept, req.allowedBranchIds);
 
     return res.json({
       success: true,
@@ -96,13 +96,17 @@ async function createManualPunch(req, res, next) {
       });
     }
 
-    const result = await addManualPunch(companyId, {
-      employeeId,
-      punch_time: punchTime,
-      date,
-      time,
-      punchType,
-    });
+    const result = await addManualPunch(
+      companyId,
+      {
+        employeeId,
+        punch_time: punchTime,
+        date,
+        time,
+        punchType,
+      },
+      req.allowedBranchIds
+    );
 
     return res.status(201).json({
       success: true,
@@ -130,7 +134,7 @@ async function createManualFullDay(req, res, next) {
       });
     }
 
-    const result = await addManualFullDay(companyId, { employeeId, date });
+    const result = await addManualFullDay(companyId, { employeeId, date }, req.allowedBranchIds);
 
     return res.status(201).json({
       success: true,
@@ -158,7 +162,7 @@ async function createManualFullDayBulk(req, res, next) {
       });
     }
 
-    const result = await addManualFullDayBulk(companyId, { employeeIds, date });
+    const result = await addManualFullDayBulk(companyId, { employeeIds, date }, req.allowedBranchIds);
 
     return res.status(201).json({
       success: true,
@@ -187,10 +191,15 @@ async function updatePunchById(req, res, next) {
       });
     }
 
-    const updated = await updatePunch(companyId, logId, {
-      punch_time: punchTime,
-      punch_type: punchType,
-    });
+    const updated = await updatePunch(
+      companyId,
+      logId,
+      {
+        punch_time: punchTime,
+        punch_type: punchType,
+      },
+      req.allowedBranchIds
+    );
 
     return res.status(200).json({
       success: true,
@@ -218,7 +227,7 @@ async function deletePunchById(req, res, next) {
       });
     }
 
-    const deleted = await deletePunch(companyId, logId);
+    const deleted = await deletePunch(companyId, logId, req.allowedBranchIds);
 
     return res.status(200).json({
       success: true,

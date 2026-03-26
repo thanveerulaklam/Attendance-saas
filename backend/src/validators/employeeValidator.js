@@ -113,6 +113,17 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'branch_id')) {
+    if (payload.branch_id == null || payload.branch_id === '') {
+      // optional; resolved server-side for admin/HR
+    } else {
+      const bid = Number(payload.branch_id);
+      if (Number.isNaN(bid) || bid < 1) {
+        errors.branch_id = 'branch_id must be a valid positive id.';
+      }
+    }
+  }
+
   ensureNoErrors(errors);
 
   const result = {
@@ -165,6 +176,13 @@ const validateCreateEmployee = (payload = {}) => {
       payload.esi_number == null || payload.esi_number === ''
         ? null
         : payload.esi_number.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'branch_id')) {
+    result.branch_id =
+      payload.branch_id == null || payload.branch_id === ''
+        ? null
+        : Number(payload.branch_id);
   }
 
   return result;
@@ -302,6 +320,19 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.esi_number = 'ESI number must be a string.';
     } else {
       clean.esi_number = payload.esi_number.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'branch_id')) {
+    if (payload.branch_id == null || payload.branch_id === '') {
+      clean.branch_id = null;
+    } else {
+      const bid = Number(payload.branch_id);
+      if (Number.isNaN(bid) || bid < 1) {
+        errors.branch_id = 'branch_id must be a valid positive id.';
+      } else {
+        clean.branch_id = bid;
+      }
     }
   }
 

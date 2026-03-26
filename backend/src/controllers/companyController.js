@@ -1,4 +1,5 @@
 const { getCompanyById, updateCompany, updateSubscription } = require('../services/companyService');
+const branchService = require('../services/branchService');
 
 /**
  * GET /api/company
@@ -107,9 +108,61 @@ async function updateSubscriptionHandler(req, res, next) {
   }
 }
 
+/**
+ * GET /api/company/branches
+ * Lists branches (all for admin; HR only sees assigned branches).
+ */
+async function listBranchesHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const data = await branchService.listBranches(companyId, req.allowedBranchIds);
+    return res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/company/branches
+ * Admin only. Body: { name, address? }
+ */
+async function createBranchHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const created = await branchService.createBranch(companyId, {
+      name: req.body?.name,
+      address: req.body?.address,
+    });
+
+    return res.status(201).json({
+      success: true,
+      data: created,
+      message: 'Branch created',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getCurrentCompany,
   updateCurrentCompany,
   updateSubscriptionHandler,
+  listBranchesHandler,
+  createBranchHandler,
 };
 

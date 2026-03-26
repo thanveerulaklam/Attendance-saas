@@ -9,7 +9,7 @@ async function summary(req, res, next) {
         message: 'companyId (from token) is required',
       });
     }
-    const data = await getDashboardSummary(companyId);
+    const data = await getDashboardSummary(companyId, req.allowedBranchIds);
     return res.json({ success: true, data });
   } catch (err) {
     next(err);

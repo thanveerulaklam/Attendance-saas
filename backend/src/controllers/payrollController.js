@@ -23,6 +23,7 @@ async function list(req, res, next) {
       page,
       limit,
       employee_id: employeeId,
+      allowedBranchIds: req.allowedBranchIds,
     });
 
     return res.json({
@@ -69,6 +70,7 @@ async function generate(req, res, next) {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
       noLeaveIncentive,
+      allowedBranchIds: req.allowedBranchIds,
     });
 
     auditService.log(companyId, req.user?.user_id, 'payroll.generate', 'payroll', result.payroll?.id, { employee_id: employeeId, year, month }).catch(() => {});
@@ -115,6 +117,7 @@ async function generateAll(req, res, next) {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
       noLeaveIncentive,
+      allowedBranchIds: req.allowedBranchIds,
     });
 
     auditService.log(companyId, req.user?.user_id, 'payroll.generate_all', 'payroll', null, {
@@ -154,7 +157,9 @@ async function breakdown(req, res, next) {
       });
     }
 
-    const data = await getPayrollBreakdown(companyId, employeeId, year, month);
+    const data = await getPayrollBreakdown(companyId, employeeId, year, month, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
 
     return res.json({
       success: true,

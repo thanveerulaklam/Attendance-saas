@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { getEffectiveEmployeeLimit, PLAN_EMPLOYEE_LIMITS } = require('../services/employeeService');
 
 /**
  * GET /api/admin/pending-companies
@@ -352,6 +353,261 @@ async function unlockCompany(req, res, next) {
   }
 }
 
+/**
+ * GET /api/admin/company-details?company_id=
+ * Full customer view: billing, effective employee limit, branches + counts, HR users + branch assignments.
+ */
+async function getCompanyDetails(req, res, next) {
+  try {
+    const companyId = req.query.company_id != null ? Number(req.query.company_id) : null;
+    if (!companyId || !Number.isInteger(companyId)) {
+      return res.status(400).json({ success: false, message: 'company_id (number) is required' });
+    }
+
+    const companyResult = await pool.query(
+      `SELECT
+         id, name, email, phone, address, status, created_at,
+         subscription_start_date, subscription_end_date, is_active,
+         plan_code, billing_cycle, next_billing_date, last_payment_date,
+         payment_status, billing_notes,
+         employee_limit_override
+       FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    if (companyResult.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Company not found' });
+    }
+    const company = companyResult.rows[0];
+
+    const effectiveLimit = await getEffectiveEmployeeLimit(companyId);
+    const planCode = (company.plan_code || 'starter').toLowerCase();
+    const planDerivedLimit = Object.prototype.hasOwnProperty.call(PLAN_EMPLOYEE_LIMITS, planCode)
+      ? PLAN_EMPLOYEE_LIMITS[planCode]
+      : null;
+
+    const branchesResult = await pool.query(
+      `SELECT b.id, b.name, b.address, b.created_at,
+         COUNT(e.id) FILTER (WHERE e.status = 'active') AS active_employees
+       FROM branches b
+       LEFT JOIN employees e ON e.branch_id = b.id AND e.company_id = b.company_id
+       WHERE b.company_id = $1
+       GROUP BY b.id
+       ORDER BY b.id ASC`,
+      [companyId]
+    );
+
+    const devicesCount = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM devices WHERE company_id = $1`,
+      [companyId]
+    );
+    const activeEmployeesTotal = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM employees WHERE company_id = $1 AND status = 'active'`,
+      [companyId]
+    );
+
+    const hrUsersResult = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role
+       FROM users u WHERE u.company_id = $1 AND u.role = 'hr'
+       ORDER BY u.id ASC`,
+      [companyId]
+    );
+
+    const hrUsers = [];
+    for (const u of hrUsersResult.rows) {
+      const assign = await pool.query(
+        `SELECT uba.branch_id, uba.is_default, b.name AS branch_name
+         FROM user_branch_assignments uba
+         JOIN branches b ON b.id = uba.branch_id AND b.company_id = $2
+         WHERE uba.user_id = $1
+         ORDER BY uba.is_default DESC, uba.branch_id ASC`,
+        [u.id, companyId]
+      );
+      hrUsers.push({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        branch_assignments: assign.rows.map((r) => ({
+          branch_id: Number(r.branch_id),
+          branch_name: r.branch_name,
+          is_default: r.is_default === true,
+        })),
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        company: {
+          id: company.id,
+          name: company.name,
+          email: company.email,
+          phone: company.phone,
+          address: company.address,
+          status: company.status,
+          created_at: company.created_at,
+          subscription_start_date: company.subscription_start_date,
+          subscription_end_date: company.subscription_end_date,
+          is_active: company.is_active,
+          plan_code: company.plan_code,
+          billing_cycle: company.billing_cycle,
+          next_billing_date: company.next_billing_date,
+          last_payment_date: company.last_payment_date,
+          payment_status: company.payment_status,
+          billing_notes: company.billing_notes,
+          employee_limit_override: company.employee_limit_override,
+        },
+        effective_employee_limit: effectiveLimit,
+        plan_derived_employee_limit: planDerivedLimit,
+        stats: {
+          total_active_employees: Number(activeEmployeesTotal.rows[0]?.n || 0),
+          total_devices: Number(devicesCount.rows[0]?.n || 0),
+        },
+        branches: branchesResult.rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          address: r.address,
+          created_at: r.created_at,
+          active_employees: Number(r.active_employees || 0),
+        })),
+        hr_users: hrUsers,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/set-user-branch-assignments
+ * Body: { company_id, user_id, branch_ids: number[], default_branch_id?: number|null }
+ */
+async function setUserBranchAssignments(req, res, next) {
+  try {
+    const companyId = req.body.company_id != null ? Number(req.body.company_id) : null;
+    const userId = req.body.user_id != null ? Number(req.body.user_id) : null;
+    const branchIds = Array.isArray(req.body.branch_ids) ? req.body.branch_ids.map(Number).filter(Boolean) : [];
+    const defaultBranchRaw = req.body.default_branch_id;
+    const defaultBranchId =
+      defaultBranchRaw == null || defaultBranchRaw === ''
+        ? null
+        : Number(defaultBranchRaw);
+
+    if (!companyId || !userId || branchIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'company_id, user_id, and non-empty branch_ids are required',
+      });
+    }
+
+    const userCheck = await pool.query(
+      `SELECT id, role, company_id FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (userCheck.rowCount === 0 || Number(userCheck.rows[0].company_id) !== companyId) {
+      return res.status(404).json({ success: false, message: 'User not found for this company' });
+    }
+    if (userCheck.rows[0].role !== 'hr') {
+      return res.status(400).json({
+        success: false,
+        message: 'Branch assignments apply to HR users only',
+      });
+    }
+
+    const branchesOk = await pool.query(
+      `SELECT id FROM branches WHERE company_id = $1 AND id = ANY($2::bigint[])`,
+      [companyId, branchIds]
+    );
+    if (branchesOk.rowCount !== branchIds.length) {
+      return res.status(400).json({ success: false, message: 'One or more branch_ids are invalid for this company' });
+    }
+
+    const defId = defaultBranchId != null ? defaultBranchId : branchIds[0];
+    if (!branchIds.includes(defId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'default_branch_id must be one of branch_ids',
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM user_branch_assignments WHERE user_id = $1`, [userId]);
+      for (const bid of branchIds) {
+        await client.query(
+          `INSERT INTO user_branch_assignments (user_id, branch_id, is_default)
+           VALUES ($1, $2, $3)`,
+          [userId, bid, bid === defId]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Branch assignments updated.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/set-company-employee-limit
+ * Body: { company_id, employee_limit_override: number|null }
+ */
+async function setCompanyEmployeeLimit(req, res, next) {
+  try {
+    const companyId = req.body.company_id != null ? Number(req.body.company_id) : null;
+    const raw = req.body.employee_limit_override;
+
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'company_id is required' });
+    }
+
+    let overrideVal = null;
+    if (raw != null && raw !== '') {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+        return res.status(400).json({
+          success: false,
+          message: 'employee_limit_override must be a positive integer or null',
+        });
+      }
+      overrideVal = n;
+    }
+
+    const result = await pool.query(
+      `UPDATE companies SET employee_limit_override = $2 WHERE id = $1
+       RETURNING id, employee_limit_override`,
+      [companyId, overrideVal]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Company not found' });
+    }
+
+    const effective = await getEffectiveEmployeeLimit(companyId);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        company_id: result.rows[0].id,
+        employee_limit_override: result.rows[0].employee_limit_override,
+        effective_employee_limit: effective,
+      },
+      message: 'Employee limit updated.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listPendingCompanies,
   getAdminOverview,
@@ -361,4 +617,7 @@ module.exports = {
   declineCompany,
   lockCompany,
   unlockCompany,
+  getCompanyDetails,
+  setUserBranchAssignments,
+  setCompanyEmployeeLimit,
 };

@@ -7,6 +7,20 @@ const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
+
+async function assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds) {
+  if (allowedBranchIds == null) return;
+  const r = await pool.query(
+    `SELECT branch_id FROM employees WHERE company_id = $1 AND id = $2`,
+    [companyId, employeeId]
+  );
+  if (r.rowCount === 0) {
+    throw new AppError('Employee not found for this company', 404);
+  }
+  if (allowedBranchIds.length === 0 || !allowedBranchIds.includes(Number(r.rows[0].branch_id))) {
+    throw new AppError('Employee not found for this company', 404);
+  }
+}
 const TZ_OFFSETS = { 'Asia/Kolkata': '+05:30', 'Asia/Calcutta': '+05:30', UTC: 'Z', 'Etc/UTC': 'Z' };
 
 function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
@@ -509,7 +523,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
  * @param {boolean} [payrollOptions.treatHolidayAdjacentAbsenceAsWorking=false] - If true, holidays adjacent to an absent day count as working (extra absence).
  */
 async function generateMonthlyPayroll(companyId, employeeId, year, month, payrollOptions = {}) {
-  const { includeOvertime = true, treatHolidayAdjacentAbsenceAsWorking = false, noLeaveIncentive = 0 } = payrollOptions;
+  const {
+    includeOvertime = true,
+    treatHolidayAdjacentAbsenceAsWorking = false,
+    noLeaveIncentive = 0,
+    allowedBranchIds = null,
+  } = payrollOptions;
   const client = await pool.connect();
 
   try {
@@ -527,6 +546,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     }
 
     const employee = employeeResult.rows[0];
+
+    await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
 
     if (employee.status !== 'active') {
       throw new AppError('Cannot generate payroll for inactive employee', 400);
@@ -701,7 +722,13 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
  * Used for detail modal. Returns attendance summary and salary breakdown.
  */
 async function getPayrollBreakdown(companyId, employeeId, year, month, options = {}) {
-  const { includeOvertime = true, treatHolidayAdjacentAbsenceAsWorking = false } = options;
+  const {
+    includeOvertime = true,
+    treatHolidayAdjacentAbsenceAsWorking = false,
+    allowedBranchIds = null,
+  } = options;
+
+  await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
 
   const todayStr = todayIstYmd();
   const [ty, tm, td] = todayStr.split('-').map(Number);
@@ -862,10 +889,22 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
  * List payroll records with optional filters and pagination.
  * @returns { Promise<{ data: Array, page: number, limit: number, total: number }> }
  */
-async function listPayrollRecords(companyId, { year, month, page = 1, limit = 20, employee_id: employeeId } = {}) {
+async function listPayrollRecords(
+  companyId,
+  { year, month, page = 1, limit = 20, employee_id: employeeId, allowedBranchIds = null } = {}
+) {
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
   const offset = (pageNum - 1) * limitNum;
+
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    return {
+      data: [],
+      page: pageNum,
+      limit: limitNum,
+      total: 0,
+    };
+  }
 
   const conditions = ['p.company_id = $1'];
   const params = [companyId];
@@ -884,6 +923,11 @@ async function listPayrollRecords(companyId, { year, month, page = 1, limit = 20
   if (employeeId != null && employeeId !== '') {
     conditions.push(`p.employee_id = $${paramIndex}`);
     params.push(Number(employeeId));
+    paramIndex += 1;
+  }
+  if (allowedBranchIds != null) {
+    conditions.push(`e.branch_id = ANY($${paramIndex}::bigint[])`);
+    params.push(allowedBranchIds);
     paramIndex += 1;
   }
 
@@ -937,22 +981,34 @@ async function listPayrollRecords(companyId, { year, month, page = 1, limit = 20
  * @returns { Promise<{ generated: number, failed: number, results: Array, errors: Array }> }
  */
 async function generateMonthlyPayrollForAllActive(companyId, year, month, payrollOptions = {}) {
-  const { noLeaveIncentive = 0, ...rest } = payrollOptions;
+  const { noLeaveIncentive = 0, allowedBranchIds = null, ...rest } = payrollOptions;
   const client = await pool.connect();
   let employeeIds = [];
   try {
-    const result = await client.query(
-      `SELECT id FROM employees WHERE company_id = $1 AND status = 'active' ORDER BY id`,
-      [companyId]
-    );
-    employeeIds = result.rows.map((r) => r.id);
+    if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+      employeeIds = [];
+    } else if (allowedBranchIds != null) {
+      const result = await client.query(
+        `SELECT id FROM employees
+         WHERE company_id = $1 AND status = 'active' AND branch_id = ANY($2::bigint[])
+         ORDER BY id`,
+        [companyId, allowedBranchIds]
+      );
+      employeeIds = result.rows.map((r) => r.id);
+    } else {
+      const result = await client.query(
+        `SELECT id FROM employees WHERE company_id = $1 AND status = 'active' ORDER BY id`,
+        [companyId]
+      );
+      employeeIds = result.rows.map((r) => r.id);
+    }
   } finally {
     client.release();
   }
 
   const results = [];
   const errors = [];
-  const options = { ...rest, noLeaveIncentive };
+  const options = { ...rest, noLeaveIncentive, allowedBranchIds };
   for (const employeeId of employeeIds) {
     try {
       const result = await generateMonthlyPayroll(companyId, employeeId, year, month, options);

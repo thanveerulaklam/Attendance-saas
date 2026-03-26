@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { pool } = require('../config/database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
@@ -83,12 +84,87 @@ function signToken(payload) {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 }
 
+/**
+ * After authenticate + company context: attach branch scope for HR users.
+ * - admin: req.allowedBranchIds = null (no filter; all company branches)
+ * - hr: req.allowedBranchIds = number[], req.defaultBranchId from is_default (else first assigned)
+ * - other roles: null (no branch filtering)
+ */
+async function attachBranchScopes(req, res, next) {
+  if (!req.user) {
+    return next();
+  }
+
+  const role = req.user.role;
+  const companyId = req.companyId;
+
+  if (role === 'admin') {
+    req.allowedBranchIds = null;
+    req.defaultBranchId = null;
+    return next();
+  }
+
+  if (role !== 'hr' || !companyId) {
+    req.allowedBranchIds = null;
+    req.defaultBranchId = null;
+    return next();
+  }
+
+  const userId = req.user.user_id;
+  if (!userId) {
+    req.allowedBranchIds = [];
+    req.defaultBranchId = null;
+    return next();
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT uba.branch_id, uba.is_default
+       FROM user_branch_assignments uba
+       INNER JOIN branches b ON b.id = uba.branch_id AND b.company_id = $2
+       WHERE uba.user_id = $1
+       ORDER BY uba.is_default DESC, uba.branch_id ASC`,
+      [userId, companyId]
+    );
+
+    const ids = result.rows.map((r) => Number(r.branch_id));
+    req.allowedBranchIds = ids;
+
+    const defaultRow = result.rows.find((r) => r.is_default === true);
+    req.defaultBranchId = defaultRow
+      ? Number(defaultRow.branch_id)
+      : ids[0] != null
+        ? ids[0]
+        : null;
+
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+}
+
+/**
+ * HR users must have at least one assigned branch to create/update data.
+ */
+function requireHrBranchForMutation(req, res, next) {
+  if (req.user?.role === 'hr' && Array.isArray(req.allowedBranchIds) && req.allowedBranchIds.length === 0) {
+    return res.status(403).json({
+      success: false,
+      message:
+        'No branch access assigned. Ask your administrator to assign branches to your account.',
+    });
+  }
+  return next();
+}
+
 module.exports = {
   authenticate,
   requireRole,
   enforceCompanyFromToken,
   optionalAuth,
   signToken,
+  attachBranchScopes,
+  requireHrBranchForMutation,
   JWT_SECRET,
   JWT_EXPIRES_IN,
 };
