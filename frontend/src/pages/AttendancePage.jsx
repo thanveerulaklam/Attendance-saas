@@ -63,6 +63,8 @@ export default function AttendancePage() {
   const [monthYear, setMonthYear] = useState(() => getMonthYear(0));
   const [employeeId, setEmployeeId] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branches, setBranches] = useState([]);
+  const [branchFilter, setBranchFilter] = useState(''); // '' = all allowed branches
   const [employees, setEmployees] = useState([]);
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
@@ -124,6 +126,34 @@ export default function AttendancePage() {
 
   useEffect(() => {
     let isMounted = true;
+    authFetch('/api/company/branches', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Failed to load branches');
+        const json = await res.json();
+        if (!isMounted) return;
+        setBranches(Array.isArray(json.data) ? json.data : []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setBranches([]);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const employeesForBranch = useMemo(() => {
+    if (!branchFilter) return employees;
+    const bid = Number(branchFilter);
+    if (!Number.isFinite(bid)) return employees;
+    return (employees || []).filter((e) => Number(e.branch_id) === bid);
+  }, [employees, branchFilter]);
+
+  useEffect(() => {
+    let isMounted = true;
     authFetch('/api/employees/departments', {
       headers: { 'Content-Type': 'application/json' },
     })
@@ -151,6 +181,7 @@ export default function AttendancePage() {
     const params = new URLSearchParams({ year, month });
     if (employeeId) params.set('employee_id', employeeId);
     if (departmentFilter !== 'all') params.set('department', departmentFilter);
+    if (branchFilter) params.set('branch_id', branchFilter);
     authFetch(`/api/attendance/monthly?${params}`, {
       headers: { 'Content-Type': 'application/json' },
     })
@@ -171,7 +202,16 @@ export default function AttendancePage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [year, month, employeeId, departmentFilter, refreshKey]);
+  }, [year, month, employeeId, departmentFilter, refreshKey, branchFilter]);
+
+  useEffect(() => {
+    if (!branchFilter) return;
+    if (!employeeId) return;
+    const bid = Number(branchFilter);
+    const eid = Number(employeeId);
+    const stillValid = employeesForBranch.some((e) => e.id === eid && Number(e.branch_id) === bid);
+    if (!stillValid) setEmployeeId('');
+  }, [branchFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let isMounted = true;
@@ -181,6 +221,7 @@ export default function AttendancePage() {
       setDailyLoading(true);
       const params = new URLSearchParams({ date: dateStr });
       if (departmentFilter !== 'all') params.set('department', departmentFilter);
+        if (branchFilter) params.set('branch_id', branchFilter);
       authFetch(`/api/attendance/daily?${params.toString()}`, {
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -368,7 +409,10 @@ export default function AttendancePage() {
   };
 
   const selectAllEmployees = () => {
-    setManualForm((f) => ({ ...f, selected_ids: employees.map((e) => e.id) }));
+    setManualForm((f) => ({
+      ...f,
+      selected_ids: employeesForBranch.map((e) => e.id),
+    }));
   };
 
   const clearAllEmployees = () => {
@@ -415,6 +459,18 @@ export default function AttendancePage() {
               {(departmentOptions || []).map((d) => (
                 <option key={String(d)} value={d}>
                   {d}
+                </option>
+              ))}
+            </select>
+            <select
+              value={branchFilter}
+              onChange={(e) => setBranchFilter(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+            >
+              <option value="">All branches</option>
+              {(branches || []).map((b) => (
+                <option key={String(b.id)} value={String(b.id)}>
+                  {b.name || `Branch #${b.id}`}
                 </option>
               ))}
             </select>
@@ -670,7 +726,7 @@ export default function AttendancePage() {
               className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
             >
               <option value="">All employees (summary)</option>
-              {employees.map((emp) => (
+              {employeesForBranch.map((emp) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.name} ({emp.employee_code})
                 </option>
@@ -1293,7 +1349,7 @@ export default function AttendancePage() {
                     </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 p-2 space-y-1">
-                    {employees.map((emp) => (
+                    {employeesForBranch.map((emp) => (
                       <label
                         key={emp.id}
                         className="flex items-center gap-2 py-1 px-2 rounded hover:bg-slate-100 cursor-pointer"
@@ -1323,7 +1379,7 @@ export default function AttendancePage() {
                     required={!manualForm.bulk}
                   >
                     <option value="">Select employee</option>
-                    {employees.map((emp) => (
+                    {employeesForBranch.map((emp) => (
                       <option key={emp.id} value={emp.id}>
                         {emp.name} ({emp.employee_code})
                       </option>

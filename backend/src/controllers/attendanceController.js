@@ -7,6 +7,35 @@ const {
   updatePunch,
   deletePunch,
 } = require('../services/attendanceService');
+const { pool } = require('../config/database');
+
+async function resolveBranchScopeForAttendance({ companyId, allowedBranchIds, requestedBranchId }) {
+  // allowedBranchIds:
+  // - null: admin can see all branches
+  // - []: HR with no assignments (blocked by middleware)
+  // - [ids]: HR assigned branches
+  if (!requestedBranchId) return allowedBranchIds;
+
+  const bid = Number(requestedBranchId);
+  if (!Number.isInteger(bid) || bid < 1) {
+    throw Object.assign(new Error('Invalid branch_id'), { status: 400 });
+  }
+
+  // HR must only request branches they already have access to
+  if (Array.isArray(allowedBranchIds)) {
+    if (!allowedBranchIds.includes(bid)) {
+      throw Object.assign(new Error('Branch not allowed for your account'), { status: 403 });
+    }
+  }
+
+  // Admin or HR: verify branch belongs to this company.
+  const r = await pool.query(`SELECT id FROM branches WHERE company_id = $1 AND id = $2`, [companyId, bid]);
+  if (r.rowCount === 0) {
+    throw Object.assign(new Error('Branch not found'), { status: 404 });
+  }
+
+  return [bid];
+}
 
 /**
  * GET /api/attendance/daily?date=YYYY-MM-DD&employee_id=
@@ -14,7 +43,7 @@ const {
 async function getDaily(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { date, employee_id: employeeId, department } = req.query || {};
+    const { date, employee_id: employeeId, department, branch_id: branchIdRaw } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -32,7 +61,13 @@ async function getDaily(req, res, next) {
 
     const eid = employeeId ? Number(employeeId) : null;
     const dept = department ? String(department).trim() : null;
-    const data = await getDailyAttendance(companyId, date.trim(), eid, dept, req.allowedBranchIds);
+    const allowedBranchIds = await resolveBranchScopeForAttendance({
+      companyId,
+      allowedBranchIds: req.allowedBranchIds,
+      requestedBranchId: branchIdRaw,
+    });
+
+    const data = await getDailyAttendance(companyId, date.trim(), eid, dept, allowedBranchIds);
 
     return res.json({
       success: true,
@@ -49,7 +84,7 @@ async function getDaily(req, res, next) {
 async function getMonthly(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { year, month, employee_id: employeeId, department } = req.query || {};
+    const { year, month, employee_id: employeeId, department, branch_id: branchIdRaw } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -69,7 +104,13 @@ async function getMonthly(req, res, next) {
 
     const eid = employeeId ? Number(employeeId) : null;
     const dept = department ? String(department).trim() : null;
-    const data = await getMonthlyAttendance(companyId, y, m, eid, dept, req.allowedBranchIds);
+    const allowedBranchIds = await resolveBranchScopeForAttendance({
+      companyId,
+      allowedBranchIds: req.allowedBranchIds,
+      requestedBranchId: branchIdRaw,
+    });
+
+    const data = await getMonthlyAttendance(companyId, y, m, eid, dept, allowedBranchIds);
 
     return res.json({
       success: true,
