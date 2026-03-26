@@ -49,6 +49,19 @@ function addDaysIst(ymd, deltaDays) {
 /** SQL fragment: IST calendar date of timestamptz `punch_time`. */
 const SQL_PUNCH_IST_DATE = "(punch_time AT TIME ZONE 'Asia/Kolkata')::date";
 
+/** Minutes from midnight (0–1439) in Asia/Kolkata for an instant. */
+function istMinutesFromMidnight(d) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: IST,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(d));
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  return hour * 60 + minute;
+}
+
 module.exports = {
   IST,
   istYmdFromDate,
@@ -56,5 +69,6 @@ module.exports = {
   todayIstYmd,
   istDayBounds,
   addDaysIst,
+  istMinutesFromMidnight,
   SQL_PUNCH_IST_DATE,
 };

@@ -16,7 +16,7 @@ const emptyForm = () => ({
   lunch_over_deduction_amount: 0,
   no_leave_incentive: 0,
   paid_leave_days: 0,
-  attendance_mode: 'shift_based',
+  attendance_mode: 'day_based',
   required_hours_per_day: 8,
 });
 
@@ -112,7 +112,7 @@ export default function ShiftsPage() {
       lunch_over_deduction_amount: shift.lunch_over_deduction_amount ?? 0,
       no_leave_incentive: shift.no_leave_incentive ?? 0,
       paid_leave_days: shift.paid_leave_days ?? 0,
-      attendance_mode: shift.attendance_mode || 'shift_based',
+      attendance_mode: shift.attendance_mode || 'day_based',
       required_hours_per_day: shift.required_hours_per_day ?? 8,
     });
     setEditingShift(shift);
@@ -197,6 +197,23 @@ export default function ShiftsPage() {
                     <input
                       type="radio"
                       name="attendance_mode_create"
+                      value="day_based"
+                      checked={form.attendance_mode === 'day_based'}
+                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'day_based' }))}
+                      disabled={creating}
+                      className="mt-0.5 text-primary-600"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      <span className="font-medium">Day based</span>
+                      <span className="block text-[10px] text-slate-500">
+                        Same calendar day: start and end fall on one IST date (e.g. 09:00–18:00). Late, lunch, and full-day rules use that day.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="attendance_mode_create"
                       value="shift_based"
                       checked={form.attendance_mode === 'shift_based'}
                       onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'shift_based' }))}
@@ -204,9 +221,9 @@ export default function ShiftsPage() {
                       className="mt-0.5 text-primary-600"
                     />
                     <span className="text-[11px] text-slate-700">
-                      <span className="font-medium">Shift Based</span>
+                      <span className="font-medium">Shift based (overnight)</span>
                       <span className="block text-[10px] text-slate-500">
-                        Traditional mode. Attendance calculated based on shift start/end time, late arrivals, and lunch breaks.
+                        Night shift: end time is after midnight on the clock (e.g. 22:00–06:00). The whole block is counted on the shift start date.
                       </span>
                     </span>
                   </label>
@@ -221,7 +238,7 @@ export default function ShiftsPage() {
                       className="mt-0.5 text-primary-600"
                     />
                     <span className="text-[11px] text-slate-700">
-                      <span className="font-medium">Hours Based</span>
+                      <span className="font-medium">Hours based</span>
                       <span className="block text-[10px] text-slate-500">
                         Flexible mode. Employee must spend minimum required hours inside the premises. Suitable for long shifts with multiple breaks.
                       </span>
@@ -275,7 +292,7 @@ export default function ShiftsPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
                   />
                 </div>
-                {form.attendance_mode === 'shift_based' && (
+                {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-700">
                       Lunch minutes (allotted)
@@ -406,7 +423,7 @@ export default function ShiftsPage() {
                 </div>
               </div>
 
-              {form.attendance_mode === 'shift_based' && (
+              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
                 <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                   <p className="text-[11px] font-medium text-slate-700">
                     Lunch over deduction (optional)
@@ -471,7 +488,11 @@ export default function ShiftsPage() {
                     <h3 className="text-sm font-semibold text-slate-900">{shift.shift_name}</h3>
                     <div className="mt-1 flex flex-wrap gap-1">
                       <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
-                        {shift.attendance_mode === 'hours_based' ? 'Hours based' : 'Shift based'}
+                        {shift.attendance_mode === 'hours_based'
+                          ? 'Hours based'
+                          : shift.attendance_mode === 'shift_based'
+                            ? 'Shift based (overnight)'
+                            : 'Day based'}
                       </span>
                       {shift.attendance_mode === 'hours_based' && (
                         <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
@@ -602,6 +623,47 @@ export default function ShiftsPage() {
                   placeholder="General shift"
                 />
               </div>
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">Attendance mode</p>
+                <div className="flex flex-col gap-1.5">
+                  <label className="inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="attendance_mode_edit"
+                      value="day_based"
+                      checked={form.attendance_mode === 'day_based'}
+                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'day_based' }))}
+                      disabled={savingEdit}
+                      className="mt-0.5 text-primary-600"
+                    />
+                    <span className="text-[11px] text-slate-700">Day based</span>
+                  </label>
+                  <label className="inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="attendance_mode_edit"
+                      value="shift_based"
+                      checked={form.attendance_mode === 'shift_based'}
+                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'shift_based' }))}
+                      disabled={savingEdit}
+                      className="mt-0.5 text-primary-600"
+                    />
+                    <span className="text-[11px] text-slate-700">Shift based (overnight)</span>
+                  </label>
+                  <label className="inline-flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="attendance_mode_edit"
+                      value="hours_based"
+                      checked={form.attendance_mode === 'hours_based'}
+                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'hours_based' }))}
+                      disabled={savingEdit}
+                      className="mt-0.5 text-primary-600"
+                    />
+                    <span className="text-[11px] text-slate-700">Hours based</span>
+                  </label>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Start time</label>
@@ -612,15 +674,32 @@ export default function ShiftsPage() {
                   <input type="time" value={form.end_time} onChange={handleChange('end_time')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
               </div>
+              {form.attendance_mode === 'hours_based' && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Required hours per day</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={24}
+                    step={0.5}
+                    value={form.required_hours_per_day}
+                    onChange={handleChange('required_hours_per_day')}
+                    disabled={savingEdit}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                  />
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Grace min</label>
                   <input type="number" min={0} value={form.grace_minutes} onChange={handleChange('grace_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Lunch min</label>
-                  <input type="number" min={0} value={form.lunch_minutes} onChange={handleChange('lunch_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                </div>
+                {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">Lunch min</label>
+                    <input type="number" min={0} value={form.lunch_minutes} onChange={handleChange('lunch_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                  </div>
+                )}
               </div>
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">Holidays (weekly off)</p>
@@ -643,16 +722,18 @@ export default function ShiftsPage() {
                   <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Lunch over min</label>
-                  <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">Lunch over min</label>
+                    <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">Lunch over deduction amt</label>
+                    <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                  </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Lunch over deduction amt</label>
-                  <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                </div>
-              </div>
+              )}
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={cancelEdit} disabled={savingEdit} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50">
                   Cancel

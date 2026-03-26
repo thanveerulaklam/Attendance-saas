@@ -5,6 +5,8 @@ const {
   istYmdParts,
   istDayBounds,
   todayIstYmd,
+  addDaysIst,
+  istMinutesFromMidnight,
   SQL_PUNCH_IST_DATE,
 } = require('../utils/istDate');
 
@@ -30,17 +32,25 @@ function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
   return Number.isNaN(d.getTime()) ? new Date(year, month - 1, day, startHour, startMinute, 0).getTime() : d.getTime();
 }
 
+function parseAttendanceMode(row) {
+  const raw = String(row.attendance_mode ?? 'day_based').toLowerCase();
+  if (raw === 'hours_based') return 'hours_based';
+  if (raw === 'shift_based') return 'shift_based';
+  return 'day_based';
+}
+
 function rowToShiftConfig(row) {
   const [startHour, startMinute] = row.start_time.split(':').map(Number);
   const [endHour, endMinute] = row.end_time.split(':').map(Number);
-  const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+  const startMin = startHour * 60 + startMinute;
+  const endMin = endHour * 60 + endMinute;
+  const isOvernightClock = endMin < startMin;
+  const shiftMinutes =
+    endMin >= startMin ? endMin - startMin : 24 * 60 + endMin - startMin;
   const shiftMs = shiftMinutes * 60 * 1000;
   const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
   const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
-  const attendanceMode =
-    (row.attendance_mode || 'shift_based').toLowerCase() === 'hours_based'
-      ? 'hours_based'
-      : 'shift_based';
+  const attendanceMode = parseAttendanceMode(row);
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
   const overtimeAllowed = row.allow_overtime === true || row.allow_overtime === 'true';
   return {
@@ -48,6 +58,7 @@ function rowToShiftConfig(row) {
     startMinute,
     endHour,
     endMinute,
+    isOvernightClock,
     shiftMs,
     graceMs,
     lunchMinutesAllotted,
@@ -55,6 +66,27 @@ function rowToShiftConfig(row) {
     requiredHoursPerDay,
     overtimeAllowed,
   };
+}
+
+/**
+ * For overnight shift_based shifts, attribute a punch to the shift start date (IST):
+ * e.g. 06:00 on day 2 belongs to the shift that started 22:00 on day 1.
+ */
+function attributedShiftStartDateStr(punchTime, shiftConfig) {
+  const istYmd = istYmdFromDate(punchTime);
+  if (shiftConfig.attendanceMode !== 'shift_based' || !shiftConfig.isOvernightClock) {
+    return istYmd;
+  }
+  const mins = istMinutesFromMidnight(punchTime);
+  const startMin = shiftConfig.startHour * 60 + shiftConfig.startMinute;
+  const endMin = shiftConfig.endHour * 60 + shiftConfig.endMinute;
+  if (mins >= startMin) {
+    return istYmd;
+  }
+  if (mins < endMin) {
+    return addDaysIst(istYmd, -1);
+  }
+  return istYmd;
 }
 
 /**
@@ -205,16 +237,17 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     lunchOverMinutes = Math.max(0, lunchMinutes - allotted);
   }
 
-  // Build shift start on the same calendar day as the first punch, in company timezone (e.g. IST).
-  // Server may run in UTC; "9:30" must mean 9:30 AM company local, not UTC.
-  let shiftStartMs;
-  if (firstInTime != null) {
-    const { year: y, month: mo, day: dd } = istYmdParts(firstInTime);
-    shiftStartMs = getShiftStartMsForDate(y, mo, dd, shiftConfig.startHour, shiftConfig.startMinute);
-  } else {
-    const [y, mo, dd] = calendarDateStr.split('-').map(Number);
-    shiftStartMs = getShiftStartMsForDate(y, mo, dd, shiftConfig.startHour, shiftConfig.startMinute);
-  }
+  // Anchor shift start to the attendance day (shift start date), not the first punch's calendar day.
+  // Required for day_based and overnight shift_based so a morning punch on day 2 does not move
+  // the expected start to day 2.
+  const [y, mo, dd] = calendarDateStr.split('-').map(Number);
+  const shiftStartMs = getShiftStartMsForDate(
+    y,
+    mo,
+    dd,
+    shiftConfig.startHour,
+    shiftConfig.startMinute
+  );
   const late =
     present &&
     firstInTime != null &&
@@ -387,143 +420,6 @@ function getHoursBasedDailyPresence(dayLogs, computedStatus, isCurrentDate) {
 }
 
 /**
- * Ensure auto OUT punches are inserted for a given date for all employees in the company.
- * This is used so that both daily attendance views and payroll calculations see a closed day
- * when staff forgot to punch OUT.
- *
- * Rules:
- * - For each employee/day where the last punch is an IN and there is no OUT after it, insert
- *   an OUT at shift end time with device_id = 'auto_out'.
- * - Do not insert for today if current time is before shift end time.
- * - If overtime is allowed for the shift, wait until the next calendar day before auto closing.
- */
-async function ensureAutoOutForDate(companyId, dateStr) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
-  if (!match) {
-    throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
-  }
-
-  const [, y, m, d] = match;
-  const year = parseInt(y, 10);
-  const month = parseInt(m, 10);
-  const dayNum = parseInt(d, 10);
-
-  const now = new Date();
-  const isToday = todayIstYmd() === dateStr;
-
-  const client = await pool.connect();
-  try {
-    const employeesResult = await client.query(
-      `SELECT id, shift_id
-       FROM employees
-       WHERE company_id = $1 AND status = 'active'`,
-      [companyId]
-    );
-    const employees = employeesResult.rows;
-    if (employees.length === 0) {
-      return;
-    }
-
-    const shiftConfigMap = await getShiftConfigMap(
-      companyId,
-      employees.map((e) => e.shift_id)
-    );
-
-    const employeeIds = employees.map((e) => e.id);
-    const logsResult = await client.query(
-      `SELECT employee_id, punch_time, punch_type
-       FROM attendance_logs
-       WHERE company_id = $1
-         AND employee_id = ANY($2::bigint[])
-         AND ${SQL_PUNCH_IST_DATE} = $3::date
-       ORDER BY punch_time ASC`,
-      [companyId, employeeIds, dateStr]
-    );
-
-    const logsByEmployee = new Map();
-    for (const row of logsResult.rows) {
-      const eid = row.employee_id;
-      if (!logsByEmployee.has(eid)) logsByEmployee.set(eid, []);
-      logsByEmployee.get(eid).push({
-        punch_time: row.punch_time,
-        punch_type: (row.punch_type || '').toLowerCase(),
-      });
-    }
-
-    for (const emp of employees) {
-      const dayLogs = logsByEmployee.get(emp.id) || [];
-      if (!dayLogs.length) continue;
-      const sorted = [...dayLogs].sort(
-        (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
-      );
-      const last = sorted[sorted.length - 1];
-      if ((last.punch_type || '').toLowerCase() !== 'in') {
-        continue;
-      }
-
-      const shiftConfig =
-        shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
-
-      const shiftStartMs = getShiftStartMsForDate(
-        year,
-        month,
-        dayNum,
-        shiftConfig.startHour,
-        shiftConfig.startMinute
-      );
-      const shiftEndMs = shiftStartMs + (shiftConfig.shiftMs || 0);
-
-      if (isToday) {
-        const nowMs = now.getTime();
-        if (nowMs < shiftEndMs) {
-          continue;
-        }
-        if (shiftConfig.overtimeAllowed) {
-          continue;
-        }
-      } else if (shiftConfig.overtimeAllowed) {
-        const todayStr = todayIstYmd();
-        if (todayStr <= dateStr) {
-          continue;
-        }
-      }
-
-      const shiftEndDate = new Date(shiftEndMs);
-      await client.query(
-        `INSERT INTO attendance_logs (company_id, employee_id, punch_time, punch_type, device_id)
-         VALUES ($1, $2, $3, 'out', 'auto_out')
-         ON CONFLICT (employee_id, punch_time) DO NOTHING`,
-        [companyId, emp.id, shiftEndDate.toISOString()]
-      );
-    }
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * Ensure auto OUT punches exist for the entire month for a specific employee.
- * Used by payroll calculations that operate on a month at a time.
- */
-async function ensureAutoOutForMonth(companyId, employeeId, year, month) {
-  const y = Number(year);
-  const m = Number(month);
-  if (!y || !m || m < 1 || m > 12) {
-    throw new AppError('Valid year and month are required', 400);
-  }
-  const daysInMonth = new Date(y, m, 0).getDate();
-  for (let d = 1; d <= daysInMonth; d += 1) {
-    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    // Reuse company-wide helper – it is safe to call multiple times.
-    // It will only ever insert missing auto_out punches.
-    // We do not currently restrict to one employee to keep query logic simple.
-    // (attendance_logs inserts are idempotent via ON CONFLICT.)
-    // eslint-disable-next-line no-await-in-loop
-    await ensureAutoOutForDate(companyId, dateStr);
-  }
-}
-
-/**
  * GET daily attendance: per-employee status for one date.
  * @param {number} companyId
  * @param {string} dateStr - YYYY-MM-DD
@@ -538,8 +434,6 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null, departm
 
   const bounds = istDayBounds(dateStr);
   const isCurrentDate = todayIstYmd() === dateStr;
-
-  await ensureAutoOutForDate(companyId, dateStr);
 
   const client = await pool.connect();
   try {
@@ -576,14 +470,26 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null, departm
 
     const ids = employees.map((e) => e.id);
 
+    const needOvernightNextDay = Array.from(shiftConfigMap.values()).some(
+      (c) => c && c.attendanceMode === 'shift_based' && c.isOvernightClock
+    );
+    const nextDayStr = addDaysIst(dateStr, 1);
+
     const logsResult = await client.query(
-      `SELECT id, employee_id, punch_time, punch_type, device_id
-       FROM attendance_logs
-       WHERE company_id = $1
-         AND employee_id = ANY($2::bigint[])
-         AND ${SQL_PUNCH_IST_DATE} = $3::date
-       ORDER BY punch_time ASC`,
-      [companyId, ids, dateStr]
+      needOvernightNextDay
+        ? `SELECT id, employee_id, punch_time, punch_type, device_id
+           FROM attendance_logs
+           WHERE company_id = $1
+             AND employee_id = ANY($2::bigint[])
+             AND (${SQL_PUNCH_IST_DATE} = $3::date OR ${SQL_PUNCH_IST_DATE} = $4::date)
+           ORDER BY punch_time ASC`
+        : `SELECT id, employee_id, punch_time, punch_type, device_id
+           FROM attendance_logs
+           WHERE company_id = $1
+             AND employee_id = ANY($2::bigint[])
+             AND ${SQL_PUNCH_IST_DATE} = $3::date
+           ORDER BY punch_time ASC`,
+      needOvernightNextDay ? [companyId, ids, dateStr, nextDayStr] : [companyId, ids, dateStr]
     );
 
     const logsByEmployee = new Map();
@@ -601,10 +507,25 @@ async function getDailyAttendance(companyId, dateStr, employeeId = null, departm
     }
 
     return employees.map((emp) => {
-      const rawDayLogs = logsByEmployee.get(emp.id) || [];
-      const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
       const shiftConfig =
         shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
+      let rawDayLogs = logsByEmployee.get(emp.id) || [];
+      if (shiftConfig.attendanceMode === 'shift_based' && shiftConfig.isOvernightClock) {
+        const [sy, smo, sdd] = dateStr.split('-').map(Number);
+        const shiftStartMs = getShiftStartMsForDate(
+          sy,
+          smo,
+          sdd,
+          shiftConfig.startHour,
+          shiftConfig.startMinute
+        );
+        const shiftEndMs = shiftStartMs + shiftConfig.shiftMs;
+        rawDayLogs = rawDayLogs.filter((l) => {
+          const t = new Date(l.punch_time).getTime();
+          return t >= shiftStartMs && t < shiftEndMs;
+        });
+      }
+      const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
       const status =
         shiftConfig.attendanceMode === 'hours_based'
           ? computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds)
@@ -716,22 +637,44 @@ async function getMonthlyAttendance(
 
     const ids = employees.map((e) => e.id);
 
+    const needOvernightExtension = Array.from(shiftConfigMap.values()).some(
+      (c) => c && c.attendanceMode === 'shift_based' && c.isOvernightClock
+    );
+    const rangeStart = needOvernightExtension
+      ? addDaysIst(monthFirstStr, -1)
+      : monthFirstStr;
+    const rangeEnd = needOvernightExtension
+      ? addDaysIst(monthLastStr, 1)
+      : monthLastStr;
+
     const logsResult = await client.query(
-       `SELECT employee_id, punch_time, punch_type
+      `SELECT employee_id, punch_time, punch_type
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
          AND ${SQL_PUNCH_IST_DATE} >= $3::date
          AND ${SQL_PUNCH_IST_DATE} <= $4::date
        ORDER BY punch_time ASC`,
-      [companyId, ids, monthFirstStr, monthLastStr]
+      [companyId, ids, rangeStart, rangeEnd]
+    );
+
+    const empShiftById = new Map(
+      employees.map((e) => [
+        e.id,
+        shiftConfigMap.get(e.shift_id) || shiftConfigMap.get(null),
+      ])
     );
 
     const logsByEmployeeAndDay = new Map();
     for (const row of logsResult.rows) {
       const eid = row.employee_id;
       const punchTime = new Date(row.punch_time);
-      const key = istYmdFromDate(punchTime);
+      const shiftCfg = empShiftById.get(eid);
+      const key =
+        shiftCfg.attendanceMode === 'shift_based' && shiftCfg.isOvernightClock
+          ? attributedShiftStartDateStr(punchTime, shiftCfg)
+          : istYmdFromDate(punchTime);
+      if (key < monthFirstStr || key > monthLastStr) continue;
       if (!logsByEmployeeAndDay.has(eid)) {
         logsByEmployeeAndDay.set(eid, new Map());
       }
@@ -1096,9 +1039,8 @@ module.exports = {
   addManualFullDayBulk,
   updatePunch,
   deletePunch,
-  ensureAutoOutForDate,
-  ensureAutoOutForMonth,
   computeDayStatus,
   computeHoursBasedDayStatus,
   getHoursBasedDailyPresence,
+  attributedShiftStartDateStr,
 };

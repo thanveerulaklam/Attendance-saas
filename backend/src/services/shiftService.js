@@ -42,6 +42,7 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
 
 async function createShift(companyId, data) {
   const parsed = parseShiftData(data);
+  validateShiftTimes(parsed);
   const {
     name,
     startTime,
@@ -152,10 +153,11 @@ function parseShiftData(data) {
   const paidLeaveDays = Number.isFinite(Number(data.paid_leave_days))
     ? Math.max(0, Number(data.paid_leave_days))
     : 0;
-  const attendanceMode =
-    String(data.attendance_mode || '').toLowerCase() === 'hours_based'
-      ? 'hours_based'
-      : 'shift_based';
+  const modeRaw = String(data.attendance_mode || 'day_based').toLowerCase();
+  let attendanceMode = 'day_based';
+  if (modeRaw === 'hours_based') attendanceMode = 'hours_based';
+  else if (modeRaw === 'shift_based') attendanceMode = 'shift_based';
+  else if (modeRaw === 'day_based') attendanceMode = 'day_based';
   const requiredHoursPerDayRaw = Number(data.required_hours_per_day);
   const requiredHoursPerDay = Number.isFinite(requiredHoursPerDayRaw)
     ? Math.min(24, Math.max(1, requiredHoursPerDayRaw))
@@ -182,8 +184,32 @@ function parseShiftData(data) {
   };
 }
 
+function validateShiftTimes(parsed) {
+  const sm = /^(\d{1,2}):(\d{2})/.exec(String(parsed.startTime || '').trim());
+  const em = /^(\d{1,2}):(\d{2})/.exec(String(parsed.endTime || '').trim());
+  if (!sm || !em) return;
+  const startMin = Number(sm[1]) * 60 + Number(sm[2]);
+  const endMin = Number(em[1]) * 60 + Number(em[2]);
+  const { attendanceMode } = parsed;
+  if (attendanceMode === 'day_based' && endMin < startMin) {
+    const err = new Error(
+      'Day-based shift must end on the same calendar day after start time. Use Shift based (overnight) for night shifts.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+  if (attendanceMode === 'shift_based' && endMin >= startMin) {
+    const err = new Error(
+      'Shift based (overnight) requires end time before start time on the clock (e.g. 22:00 to 06:00).'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
 async function updateShift(companyId, shiftId, data) {
   const parsed = parseShiftData(data);
+  validateShiftTimes(parsed);
   if (!parsed.name || !parsed.startTime || !parsed.endTime) {
     const error = new Error('shift_name, start_time and end_time are required');
     error.statusCode = 400;

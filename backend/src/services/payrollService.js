@@ -1,10 +1,10 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { istYmdFromDate, todayIstYmd, SQL_PUNCH_IST_DATE, addDaysIst } = require('../utils/istDate');
+const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceService');
 const { getHolidayDatesForMonth } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
-const { ensureAutoOutForMonth } = require('./attendanceService');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 const TZ_OFFSETS = { 'Asia/Kolkata': '+05:30', 'Asia/Calcutta': '+05:30', UTC: 'Z', 'Etc/UTC': 'Z' };
@@ -26,19 +26,29 @@ function getMonthBounds(year, month) {
 function rowToShiftConfig(row) {
   const [startHour, startMinute] = row.start_time.split(':').map(Number);
   const [endHour, endMinute] = row.end_time.split(':').map(Number);
-  const shiftMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
+  const startMin = startHour * 60 + startMinute;
+  const endMin = endHour * 60 + endMinute;
+  const isOvernightClock = endMin < startMin;
+  const shiftMinutes =
+    endMin >= startMin ? endMin - startMin : 24 * 60 + endMin - startMin;
   const shiftMs = shiftMinutes * 60 * 1000;
   const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
   const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
+  const rawMode = String(row.attendance_mode ?? 'day_based').toLowerCase();
   const attendanceMode =
-    (row.attendance_mode || 'shift_based').toLowerCase() === 'hours_based'
+    rawMode === 'hours_based'
       ? 'hours_based'
-      : 'shift_based';
+      : rawMode === 'shift_based'
+        ? 'shift_based'
+        : 'day_based';
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
   return {
     id: row.id,
     startHour,
     startMinute,
+    endHour,
+    endMinute,
+    isOvernightClock,
     shiftMs,
     graceMs,
     lunchMinutesAllotted,
@@ -164,13 +174,20 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
   const { treatHolidayAdjacentAbsenceAsWorking = false, asOfDate = null } = options;
   const client = await pool.connect();
   try {
-    await ensureAutoOutForMonth(companyId, employeeId, year, month);
-
     const { daysInMonth } = getMonthBounds(year, month);
     const monthFirstStr = `${year}-${String(month).padStart(2, '0')}-01`;
     const monthLastStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
+
+    const needOvernightRange =
+      shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
+    const rangeStart = needOvernightRange
+      ? addDays(monthFirstStr, -1)
+      : monthFirstStr;
+    const rangeEnd = needOvernightRange
+      ? addDays(monthLastStr, 1)
+      : monthLastStr;
 
     const [logsResult, holidaySet] = await Promise.all([
       client.query(
@@ -181,7 +198,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
            AND ${SQL_PUNCH_IST_DATE} >= $3::date
            AND ${SQL_PUNCH_IST_DATE} <= $4::date
          ORDER BY punch_time ASC`,
-        [companyId, employeeId, monthFirstStr, monthLastStr]
+        [companyId, employeeId, rangeStart, rangeEnd]
       ),
       getHolidayDatesForMonth(companyId, year, month),
     ]);
@@ -203,7 +220,15 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     for (const row of logsResult.rows) {
       const punchTime = new Date(row.punch_time);
-      const key = istYmdFromDate(punchTime);
+      let key;
+      if (shift.attendanceMode === 'hours_based') {
+        key = istYmdFromDate(punchTime);
+      } else if (shift.attendanceMode === 'shift_based' && shift.isOvernightClock) {
+        key = attributedShiftStartDateStr(punchTime, shift);
+      } else {
+        key = istYmdFromDate(punchTime);
+      }
+      if (key < monthFirstStr || key > monthLastStr) continue;
       if (!logsByDay.has(key)) {
         logsByDay.set(key, []);
       }
@@ -234,6 +259,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const dayDetails = [];
 
       let rawAbsenceDays = 0;
+      let overtimeHours = 0;
 
       for (const [dayKey, dayLogs] of logsByDay.entries()) {
         if (dayKey > lastDateToConsider) {
@@ -377,64 +403,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         punch_type: l.punchType,
       }));
 
-      const status = require('./attendanceService').computeDayStatus
-        ? require('./attendanceService').computeDayStatus(logsForStatus, shift, dayKey)
-        : (() => {
-            let workedMs = 0;
-            let lastIn = null;
-            let firstInTime = null;
-            let lunchStartTime = null;
-            let lunchEndTime = null;
-            for (const log of sorted) {
-              if (log.punchType === 'in') {
-                if (!firstInTime) firstInTime = log.punchTime;
-                if (lunchStartTime != null && lunchEndTime == null) {
-                  lunchEndTime = log.punchTime;
-                }
-                lastIn = log.punchTime;
-              } else if (log.punchType === 'out' && lastIn) {
-                workedMs += Math.max(0, log.punchTime - lastIn);
-                if (lunchStartTime == null) lunchStartTime = log.punchTime;
-                lastIn = null;
-              }
-            }
-            const presentLocal = workedMs > 0 || !!firstInTime;
-            const shiftStartMs = getShiftStartMsForDate(yy, mo, dd, shift.startHour, shift.startMinute);
-            const overtimeMsLocal = Math.max(0, workedMs - shift.shiftMs - shift.graceMs);
-            const lateLocal =
-              presentLocal &&
-              firstInTime &&
-              firstInTime.getTime() > shiftStartMs + shift.graceMs;
-            const allowedLunchMsLocal = allottedLunchMs;
-            let lunchOverLocal = 0;
-            if (lunchStartTime != null && lunchEndTime != null) {
-              const lunchMs = lunchEndTime - lunchStartTime;
-              if (lunchMs > allowedLunchMsLocal) {
-                lunchOverLocal = lunchMs - allowedLunchMsLocal;
-              }
-            }
-            const midpointMs = shiftStartMs + (shift.shiftMs || 0) / 2;
-            let halfDayLocal = false;
-            if (presentLocal && midpointMs) {
-              const lastPunch = sorted[sorted.length - 1];
-              if (
-                lastPunch &&
-                lastPunch.punchType === 'out' &&
-                lastPunch.punchTime.getTime() < midpointMs
-              ) {
-                halfDayLocal = true;
-              } else if (firstInTime && firstInTime.getTime() > midpointMs) {
-                halfDayLocal = true;
-              }
-            }
-            return {
-              present: presentLocal,
-              overtimeHours: overtimeMsLocal / (60 * 60 * 1000),
-              late: lateLocal,
-              halfDay: halfDayLocal,
-              lunchOverMinutes: lunchOverLocal / (60 * 1000),
-            };
-          })();
+      const status = computeDayStatus(logsForStatus, shift, dayKey);
 
       if (!status.present) {
         continue;
@@ -525,7 +494,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       paidLeaveUsed,
       rawAbsenceDays,
       absenceDays,
-      attendanceMode: shift.attendanceMode || 'shift_based',
+      attendanceMode: shift.attendanceMode || 'day_based',
       requiredHoursPerDay: shift.requiredHoursPerDay || 8,
       dayDetails: null,
     };
