@@ -30,6 +30,21 @@ function getSubscriptionUrgency(subscriptionEndDate) {
   return { isUrgent, isExpired, daysLeft };
 }
 
+function deriveSubscriptionDates(company) {
+  const startRaw = company?.subscription_start_date || company?.created_at || null;
+  const endRaw = company?.subscription_end_date || null;
+  if (!startRaw && !endRaw) return { start: null, end: null };
+  const start = startRaw ? new Date(startRaw) : null;
+  if (start && Number.isNaN(start.getTime())) return { start: null, end: null };
+  let end = endRaw ? new Date(endRaw) : null;
+  if (end && Number.isNaN(end.getTime())) end = null;
+  if (!end && start) {
+    end = new Date(start);
+    end.setDate(end.getDate() + 365);
+  }
+  return { start, end };
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [keyInput, setKeyInput] = useState('');
@@ -46,7 +61,7 @@ export default function AdminPage() {
   const [billingModalCompany, setBillingModalCompany] = useState(null);
   const [billingForm, setBillingForm] = useState({
     plan_code: 'starter',
-    billing_cycle: 'monthly',
+    billing_cycle: 'annual',
     next_billing_date: '',
     last_payment_date: '',
     payment_status: 'paid',
@@ -343,8 +358,8 @@ export default function AdminPage() {
       value ? new Date(value).toISOString().slice(0, 10) : '';
     setBillingForm({
       plan_code: company.plan_code || 'starter',
-      billing_cycle: company.billing_cycle || 'monthly',
-      next_billing_date: toDateInput(company.next_billing_date),
+      billing_cycle: 'annual',
+      next_billing_date: toDateInput(company.subscription_end_date || company.next_billing_date),
       last_payment_date: toDateInput(company.last_payment_date),
       payment_status: company.payment_status || 'paid',
       billing_notes: company.billing_notes || '',
@@ -371,6 +386,14 @@ export default function AdminPage() {
   const handleBillingSubmit = async (e) => {
     e.preventDefault();
     if (!billingModalCompany) return;
+    const computedStart = billingForm.subscription_start_date || new Date().toISOString().slice(0, 10);
+    const computedEnd =
+      billingForm.subscription_end_date ||
+      (() => {
+        const d = new Date(computedStart);
+        d.setDate(d.getDate() + 365);
+        return d.toISOString().slice(0, 10);
+      })();
     setBillingSaving(true);
     try {
       const res = await adminFetch(
@@ -380,6 +403,10 @@ export default function AdminPage() {
           body: JSON.stringify({
             company_id: billingModalCompany.id,
             ...billingForm,
+            billing_cycle: 'annual',
+            next_billing_date: computedEnd,
+            subscription_start_date: computedStart,
+            subscription_end_date: computedEnd,
           }),
         },
         adminKey
@@ -589,13 +616,10 @@ export default function AdminPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {companies.map((c) => {
-                    const subStart = c.subscription_start_date
-                      ? new Date(c.subscription_start_date).toLocaleDateString()
-                      : null;
-                    const subEnd = c.subscription_end_date
-                      ? new Date(c.subscription_end_date).toLocaleDateString()
-                      : null;
-                    const urgency = getSubscriptionUrgency(c.subscription_end_date);
+                    const derived = deriveSubscriptionDates(c);
+                    const subStart = derived.start ? derived.start.toLocaleDateString() : null;
+                    const subEnd = derived.end ? derived.end.toLocaleDateString() : null;
+                    const urgency = getSubscriptionUrgency(derived.end ? derived.end.toISOString() : null);
                     const createdAt = c.created_at
                       ? new Date(c.created_at).toLocaleDateString()
                       : null;
@@ -643,14 +667,10 @@ export default function AdminPage() {
                                 .charAt(0)
                                 .toUpperCase() +
                                 (c.plan_code || 'starter').slice(1)}
-                              {c.billing_cycle ? ` • ${c.billing_cycle}` : ''}
+                              {' • annual'}
                             </span>
                             <span className="text-xs text-slate-500">
-                              {c.next_billing_date
-                                ? `Next: ${new Date(
-                                    c.next_billing_date
-                                  ).toLocaleDateString()}`
-                                : 'Next billing not set'}
+                              {subEnd ? `Valid till: ${subEnd}` : 'Valid till: auto on first billing save'}
                             </span>
                             <span
                               className={`inline-flex mt-0.5 w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${
@@ -710,7 +730,7 @@ export default function AdminPage() {
                               )}
                             </div>
                           ) : (
-                            <span className="text-xs text-slate-500 italic">Not set</span>
+                            <span className="text-xs text-slate-500 italic">Starts on activation, valid for 1 year</span>
                           )}
                         </td>
                         <td className="px-4 py-2.5 text-slate-600">{createdAt || '—'}</td>
@@ -1056,6 +1076,11 @@ export default function AdminPage() {
                     Plan & billing
                   </h3>
                   <dl className="space-y-1.5 text-xs text-slate-600">
+                    {(() => {
+                      const derived = deriveSubscriptionDates(detailsCompany);
+                      const detailEnd = derived.end ? derived.end.toLocaleDateString() : null;
+                      return (
+                        <>
                     <div className="flex justify-between gap-4">
                       <dt className="text-slate-500">Plan</dt>
                       <dd className="text-right">
@@ -1063,9 +1088,7 @@ export default function AdminPage() {
                           .charAt(0)
                           .toUpperCase() +
                           (detailsCompany.plan_code || 'starter').slice(1)}
-                        {detailsCompany.billing_cycle
-                          ? ` • ${detailsCompany.billing_cycle}`
-                          : ''}
+                        {' • annual'}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
@@ -1075,13 +1098,9 @@ export default function AdminPage() {
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
-                      <dt className="text-slate-500">Next billing date</dt>
+                      <dt className="text-slate-500">Valid till</dt>
                       <dd className="text-right">
-                        {detailsCompany.next_billing_date
-                          ? new Date(
-                              detailsCompany.next_billing_date
-                            ).toLocaleDateString()
-                          : 'Not set'}
+                        {detailEnd || 'Auto on first billing save'}
                       </dd>
                     </div>
                     <div className="flex justify-between gap-4">
@@ -1112,21 +1131,22 @@ export default function AdminPage() {
                       <dt className="text-slate-500">Subscription period</dt>
                       <dd className="text-right">
                         {detailsCompany.subscription_start_date &&
-                        detailsCompany.subscription_end_date ? (
+                        detailEnd ? (
                           <>
                             {new Date(
                               detailsCompany.subscription_start_date
                             ).toLocaleDateString()}{' '}
                             →{' '}
-                            {new Date(
-                              detailsCompany.subscription_end_date
-                            ).toLocaleDateString()}
+                            {detailEnd}
                           </>
                         ) : (
-                          'Not set'
+                          'Starts on activation, valid for 1 year'
                         )}
                       </dd>
                     </div>
+                        </>
+                      );
+                    })()}
                   </dl>
                   <div className="mt-3">
                     <div className="text-xs font-medium text-slate-700 mb-1">
@@ -1167,7 +1187,7 @@ export default function AdminPage() {
                 Manage billing – {billingModalCompany.name || `Company #${billingModalCompany.id}`}
               </h2>
               <p className="text-xs text-slate-500 mb-4">
-                Update plan, billing cycle, and manual payment status. Automated gateways can be added later.
+                Annual billing only. Subscription start/end auto-default to a 1-year window from activation, with manual override allowed.
               </p>
               <form onSubmit={handleBillingSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1192,28 +1212,32 @@ export default function AdminPage() {
                     <label className="block text-xs font-medium text-slate-700 mb-1">
                       Billing cycle
                     </label>
-                    <select
-                      name="billing_cycle"
-                      value={billingForm.billing_cycle}
-                      onChange={handleBillingChange}
-                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
-                    >
-                      <option value="monthly">Monthly</option>
-                      <option value="annual">Annual</option>
-                    </select>
+                    <input
+                      type="text"
+                      value="Annual"
+                      readOnly
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-slate-50"
+                    />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Next billing date
+                      Valid till
                     </label>
                     <input
                       type="date"
                       name="next_billing_date"
-                      value={billingForm.next_billing_date}
-                      onChange={handleBillingChange}
+                      value={billingForm.subscription_end_date || billingForm.next_billing_date}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBillingForm((prev) => ({
+                          ...prev,
+                          next_billing_date: val,
+                          subscription_end_date: val,
+                        }));
+                      }}
                       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
                     />
                   </div>

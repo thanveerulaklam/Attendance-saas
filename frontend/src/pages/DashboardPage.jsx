@@ -41,6 +41,7 @@ export default function DashboardPage() {
   }, []);
 
   const trend = summary?.attendanceTrend || [];
+  const branchSummary = summary?.branchSummary || [];
   const kpis = summary
     ? [
         {
@@ -146,6 +147,47 @@ export default function DashboardPage() {
             </ul>
           ) : (
             <p className="mt-2 text-sm text-slate-500 italic">Everyone is present today</p>
+          )}
+        </article>
+      </section>
+
+      <section>
+        <article className="rounded-xl bg-white shadow-soft px-5 py-4 border border-slate-100 flex flex-col transition-all duration-200 hover:shadow-md">
+          <div className="mb-4">
+            <h2 className="text-sm font-semibold text-slate-900">Branch-wise attendance (All branches)</h2>
+            <p className="mt-1 text-xs text-slate-500">Default view combines all branches and shows each branch split below</p>
+          </div>
+          {loading ? (
+            <div className="h-28 rounded-lg bg-slate-50 animate-pulse" />
+          ) : branchSummary.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-slate-900">
+                <thead className="border-b border-slate-200 bg-slate-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Branch</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Present</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Absent</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Late</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">Total</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-slate-600">% Present</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {branchSummary.map((b) => (
+                    <tr key={`${b.branch_id}-${b.branch_name}`}>
+                      <td className="px-3 py-2">{b.branch_name}</td>
+                      <td className="px-3 py-2 text-emerald-700 font-medium">{b.present}</td>
+                      <td className="px-3 py-2 text-amber-700 font-medium">{b.absent}</td>
+                      <td className="px-3 py-2 text-rose-700 font-medium">{b.late}</td>
+                      <td className="px-3 py-2">{b.total}</td>
+                      <td className="px-3 py-2">{b.present_pct}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 italic">No branch attendance data yet</p>
           )}
         </article>
       </section>

@@ -14,7 +14,7 @@ const {
 // Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 
-function employeesBranchFilterSql(allowedBranchIds, paramIndex) {
+function employeesBranchFilterSql(allowedBranchIds, paramIndex, columnName = 'branch_id') {
   if (allowedBranchIds == null) {
     return { clause: '', params: [], nextIndex: paramIndex };
   }
@@ -22,7 +22,7 @@ function employeesBranchFilterSql(allowedBranchIds, paramIndex) {
     return { clause: ' AND FALSE', params: [], nextIndex: paramIndex };
   }
   return {
-    clause: ` AND branch_id = ANY($${paramIndex}::bigint[])`,
+    clause: ` AND ${columnName} = ANY($${paramIndex}::bigint[])`,
     params: [allowedBranchIds],
     nextIndex: paramIndex + 1,
   };
@@ -488,24 +488,25 @@ async function getDailyAttendance(
   try {
     let employeesResult;
     const dept = department ? String(department).trim() : null;
-    let employeesQuery = `SELECT id, name, employee_code, shift_id
-      FROM employees
-      WHERE company_id = $1 AND status = 'active'`;
+    let employeesQuery = `SELECT e.id, e.name, e.employee_code, e.shift_id, e.branch_id, b.name AS branch_name
+      FROM employees e
+      LEFT JOIN branches b ON b.id = e.branch_id
+      WHERE e.company_id = $1 AND e.status = 'active'`;
     const params = [companyId];
 
-    const bfEmp = employeesBranchFilterSql(allowedBranchIds, 2);
+    const bfEmp = employeesBranchFilterSql(allowedBranchIds, 2, 'e.branch_id');
     employeesQuery += bfEmp.clause;
     params.push(...bfEmp.params);
     let nextIdx = bfEmp.nextIndex;
 
     if (employeeId) {
-      employeesQuery += ` AND id = $${nextIdx}`;
+      employeesQuery += ` AND e.id = $${nextIdx}`;
       params.push(employeeId);
       nextIdx += 1;
     }
 
     if (dept) {
-      employeesQuery += ` AND department = $${nextIdx}`;
+      employeesQuery += ` AND e.department = $${nextIdx}`;
       params.push(dept);
       nextIdx += 1;
     }
@@ -602,6 +603,8 @@ async function getDailyAttendance(
         employee_id: emp.id,
         name: emp.name,
         employee_code: emp.employee_code,
+        branch_id: emp.branch_id ? Number(emp.branch_id) : null,
+        branch_name: emp.branch_name || null,
         present: presentForDaily,
         late: status.late,
         overtime_hours: Math.round(status.overtimeHours * 100) / 100,

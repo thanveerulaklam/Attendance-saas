@@ -206,10 +206,24 @@ async function updateCompanyBilling(req, res, next) {
       });
     }
 
+    const existingResult = await pool.query(
+      `SELECT created_at, status, subscription_start_date, subscription_end_date
+       FROM companies
+       WHERE id = $1`,
+      [companyId]
+    );
+    if (existingResult.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company not found',
+      });
+    }
+    const existing = existingResult.rows[0];
+
     const {
       plan_code,
-      billing_cycle,
-      next_billing_date,
+      billing_cycle: _ignoredBillingCycle,
+      next_billing_date: _ignoredNextBillingDate,
       last_payment_date,
       payment_status,
       billing_notes,
@@ -218,16 +232,36 @@ async function updateCompanyBilling(req, res, next) {
       is_active,
     } = req.body || {};
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const activationDate = existing.subscription_start_date
+      ? new Date(existing.subscription_start_date)
+      : existing.status === 'active'
+        ? new Date(existing.created_at || today)
+        : today;
+    activationDate.setHours(0, 0, 0, 0);
+    const defaultEndDate = new Date(activationDate);
+    defaultEndDate.setDate(defaultEndDate.getDate() + 365);
+
+    const normalizedStart =
+      subscription_start_date === '' || subscription_start_date == null
+        ? activationDate
+        : subscription_start_date;
+    const normalizedEnd =
+      subscription_end_date === '' || subscription_end_date == null
+        ? defaultEndDate
+        : subscription_end_date;
+
     const { updateBillingMetadata } = require('../services/companyService');
     const updated = await updateBillingMetadata(companyId, {
       plan_code,
-      billing_cycle,
-      next_billing_date,
+      billing_cycle: 'annual',
+      next_billing_date: normalizedEnd,
       last_payment_date,
       payment_status,
       billing_notes,
-      subscription_start_date,
-      subscription_end_date,
+      subscription_start_date: normalizedStart,
+      subscription_end_date: normalizedEnd,
       is_active,
     });
 

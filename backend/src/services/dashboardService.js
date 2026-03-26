@@ -32,6 +32,34 @@ async function getDashboardSummary(companyId, allowedBranchIds = null) {
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Branch-wise summary for multi-branch admins (defaults to all branches for admin users).
+  const branchBuckets = new Map();
+  for (const row of dailyResult || []) {
+    const branchId = row.branch_id != null ? Number(row.branch_id) : 0;
+    const branchName = row.branch_name || 'Unassigned';
+    if (!branchBuckets.has(branchId)) {
+      branchBuckets.set(branchId, {
+        branch_id: branchId,
+        branch_name: branchName,
+        total: 0,
+        present: 0,
+        absent: 0,
+        late: 0,
+      });
+    }
+    const bucket = branchBuckets.get(branchId);
+    bucket.total += 1;
+    if (row.present) bucket.present += 1;
+    else bucket.absent += 1;
+    if (row.late) bucket.late += 1;
+  }
+  const branchSummary = Array.from(branchBuckets.values())
+    .sort((a, b) => a.branch_name.localeCompare(b.branch_name))
+    .map((b) => ({
+      ...b,
+      present_pct: b.total > 0 ? Math.round((b.present / b.total) * 100) : 0,
+    }));
+
   const trendDays = [];
   for (let i = 6; i >= 0; i -= 1) {
     const dateStr = addDaysIst(todayStr, -i);
@@ -61,6 +89,7 @@ async function getDashboardSummary(companyId, allowedBranchIds = null) {
     todayPct: todayTotal > 0 ? Math.round((todayPresent / todayTotal) * 100) : 0,
     todayAbsent,
     todayOnLunch,
+    branchSummary,
     attendanceTrend: trend,
   };
 }

@@ -478,6 +478,16 @@
           return { isUrgent: isUrgent, isExpired: isExpired, daysLeft: daysLeft };
         }
 
+        function deriveSubscriptionEnd(company) {
+          if (company && company.subscription_end_date) return company.subscription_end_date;
+          var start = company && (company.subscription_start_date || company.created_at);
+          if (!start) return null;
+          var d = new Date(start);
+          if (isNaN(d.getTime())) return null;
+          d.setDate(d.getDate() + 365);
+          return d.toISOString().slice(0, 10);
+        }
+
         function renderOverview(data) {
           var el = document.getElementById("overview-summary");
           if (!el) return;
@@ -606,7 +616,8 @@
 
           list.forEach(function (c) {
             var tr = document.createElement("tr");
-            var subUrgency = getSubscriptionUrgency(c.subscription_end_date);
+            var derivedEnd = deriveSubscriptionEnd(c);
+            var subUrgency = getSubscriptionUrgency(derivedEnd);
 
             function makeTd(text) {
               var td = document.createElement("td");
@@ -642,10 +653,10 @@
             tdPlan.innerHTML =
               "<div class='small'>" +
               (c.plan_code || "starter") +
-              (c.billing_cycle ? " • " + c.billing_cycle : "") +
+              " • annual" +
               "</div>" +
-              "<div class='small muted'>Next: " +
-              (c.next_billing_date ? formatDate(c.next_billing_date) : "—") +
+              "<div class='small muted'>Valid till: " +
+              (derivedEnd ? formatDate(derivedEnd) : "auto on first billing save") +
               "</div>" +
               "<div class='small muted'>Payment: " +
               (c.payment_status || "paid") +
@@ -666,11 +677,11 @@
               "<div class='small " +
               (subUrgency.isUrgent ? "text-rose-600" : "") +
               "'>" +
-              (c.subscription_start_date && c.subscription_end_date
+              (c.subscription_start_date && derivedEnd
                 ? formatDate(c.subscription_start_date) +
                   " → " +
-                  formatDate(c.subscription_end_date)
-                : "Not set") +
+                  formatDate(derivedEnd)
+                : "Starts on activation, valid for 1 year") +
               "</div><div class='small muted'>" +
               (c.is_active === false ? "Inactive" : "Active/within grace") +
               "</div>" +
@@ -1104,25 +1115,15 @@
           );
           if (plan === null) return;
 
-          var billingCycle = window.prompt(
-            'Billing cycle (monthly/annual) for "' +
+          var validTill = window.prompt(
+            'Valid till date (YYYY-MM-DD) for "' +
               name +
               '" (current: ' +
-              (company.billing_cycle || "monthly") +
+              (company.subscription_end_date || deriveSubscriptionEnd(company) || "not set") +
               ")",
-            company.billing_cycle || "monthly"
+            company.subscription_end_date || deriveSubscriptionEnd(company) || ""
           );
-          if (billingCycle === null) return;
-
-          var nextBilling = window.prompt(
-            'Next billing date (YYYY-MM-DD) for "' +
-              name +
-              '" (current: ' +
-              (company.next_billing_date || "not set") +
-              ")",
-            company.next_billing_date || ""
-          );
-          if (nextBilling === null) return;
+          if (validTill === null) return;
 
           var paymentStatus = window.prompt(
             'Payment status (trial/paid/pending/overdue) for "' +
@@ -1148,8 +1149,10 @@
           var body = {
             company_id: company.id,
             plan_code: plan || company.plan_code || "starter",
-            billing_cycle: billingCycle || company.billing_cycle || "monthly",
-            next_billing_date: nextBilling || "",
+            billing_cycle: "annual",
+            next_billing_date: validTill || "",
+            subscription_start_date: company.subscription_start_date || new Date().toISOString().slice(0, 10),
+            subscription_end_date: validTill || "",
             payment_status: paymentStatus || company.payment_status || "paid",
             is_active: isActive,
           };
