@@ -221,7 +221,7 @@ export default function AttendancePage() {
       setDailyLoading(true);
       const params = new URLSearchParams({ date: dateStr });
       if (departmentFilter !== 'all') params.set('department', departmentFilter);
-        if (branchFilter) params.set('branch_id', branchFilter);
+      if (branchFilter) params.set('branch_id', branchFilter);
       authFetch(`/api/attendance/daily?${params.toString()}`, {
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -259,7 +259,7 @@ export default function AttendancePage() {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [dateStr, departmentFilter, refreshKey]);
+  }, [dateStr, departmentFilter, refreshKey, branchFilter]);
 
   const todaySummary = useMemo(() => {
     if (!dailyData || dailyData.length === 0) {
