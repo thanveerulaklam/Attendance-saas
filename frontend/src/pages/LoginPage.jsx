@@ -663,6 +663,17 @@ export default function LoginPage() {
                   >
                     {loading ? 'Signing in…' : 'Login'}
                   </button>
+                  <p className="text-center text-xs text-slate-500">
+                    Forgot password?{' '}
+                    <a
+                      href={WHATSAPP_LINK}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 font-medium hover:underline"
+                    >
+                      Contact support
+                    </a>
+                  </p>
                 </form>
 
                 <p className="mt-6 text-center text-sm text-slate-600">

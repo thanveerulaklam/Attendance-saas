@@ -71,6 +71,14 @@ export default function AdminPage() {
     is_active: true,
   });
   const [billingSaving, setBillingSaving] = useState(false);
+  const [resetModalCompany, setResetModalCompany] = useState(null);
+  const [resetForm, setResetForm] = useState({
+    admin_email: '',
+    admin_user_id: '',
+    new_password: '',
+    confirm_new_password: '',
+  });
+  const [resetSaving, setResetSaving] = useState(false);
   const [lockBusyId, setLockBusyId] = useState(null);
   const [detailsCompany, setDetailsCompany] = useState(null);
   const [collectionsQueue, setCollectionsQueue] = useState([]);
@@ -433,6 +441,76 @@ export default function AdminPage() {
     }
   };
 
+  const openResetModal = (company) => {
+    if (!company) return;
+    setResetForm({
+      admin_email: '',
+      admin_user_id: '',
+      new_password: '',
+      confirm_new_password: '',
+    });
+    setResetSaving(false);
+    setResetModalCompany(company);
+  };
+
+  const closeResetModal = () => {
+    setResetModalCompany(null);
+    setResetSaving(false);
+  };
+
+  const handleResetAdminPassword = async (e) => {
+    e.preventDefault();
+    if (!resetModalCompany || resetSaving) return;
+
+    const adminEmail = resetForm.admin_email.trim();
+    const adminUserId = resetForm.admin_user_id.trim();
+    const newPassword = resetForm.new_password;
+    const confirmPassword = resetForm.confirm_new_password;
+
+    if (!adminEmail && !adminUserId) {
+      setToast({ type: 'error', message: 'Enter admin email or admin user ID.' });
+      return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+      setToast({ type: 'error', message: 'New password must be at least 8 characters.' });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setToast({ type: 'error', message: 'New password and confirm password do not match.' });
+      return;
+    }
+
+    setResetSaving(true);
+    try {
+      const payload = {
+        company_id: resetModalCompany.id,
+        new_password: newPassword,
+      };
+      if (adminEmail) payload.admin_email = adminEmail;
+      if (adminUserId) payload.admin_user_id = Number(adminUserId);
+
+      const res = await adminFetch('/reset-company-admin-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }, adminKey);
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setKeyError('Invalid admin key');
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+        setAdminKey('');
+        return;
+      }
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to reset password');
+      }
+      setToast({ type: 'success', message: json.message || 'Admin password reset successfully.' });
+      closeResetModal();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to reset password' });
+      setResetSaving(false);
+    }
+  };
+
   // Gate: require admin key
   if (!adminKey) {
     return (
@@ -789,6 +867,16 @@ export default function AdminPage() {
                               className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
                             >
                               Renew 1y
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openResetModal(c);
+                              }}
+                              className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 hover:bg-amber-100"
+                            >
+                              Reset pwd
                             </button>
                           </div>
                         </td>
@@ -1333,6 +1421,95 @@ export default function AdminPage() {
                     disabled={billingSaving}
                   >
                     {billingSaving ? 'Saving…' : 'Save billing'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {resetModalCompany && (
+          <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40">
+            <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-200 p-6">
+              <h2 className="text-base font-semibold text-slate-900 mb-1">
+                Reset admin password – {resetModalCompany.name || `Company #${resetModalCompany.id}`}
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Enter admin email (or user ID) and a new temporary password. Share it securely.
+              </p>
+              <form onSubmit={handleResetAdminPassword} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Admin email
+                    </label>
+                    <input
+                      type="email"
+                      value={resetForm.admin_email}
+                      onChange={(e) => setResetForm((prev) => ({ ...prev, admin_email: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                      placeholder="admin@company.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Admin user ID (optional)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={resetForm.admin_user_id}
+                      onChange={(e) => setResetForm((prev) => ({ ...prev, admin_user_id: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                      placeholder="e.g. 42"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      New password
+                    </label>
+                    <input
+                      type="password"
+                      value={resetForm.new_password}
+                      onChange={(e) => setResetForm((prev) => ({ ...prev, new_password: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                      minLength={8}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Confirm password
+                    </label>
+                    <input
+                      type="password"
+                      value={resetForm.confirm_new_password}
+                      onChange={(e) => setResetForm((prev) => ({ ...prev, confirm_new_password: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                      minLength={8}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={closeResetModal}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    disabled={resetSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60"
+                    disabled={resetSaving}
+                  >
+                    {resetSaving ? 'Resetting…' : 'Reset password'}
                   </button>
                 </div>
               </form>

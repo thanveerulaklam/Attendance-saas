@@ -16,6 +16,7 @@ const {
   getCollectionsQueue,
   renewCompanySubscription,
   getCompanyAudit,
+  resetCompanyAdminPassword,
 } = require('../controllers/adminController');
 const { requireApprovalSecret } = require('../middleware/approvalSecret');
 
@@ -55,5 +56,6 @@ router.post('/approve-company', approveCompany);
 router.post('/decline-company', declineCompany);
 router.post('/lock-company', lockCompany);
 router.post('/unlock-company', unlockCompany);
+router.post('/reset-company-admin-password', resetCompanyAdminPassword);
 
 module.exports = router;

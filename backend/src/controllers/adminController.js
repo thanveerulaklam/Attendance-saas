@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { getEffectiveEmployeeLimit, PLAN_EMPLOYEE_LIMITS } = require('../services/employeeService');
 const auditService = require('../services/auditService');
+const authService = require('../services/authService');
 
 async function logSuperadminAction(companyId, actionType, entityType, entityId, metadata = null) {
   if (!companyId) return;
@@ -947,6 +948,67 @@ async function getCompanyAudit(req, res, next) {
   }
 }
 
+/**
+ * POST /api/admin/reset-company-admin-password
+ * Body: { company_id, admin_user_id?, admin_email?, new_password }
+ * Requires X-Approval-Secret or Authorization: Bearer <ADMIN_APPROVAL_SECRET>.
+ */
+async function resetCompanyAdminPassword(req, res, next) {
+  try {
+    const companyId = req.body?.company_id != null ? Number(req.body.company_id) : null;
+    const adminUserId = req.body?.admin_user_id != null ? Number(req.body.admin_user_id) : null;
+    const adminEmail =
+      typeof req.body?.admin_email === 'string' && req.body.admin_email.trim()
+        ? req.body.admin_email.trim()
+        : null;
+    const newPassword =
+      typeof req.body?.new_password === 'string' ? req.body.new_password : null;
+
+    if (!companyId || !Number.isInteger(companyId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'company_id (number) is required',
+      });
+    }
+    if (!adminUserId && !adminEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Either admin_user_id or admin_email is required',
+      });
+    }
+    if (adminUserId != null && !Number.isInteger(adminUserId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'admin_user_id must be a number when provided',
+      });
+    }
+    if (!newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'new_password is required',
+      });
+    }
+
+    const user = await authService.superadminResetAdminPassword(
+      companyId,
+      { adminUserId, adminEmail },
+      newPassword
+    );
+
+    res.status(200).json({
+      success: true,
+      data: user,
+      message: `Password reset successfully for admin "${user.email}".`,
+    });
+    await logSuperadminAction(companyId, 'admin.user.password.reset', 'user', user.id, {
+      admin_email: user.email,
+      reset_via: adminUserId ? 'admin_user_id' : 'admin_email',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listPendingCompanies,
   getAdminOverview,
@@ -963,4 +1025,5 @@ module.exports = {
   getCollectionsQueue,
   renewCompanySubscription,
   getCompanyAudit,
+  resetCompanyAdminPassword,
 };

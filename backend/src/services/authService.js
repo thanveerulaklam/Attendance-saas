@@ -139,4 +139,113 @@ async function login(email, password) {
   throw new AppError('Invalid email or password', 401);
 }
 
-module.exports = { registerCompany, login };
+async function changeAdminPassword(userId, companyId, currentPassword, newPassword) {
+  if (!userId || !companyId) {
+    throw new AppError('Invalid authenticated user context', 401);
+  }
+  if (!currentPassword || !newPassword) {
+    throw new AppError('Current password and new password are required', 400);
+  }
+  if (String(newPassword).length < 8) {
+    throw new AppError('New password must be at least 8 characters', 400);
+  }
+
+  const userResult = await pool.query(
+    `SELECT id, company_id, name, email, password, role
+     FROM users
+     WHERE id = $1 AND company_id = $2 AND role = 'admin'
+     LIMIT 1`,
+    [userId, companyId]
+  );
+  if (userResult.rowCount === 0) {
+    throw new AppError('Admin user not found', 404);
+  }
+
+  const user = userResult.rows[0];
+  const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+  if (!isCurrentPasswordValid) {
+    throw new AppError('Current password is incorrect', 401);
+  }
+
+  const isSameAsCurrent = await bcrypt.compare(newPassword, user.password);
+  if (isSameAsCurrent) {
+    throw new AppError('New password must be different from current password', 400);
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await pool.query(
+    `UPDATE users
+     SET password = $1
+     WHERE id = $2 AND company_id = $3 AND role = 'admin'`,
+    [passwordHash, user.id, user.company_id]
+  );
+
+  return {
+    id: user.id,
+    company_id: user.company_id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  };
+}
+
+async function superadminResetAdminPassword(companyId, selector, newPassword) {
+  if (!companyId) {
+    throw new AppError('company_id is required', 400);
+  }
+  if (!selector || (selector.adminUserId == null && !selector.adminEmail)) {
+    throw new AppError('Either admin_user_id or admin_email is required', 400);
+  }
+  if (!newPassword) {
+    throw new AppError('new_password is required', 400);
+  }
+  if (String(newPassword).length < 8) {
+    throw new AppError('new_password must be at least 8 characters', 400);
+  }
+
+  const whereClauses = [`company_id = $1`, `role = 'admin'`];
+  const params = [companyId];
+
+  if (selector.adminUserId != null) {
+    whereClauses.push(`id = $${params.length + 1}`);
+    params.push(selector.adminUserId);
+  } else {
+    whereClauses.push(`LOWER(TRIM(email)) = LOWER(TRIM($${params.length + 1}))`);
+    params.push(selector.adminEmail);
+  }
+
+  const userResult = await pool.query(
+    `SELECT id, company_id, name, email, role
+     FROM users
+     WHERE ${whereClauses.join(' AND ')}
+     LIMIT 1`,
+    params
+  );
+  if (userResult.rowCount === 0) {
+    throw new AppError('Admin user not found for this company', 404);
+  }
+
+  const user = userResult.rows[0];
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await pool.query(
+    `UPDATE users
+     SET password = $1
+     WHERE id = $2 AND company_id = $3 AND role = 'admin'`,
+    [passwordHash, user.id, user.company_id]
+  );
+
+  return {
+    id: user.id,
+    company_id: user.company_id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  };
+}
+
+module.exports = {
+  registerCompany,
+  login,
+  changeAdminPassword,
+  superadminResetAdminPassword,
+};

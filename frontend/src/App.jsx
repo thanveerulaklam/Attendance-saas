@@ -15,6 +15,7 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import EnquiriesPage from './pages/EnquiriesPage';
 import AdminPage from './pages/AdminPage';
+import ChangePasswordPage from './pages/ChangePasswordPage';
 import ToolsHomePage from './pages/tools/ToolsHomePage';
 import SalaryCalculator from './pages/tools/SalaryCalculator';
 import PFESICalculator from './pages/tools/PFESICalculator';
@@ -58,6 +59,7 @@ function App() {
             <Route path="/payroll" element={<PayrollPage />} />
             <Route path="/advances" element={<AdvancesPage />} />
             <Route path="/enquiries" element={<EnquiriesPage />} />
+            <Route path="/settings/change-password" element={<ChangePasswordPage />} />
           </Route>
         </Routes>
       </AuthProvider>

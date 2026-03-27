@@ -63,4 +63,35 @@ async function me(req, res, next) {
   }
 }
 
-module.exports = { register, login, me };
+/**
+ * POST /api/auth/change-password
+ * Body: { current_password, new_password }
+ * Auth: admin only
+ */
+async function changePassword(req, res, next) {
+  try {
+    const { current_password: currentPassword, new_password: newPassword } = req.body || {};
+    const updatedUser = await authService.changeAdminPassword(
+      req.user?.user_id,
+      req.user?.company_id,
+      currentPassword,
+      newPassword
+    );
+    auditService.log(
+      updatedUser.company_id,
+      updatedUser.id,
+      'auth.password.change',
+      'user',
+      updatedUser.id,
+      { email: updatedUser.email, role: updatedUser.role }
+    ).catch(() => {});
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, login, me, changePassword };
