@@ -293,6 +293,21 @@ export default function ReportsPage() {
         margin: { left: 24, right: 24 },
         styles: { fontSize: 7 },
       });
+      if (type === 'payroll') {
+        const netIdx = header.findIndex((h) => String(h).trim().toLowerCase() === 'net salary');
+        const payrollTotal = rows.reduce((sum, row) => {
+          if (netIdx < 0) return sum;
+          const raw = String(row[netIdx] ?? '').replace(/,/g, '');
+          const val = Number(raw);
+          return sum + (Number.isFinite(val) ? val : 0);
+        }, 0);
+        const y = doc.internal.pageSize.getHeight() - 44;
+        doc.setFontSize(18);
+        doc.setFont(undefined, 'bold');
+        doc.text(`TOTAL PAYROLL: INR ${formatMoney(payrollTotal)}`, doc.internal.pageSize.getWidth() - 24, y, {
+          align: 'right',
+        });
+      }
       savePdf(doc, `${type}-${year}-${String(month).padStart(2, '0')}.pdf`);
       setToast({ type: 'success', message: `${type} PDF downloaded` });
     } catch (err) {
