@@ -19,6 +19,27 @@ function formatMonthLabel(year, month) {
   return d.toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
+/** Day of week 0=Sun..6=Sat for a calendar YYYY-MM-DD (local date parts). */
+function dayOfWeekFromYmd(ymd) {
+  const parts = String(ymd || '').slice(0, 10).split('-').map(Number);
+  const [y, m, d] = parts;
+  if (!y || !m || !d) return 0;
+  return new Date(y, m - 1, d).getDay();
+}
+
+function getWeeklyOffDaysForEmployee(employeeRow, shiftById, companyWeeklyOffDays) {
+  const sid = employeeRow?.shift_id != null ? Number(employeeRow.shift_id) : null;
+  if (sid && shiftById.has(sid)) {
+    const arr = shiftById.get(sid).weekly_off_days;
+    if (Array.isArray(arr) && arr.length > 0) {
+      return arr.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
+    }
+  }
+  return Array.isArray(companyWeeklyOffDays)
+    ? companyWeeklyOffDays.map((x) => Number(x)).filter((n) => Number.isInteger(n) && n >= 0 && n <= 6)
+    : [];
+}
+
 export async function generateDetailedAttendancePdf({
   year,
   month,
@@ -26,7 +47,6 @@ export async function generateDetailedAttendancePdf({
   toDate,
   department,
   employeeIds,
-  includeWeekends,
 }) {
   const selectedEmployeeIds = Array.isArray(employeeIds)
     ? employeeIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
@@ -37,7 +57,7 @@ export async function generateDetailedAttendancePdf({
     ...(department ? { department } : {}),
   }).toString();
 
-  const [companyRes, empRes, monthlyRes, holidaysRes] = await Promise.all([
+  const [companyRes, empRes, monthlyRes, holidaysRes, weeklyOffRes, shiftsRes] = await Promise.all([
     authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
     authFetch('/api/employees?limit=500', { headers: { 'Content-Type': 'application/json' } }),
     authFetch(`/api/attendance/monthly?${monthlyQuery}`, {
@@ -46,12 +66,16 @@ export async function generateDetailedAttendancePdf({
     authFetch(`/api/holidays?${new URLSearchParams({ year, month }).toString()}`, {
       headers: { 'Content-Type': 'application/json' },
     }),
+    authFetch('/api/holidays/weekly-off', { headers: { 'Content-Type': 'application/json' } }),
+    authFetch('/api/shifts?limit=100', { headers: { 'Content-Type': 'application/json' } }),
   ]);
 
   const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
   const employeesJson = empRes.ok ? await empRes.json() : { data: { data: [] } };
   const monthlyJson = monthlyRes.ok ? await monthlyRes.json() : { data: null };
   const holidaysJson = holidaysRes.ok ? await holidaysRes.json() : { data: [] };
+  const weeklyOffJson = weeklyOffRes.ok ? await weeklyOffRes.json() : { data: {} };
+  const shiftsJson = shiftsRes.ok ? await shiftsRes.json() : { data: [] };
 
   const company = companyJson.data || {};
   const monthly = monthlyJson.data;
@@ -74,9 +98,24 @@ export async function generateDetailedAttendancePdf({
     throw new Error('No attendance data available for selected filters');
   }
 
-  const holidayByDate = new Map();
+  const companyWeeklyOffDays = weeklyOffJson.data?.days || [];
+  const shiftList = Array.isArray(shiftsJson.data) ? shiftsJson.data : [];
+  const shiftById = new Map(shiftList.map((s) => [Number(s.id), s]));
+
+  /** Named calendar holidays (public / company). */
+  const namedHolidayByDate = new Map();
+  /** Explicit weekly-off rows stored as company_holidays.kind = weekly_off. */
+  const explicitWeeklyOffDates = new Set();
   (holidaysJson.data || []).forEach((h) => {
-    if (h.date) holidayByDate.set(h.date, h.name || 'Holiday');
+    const raw = h.holiday_date ?? h.date;
+    const dateStr = raw ? String(raw).slice(0, 10) : '';
+    if (!dateStr) return;
+    const kind = String(h.kind || 'public').toLowerCase();
+    if (kind === 'weekly_off') {
+      explicitWeeklyOffDates.add(dateStr);
+    } else if (kind === 'public' || kind === 'company') {
+      namedHolidayByDate.set(dateStr, (h.name && String(h.name).trim()) || 'Holiday');
+    }
   });
 
   const periodLabel = fromDate && toDate
@@ -141,6 +180,9 @@ export async function generateDetailedAttendancePdf({
       doc.text(shiftLabel, 32, titleY + 14);
     }
 
+    const empMeta = employeeById.get(Number(emp.employee_id));
+    const weeklyOffDays = getWeeklyOffDaysForEmployee(empMeta, shiftById, companyWeeklyOffDays);
+
     const bodyRows = [];
     (emp.days || []).forEach((day) => {
       const date = day.date;
@@ -150,14 +192,15 @@ export async function generateDetailedAttendancePdf({
 
       const jsDate = new Date(date);
       const weekday = jsDate.toLocaleString('default', { weekday: 'short' });
-      const isWeekend = [0, 6].includes(jsDate.getDay());
-      if (!includeWeekends && isWeekend && !holidayByDate.has(date)) return;
+      const dow = dayOfWeekFromYmd(date);
 
-      const holidayName = holidayByDate.get(date);
+      const holidayName = namedHolidayByDate.get(date);
       let status = 'Absent';
       if (holidayName) {
         status = 'Holiday';
-      } else if (isWeekend) {
+      } else if (explicitWeeklyOffDates.has(date)) {
+        status = 'Weekly Off';
+      } else if (weeklyOffDays.length > 0 && weeklyOffDays.includes(dow)) {
         status = 'Weekly Off';
       } else if (day.present) {
         if (day.half_day) status = 'Half Day';

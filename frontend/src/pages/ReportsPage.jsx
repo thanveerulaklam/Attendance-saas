@@ -98,7 +98,6 @@ export default function ReportsPage() {
   const [selectedEmployeeIds, setSelectedEmployeeIds] = useState([]);
   const [detailedFrom, setDetailedFrom] = useState('');
   const [detailedTo, setDetailedTo] = useState('');
-  const [includeWeekends, setIncludeWeekends] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [payrollEmployees, setPayrollEmployees] = useState([]);
   const [currentMonthPayrollRows, setCurrentMonthPayrollRows] = useState([]);
@@ -511,20 +510,6 @@ export default function ReportsPage() {
                 />
               </div>
             </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                Include weekends
-              </label>
-              <label className="inline-flex items-center gap-2 text-[11px] text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={includeWeekends}
-                  onChange={(e) => setIncludeWeekends(e.target.checked)}
-                  className="rounded border-slate-300 text-blue-600"
-                />
-                <span>Include Saturdays and Sundays in detailed section</span>
-              </label>
-            </div>
           </div>
           <div className="space-y-3">
             <div>
@@ -601,7 +586,6 @@ export default function ReportsPage() {
                       toDate: detailedTo || null,
                       department: detailedDepartment || null,
                       employeeIds: selectedEmployeeIds.length > 0 ? selectedEmployeeIds : null,
-                      includeWeekends,
                     });
                     setToast({ type: 'success', message: 'Detailed attendance PDF generated' });
                   } catch (err) {
