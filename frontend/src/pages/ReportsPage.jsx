@@ -106,6 +106,11 @@ export default function ReportsPage() {
   const [payrollModalPage, setPayrollModalPage] = useState(1);
   const [payrollModalTotal, setPayrollModalTotal] = useState(0);
   const [detailsModal, setDetailsModal] = useState(null); // 'employees' | 'payroll' | null
+  const [reportFormats, setReportFormats] = useState({
+    attendance: 'csv',
+    payroll: 'csv',
+    overtime: 'csv',
+  });
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -301,15 +306,16 @@ export default function ReportsPage() {
           const val = Number(raw);
           return sum + (Number.isFinite(val) ? val : 0);
         }, 0);
+        const marginRight = 24;
+        const marginLeft = 24;
+        const pageWidth = doc.internal.pageSize.getWidth();
         const y = doc.internal.pageSize.getHeight() - 44;
         doc.setFontSize(18);
         doc.setFont(undefined, 'bold');
-        doc.text(
-          `₹${formatMoney(payrollTotal)}`,
-          doc.internal.pageSize.getWidth() - 24,
-          y,
-          { align: 'right' }
-        );
+        const label = `₹${formatMoney(payrollTotal)}`;
+        const textWidth = doc.getTextWidth(label);
+        const xLeft = Math.max(marginLeft, pageWidth - marginRight - textWidth);
+        doc.text(label, xLeft, y);
       }
       savePdf(doc, `${type}-${year}-${String(month).padStart(2, '0')}.pdf`);
       setToast({ type: 'success', message: `${type} PDF downloaded` });
@@ -426,57 +432,80 @@ export default function ReportsPage() {
 
         <h2 className="mt-6 text-sm font-semibold text-slate-900">Download</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
-          Download CSV or PDF for {MONTHS.find((m) => m.value === month)?.label} {year}.
+          Choose a report, pick CSV or PDF, then download for {MONTHS.find((m) => m.value === month)?.label}{' '}
+          {year}.
         </p>
-        <div className="mt-4 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleDownload('attendance')}
-            disabled={loading != null}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
-          >
-            {loading === 'attendance' ? 'Downloading...' : 'Download attendance CSV'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadPdf('attendance')}
-            disabled={loading != null}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
-          >
-            {loading === 'attendance-pdf' ? 'Generating...' : 'Download attendance PDF'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownload('payroll')}
-            disabled={loading != null}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
-          >
-            {loading === 'payroll' ? 'Downloading...' : 'Download payroll CSV'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadPdf('payroll')}
-            disabled={loading != null}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
-          >
-            {loading === 'payroll-pdf' ? 'Generating...' : 'Download payroll PDF'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownload('overtime')}
-            disabled={loading != null}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
-          >
-            {loading === 'overtime' ? 'Downloading...' : 'Download overtime CSV'}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadPdf('overtime')}
-            disabled={loading != null}
-            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
-          >
-            {loading === 'overtime-pdf' ? 'Generating...' : 'Download overtime PDF'}
-          </button>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          {[
+            {
+              key: 'attendance',
+              title: 'Attendance',
+              blurb: 'Present, absent, late days and overtime hours.',
+            },
+            {
+              key: 'payroll',
+              title: 'Payroll',
+              blurb: 'Present/total days, gross, deductions, net salary.',
+            },
+            {
+              key: 'overtime',
+              title: 'Overtime',
+              blurb: 'Overtime hours for the month.',
+            },
+          ].map(({ key, title, blurb }) => {
+            const fmt = reportFormats[key];
+            const busy =
+              loading === key || loading === `${key}-pdf`;
+            return (
+              <div
+                key={key}
+                className="flex flex-col rounded-xl border border-slate-200 bg-slate-50/40 px-4 py-3 shadow-sm"
+              >
+                <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+                <p className="mt-1 flex-1 text-[11px] leading-snug text-slate-500">{blurb}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-4">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                    <input
+                      type="radio"
+                      name={`report-fmt-${key}`}
+                      className="border-slate-300 text-blue-600"
+                      checked={fmt === 'csv'}
+                      onChange={() =>
+                        setReportFormats((prev) => ({ ...prev, [key]: 'csv' }))
+                      }
+                    />
+                    CSV
+                  </label>
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                    <input
+                      type="radio"
+                      name={`report-fmt-${key}`}
+                      className="border-slate-300 text-blue-600"
+                      checked={fmt === 'pdf'}
+                      onChange={() =>
+                        setReportFormats((prev) => ({ ...prev, [key]: 'pdf' }))
+                      }
+                    />
+                    PDF
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  disabled={loading != null}
+                  onClick={() => {
+                    if (fmt === 'csv') {
+                      void handleDownload(key)();
+                    } else {
+                      void handleDownloadPdf(key)();
+                    }
+                  }}
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
+                >
+                  {busy ? (fmt === 'pdf' ? 'Generating...' : 'Downloading...') : 'Download'}
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         <div className="mt-6 rounded-lg border border-slate-100 bg-slate-50/60 px-3 py-2 text-[11px] text-slate-600">
