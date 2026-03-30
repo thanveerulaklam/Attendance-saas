@@ -231,16 +231,12 @@ function buildPayrollPdfDocument(rows, payrollMode, company, periodLabel) {
     margin: { left: 24, right: 24 },
     styles: { fontSize: 7 },
   });
-  const marginRight = 24;
-  const marginLeft = 24;
   const pageWidth = doc.internal.pageSize.getWidth();
   const y = doc.internal.pageSize.getHeight() - 44;
   doc.setFontSize(18);
   doc.setFont(undefined, 'bold');
-  const label = `₹${formatMoney(netTotal)}`;
-  const textWidth = doc.getTextWidth(label);
-  const xLeft = Math.max(marginLeft, pageWidth - marginRight - textWidth);
-  doc.text(label, xLeft, y);
+  const label = `INR: ${formatMoney(netTotal)}`;
+  doc.text(label, pageWidth * 0.75, y, { align: 'center' });
   return doc;
 }
 

@@ -306,16 +306,12 @@ export default function ReportsPage() {
           const val = Number(raw);
           return sum + (Number.isFinite(val) ? val : 0);
         }, 0);
-        const marginRight = 24;
-        const marginLeft = 24;
         const pageWidth = doc.internal.pageSize.getWidth();
         const y = doc.internal.pageSize.getHeight() - 44;
         doc.setFontSize(18);
         doc.setFont(undefined, 'bold');
-        const label = `₹${formatMoney(payrollTotal)}`;
-        const textWidth = doc.getTextWidth(label);
-        const xLeft = Math.max(marginLeft, pageWidth - marginRight - textWidth);
-        doc.text(label, xLeft, y);
+        const label = `INR: ${formatMoney(payrollTotal)}`;
+        doc.text(label, pageWidth * 0.75, y, { align: 'center' });
       }
       savePdf(doc, `${type}-${year}-${String(month).padStart(2, '0')}.pdf`);
       setToast({ type: 'success', message: `${type} PDF downloaded` });
