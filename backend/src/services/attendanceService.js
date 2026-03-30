@@ -870,7 +870,7 @@ async function getMonthlyAttendance(
           nowMs
         );
         const total_hours_from_shift_start =
-          shiftConfig.attendanceMode === 'shift_based'
+          shiftConfig.attendanceMode !== 'hours_based'
             ? Math.round((workedMsFromShiftStart / (60 * 60 * 1000)) * 100) / 100
             : null;
         days.push({

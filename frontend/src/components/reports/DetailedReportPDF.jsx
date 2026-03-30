@@ -4,10 +4,10 @@ import { formatIstTime } from '../../utils/istDisplay';
 
 function formatTotalHoursForPdf(day) {
   if (!day) return '';
-  if (day.attendance_mode === 'hours_based' && day.total_hours_inside != null) {
+  if (day.total_hours_inside != null) {
     return `${day.total_hours_inside} h`;
   }
-  if (day.attendance_mode === 'shift_based' && day.total_hours_from_shift_start != null) {
+  if (day.total_hours_from_shift_start != null) {
     return `${day.total_hours_from_shift_start} h`;
   }
   return '';
