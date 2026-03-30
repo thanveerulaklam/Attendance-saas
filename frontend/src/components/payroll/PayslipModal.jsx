@@ -133,6 +133,21 @@ export default function PayslipModal({
 }) {
   const periodLabel = useMemo(() => {
     if (!payrollRow) return '';
+    if (payrollRow.week_start_date && payrollRow.week_end_date) {
+      const s = new Date(`${payrollRow.week_start_date}T00:00:00`);
+      const e = new Date(`${payrollRow.week_end_date}T00:00:00`);
+      if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return '—';
+
+      const sLabel = s.toLocaleString('default', { day: '2-digit', month: 'short' });
+      const eLabel = e.toLocaleString('default', { day: '2-digit', month: 'short' });
+      const sYear = s.getFullYear();
+      const eYear = e.getFullYear();
+      if (sYear !== eYear) {
+        return `${sLabel} ${sYear} — ${eLabel} ${eYear}`;
+      }
+      return `${sLabel} — ${eLabel} ${sYear}`;
+    }
+
     const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
     return d.toLocaleString('default', { month: 'long', year: 'numeric' });
   }, [payrollRow]);
@@ -169,7 +184,7 @@ export default function PayslipModal({
     y += 12;
     doc.setFontSize(9);
     doc.setFont(undefined, 'normal');
-    doc.text(`Month: ${periodLabel}`, pageWidth / 2, y, { align: 'center' });
+    doc.text(`Period: ${periodLabel}`, pageWidth / 2, y, { align: 'center' });
 
     y += 20;
     doc.setFontSize(10);
@@ -262,8 +277,12 @@ export default function PayslipModal({
 
     const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
     const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
-    const monthStr = d.toLocaleString('default', { month: 'short', year: 'numeric' }).replace(/\s+/g, '');
-    const filename = `PunchPay_${safeName}_${monthStr}.pdf`;
+    let filename = `PunchPay_${safeName}_${periodLabel.replace(/\s+/g, '').replace(/[—–-]/g, '_')}.pdf`;
+    // Preserve existing monthly filename behavior
+    if (payrollRow.year && payrollRow.month) {
+      const monthStr = d.toLocaleString('default', { month: 'short', year: 'numeric' }).replace(/\s+/g, '');
+      filename = `PunchPay_${safeName}_${monthStr}.pdf`;
+    }
     savePdf(doc, filename);
   };
 
@@ -339,7 +358,7 @@ punchpay.in
             <p className="mt-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               PAYSLIP
             </p>
-            <p className="mt-0.5 text-[11px] text-slate-500">Month: {periodLabel}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">Period: {periodLabel}</p>
           </header>
 
           <section className="grid gap-4 rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 text-[11px] text-slate-700 sm:grid-cols-2">

@@ -77,9 +77,9 @@ async function getOnboardingStatus(companyId) {
 
       // Payroll records
       client.query(
-        `SELECT COUNT(*) AS count
-         FROM payroll_records
-         WHERE company_id = $1`,
+        `SELECT
+           (SELECT COUNT(*) FROM payroll_records pr WHERE pr.company_id = $1) +
+           (SELECT COUNT(*) FROM weekly_payroll_records wr WHERE wr.company_id = $1) AS count`,
         [companyId]
       ),
     ]);

@@ -1,6 +1,7 @@
 const { AppError } = require('../utils/AppError');
 
 const STATUS_VALUES = ['active', 'inactive'];
+const PAYROLL_FREQUENCY_VALUES = ['monthly', 'weekly'];
 
 const isValidDate = (value) => {
   const date = new Date(value);
@@ -50,6 +51,16 @@ const validateCreateEmployee = (payload = {}) => {
     } else if (!STATUS_VALUES.includes(payload.status)) {
       errors.status = `Status must be one of: ${STATUS_VALUES.join(', ')}.`;
     }
+  }
+
+  // Default to monthly if not provided
+  const payrollFrequencyRaw =
+    payload.payroll_frequency == null || payload.payroll_frequency === ''
+      ? 'monthly'
+      : payload.payroll_frequency;
+  const payrollFrequency = String(payrollFrequencyRaw).toLowerCase();
+  if (!PAYROLL_FREQUENCY_VALUES.includes(payrollFrequency)) {
+    errors.payroll_frequency = `payroll_frequency must be one of: ${PAYROLL_FREQUENCY_VALUES.join(', ')}`;
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'shift_id')) {
@@ -132,6 +143,7 @@ const validateCreateEmployee = (payload = {}) => {
     basic_salary: Number(payload.basic_salary),
     join_date: new Date(payload.join_date),
     status: payload.status || 'active',
+    payroll_frequency: payrollFrequency,
   };
   if (Object.prototype.hasOwnProperty.call(payload, 'shift_id')) {
     result.shift_id =
@@ -245,6 +257,16 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.status = `Status must be one of: ${STATUS_VALUES.join(', ')}.`;
     } else {
       clean.status = payload.status;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'payroll_frequency')) {
+    const raw = payload.payroll_frequency;
+    const pf = raw == null || raw === '' ? 'monthly' : String(raw).toLowerCase();
+    if (!PAYROLL_FREQUENCY_VALUES.includes(pf)) {
+      errors.payroll_frequency = `payroll_frequency must be one of: ${PAYROLL_FREQUENCY_VALUES.join(', ')}`;
+    } else {
+      clean.payroll_frequency = pf;
     }
   }
 

@@ -25,12 +25,52 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+function toYmdLocal(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getSundayYmd(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay(); // 0=Sun..6=Sat
+  d.setDate(d.getDate() - day);
+  return toYmdLocal(d);
+}
+
+function snapToSundayYmd(ymdStr) {
+  const raw = String(ymdStr || '').slice(0, 10);
+  if (!raw) return getSundayYmd(new Date());
+  const d = new Date(`${raw}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return getSundayYmd(new Date());
+  return getSundayYmd(d);
+}
+
+function formatWeekLabel(weekStartDate, weekEndDate) {
+  if (!weekStartDate || !weekEndDate) return '—';
+  const s = new Date(`${weekStartDate}T00:00:00`);
+  const e = new Date(`${weekEndDate}T00:00:00`);
+  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return '—';
+
+  const sLabel = s.toLocaleString('default', { day: '2-digit', month: 'short' });
+  const eLabel = e.toLocaleString('default', { day: '2-digit', month: 'short' });
+  const sYear = s.getFullYear();
+  const eYear = e.getFullYear();
+  if (sYear !== eYear) {
+    return `${sLabel} ${sYear} — ${eLabel} ${eYear}`;
+  }
+  return `${sLabel} — ${eLabel} ${sYear}`;
+}
+
 export default function PayrollPage() {
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [payrollMode, setPayrollMode] = useState('monthly'); // 'monthly' | 'weekly'
   const [year, setYear] = useState(currentYear());
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
+  const [weekStartDate, setWeekStartDate] = useState(getSundayYmd(new Date()));
   const [employeeId, setEmployeeId] = useState('');
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -43,14 +83,17 @@ export default function PayrollPage() {
     treatHolidayAdjacentAbsenceAsWorking: false,
     noLeaveIncentive: '',
   });
+  const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
+    includeOvertime: true,
+    treatHolidayAdjacentAbsenceAsWorking: false,
+    applyAdvanceRepayments: true,
+  });
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState(null);
   const [company, setCompany] = useState(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailRow, setDetailRow] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
-  const [breakdownLoading, setBreakdownLoading] = useState(false);
-  const [breakdownError, setBreakdownError] = useState(null);
   const [attendanceMeta, setAttendanceMeta] = useState(null);
 
   const subscription = getSubscriptionStatus(company);
@@ -86,13 +129,18 @@ export default function PayrollPage() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    params.set('year', String(year));
-    if (month) params.set('month', month);
+    if (payrollMode === 'monthly') {
+      params.set('year', String(year));
+      if (month) params.set('month', month);
+    } else {
+      params.set('week_start_date', String(weekStartDate));
+    }
     params.set('page', String(page));
     params.set('limit', String(PAGE_SIZE));
     if (employeeId) params.set('employee_id', employeeId);
 
-    authFetch(`/api/payroll?${params}`, {
+    const url = payrollMode === 'monthly' ? `/api/payroll?${params}` : `/api/payroll/weekly?${params}`;
+    authFetch(url, {
       headers: { 'Content-Type': 'application/json' },
     })
       .then((res) => {
@@ -115,114 +163,150 @@ export default function PayrollPage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [year, month, page, employeeId]);
+  }, [payrollMode, year, month, weekStartDate, page, employeeId]);
 
   useEffect(() => {
     if (!detailModalOpen || !detailRow) return;
     let isMounted = true;
     setBreakdown(null);
-    setBreakdownError(null);
-    setBreakdownLoading(true);
-    const params = new URLSearchParams({
-      employee_id: String(detailRow.employee_id),
-      year: String(detailRow.year),
-      month: String(detailRow.month),
-    });
-    authFetch(`/api/payroll/breakdown?${params}`, { headers: { 'Content-Type': 'application/json' } })
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load details');
-        return res.json();
-      })
-      .then(async (json) => {
-        if (!isMounted) return;
-        setBreakdown(json.data);
-        try {
-          const monthlyParams = new URLSearchParams({
-            year: String(detailRow.year),
-            month: String(detailRow.month),
+    (async () => {
+      try {
+        if (payrollMode === 'weekly') {
+          const params = new URLSearchParams({
             employee_id: String(detailRow.employee_id),
+            week_start_date: String(detailRow.week_start_date),
           });
-          const monthlyRes = await authFetch(`/api/attendance/monthly?${monthlyParams}`, {
+
+          const res = await authFetch(`/api/payroll/weekly/breakdown?${params}`, {
             headers: { 'Content-Type': 'application/json' },
           });
-          const holidayParams = new URLSearchParams({
-            year: String(detailRow.year),
-            month: String(detailRow.month),
-          });
-          const holidaysRes = await authFetch(`/api/holidays?${holidayParams}`, {
-            headers: { 'Content-Type': 'application/json' },
-          });
-          const empMeta = {
-            designation: null,
-            department: null,
-            join_date: null,
-            shift_name: null,
-            phone: null,
-            absentDates: [],
-            halfDayDates: [],
-            lateDetails: [],
-            lateCount: 0,
-            halfDayCount: 0,
-          };
-          if (monthlyRes.ok) {
-            const monthlyJson = await monthlyRes.json();
-            const data = monthlyJson.data;
-            const employee = Array.isArray(data?.employees) ? data.employees[0] : null;
-            const holidayJson = holidaysRes.ok ? await holidaysRes.json() : { data: [] };
-            const holidayDateSet = new Set(
-              (holidayJson.data || [])
-                .map((h) => (h?.holiday_date || h?.date || '').slice(0, 10))
-                .filter(Boolean)
-            );
-            if (employee) {
-              const days = employee.days || [];
-              empMeta.absentDates = days
-                .filter((d) => !d.present && !holidayDateSet.has(d.date))
-                .map((d) => d.date);
-              empMeta.halfDayDates = days
-                .filter((d) => d.half_day && !holidayDateSet.has(d.date))
-                .map((d) => d.date);
-              empMeta.halfDayCount = empMeta.halfDayDates.length;
-              empMeta.lateDetails = days
-                .filter((d) => d.late && !holidayDateSet.has(d.date))
-                .map((d) => ({
-                  date: d.date,
-                  minutes: d.minutes_late || null,
-                }));
-              empMeta.lateCount = empMeta.lateDetails.length;
-            }
-          }
+          if (!res.ok) throw new Error('Failed to load details');
+          const json = await res.json();
+          if (!isMounted) return;
+          setBreakdown(json.data);
+
+          // Minimal attendance metadata for the payslip modal (no weekly attendance/holiday endpoint yet)
           const empRes = await authFetch(`/api/employees/${detailRow.employee_id}`, {
             headers: { 'Content-Type': 'application/json' },
           });
-          if (empRes.ok) {
-            const empJson = await empRes.json();
-            const e = empJson.data;
-            if (e) {
-              empMeta.designation = e.designation || null;
-              empMeta.department = e.department || null;
-              empMeta.join_date = e.join_date || null;
-              empMeta.shift_name = e.shift_name || null;
-              empMeta.phone = e.phone || null;
+          const empJson = empRes.ok ? await empRes.json() : null;
+          const e = empJson?.data || null;
+          const att = json.data?.attendance || {};
+
+          setAttendanceMeta({
+            designation: e?.designation || null,
+            department: e?.department || null,
+            join_date: e?.join_date || null,
+            shift_name: e?.shift_name || null,
+            phone: e?.phone || null,
+            absentDates: [],
+            halfDayDates: [],
+            lateDetails: [],
+            lateCount: att.lateDays ?? 0,
+            halfDayCount: undefined,
+          });
+        } else {
+          const params = new URLSearchParams({
+            employee_id: String(detailRow.employee_id),
+            year: String(detailRow.year),
+            month: String(detailRow.month),
+          });
+
+          const res = await authFetch(`/api/payroll/breakdown?${params}`, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (!res.ok) throw new Error('Failed to load details');
+          const json = await res.json();
+          if (!isMounted) return;
+          setBreakdown(json.data);
+
+          try {
+            const monthlyParams = new URLSearchParams({
+              year: String(detailRow.year),
+              month: String(detailRow.month),
+              employee_id: String(detailRow.employee_id),
+            });
+            const monthlyRes = await authFetch(`/api/attendance/monthly?${monthlyParams}`, {
+              headers: { 'Content-Type': 'application/json' },
+            });
+            const holidayParams = new URLSearchParams({
+              year: String(detailRow.year),
+              month: String(detailRow.month),
+            });
+            const holidaysRes = await authFetch(`/api/holidays?${holidayParams}`, {
+              headers: { 'Content-Type': 'application/json' },
+            });
+            const empMeta = {
+              designation: null,
+              department: null,
+              join_date: null,
+              shift_name: null,
+              phone: null,
+              absentDates: [],
+              halfDayDates: [],
+              lateDetails: [],
+              lateCount: 0,
+              halfDayCount: 0,
+            };
+            if (monthlyRes.ok) {
+              const monthlyJson = await monthlyRes.json();
+              const data = monthlyJson.data;
+              const employee = Array.isArray(data?.employees) ? data.employees[0] : null;
+              const holidayJson = holidaysRes.ok ? await holidaysRes.json() : { data: [] };
+              const holidayDateSet = new Set(
+                (holidayJson.data || [])
+                  .map((h) => (h?.holiday_date || h?.date || '').slice(0, 10))
+                  .filter(Boolean)
+              );
+              if (employee) {
+                const days = employee.days || [];
+                empMeta.absentDates = days
+                  .filter((d) => !d.present && !holidayDateSet.has(d.date))
+                  .map((d) => d.date);
+                empMeta.halfDayDates = days
+                  .filter((d) => d.half_day && !holidayDateSet.has(d.date))
+                  .map((d) => d.date);
+                empMeta.halfDayCount = empMeta.halfDayDates.length;
+                empMeta.lateDetails = days
+                  .filter((d) => d.late && !holidayDateSet.has(d.date))
+                  .map((d) => ({
+                    date: d.date,
+                    minutes: d.minutes_late || null,
+                  }));
+                empMeta.lateCount = empMeta.lateDetails.length;
+              }
+            }
+            const empRes = await authFetch(`/api/employees/${detailRow.employee_id}`, {
+              headers: { 'Content-Type': 'application/json' },
+            });
+            if (empRes.ok) {
+              const empJson = await empRes.json();
+              const e = empJson.data;
+              if (e) {
+                empMeta.designation = e.designation || null;
+                empMeta.department = e.department || null;
+                empMeta.join_date = e.join_date || null;
+                empMeta.shift_name = e.shift_name || null;
+                empMeta.phone = e.phone || null;
+              }
+            }
+            if (isMounted) {
+              setAttendanceMeta(empMeta);
+            }
+          } catch {
+            if (isMounted) {
+              setAttendanceMeta(null);
             }
           }
-          if (isMounted) {
-            setAttendanceMeta(empMeta);
-          }
-        } catch {
-          if (isMounted) {
-            setAttendanceMeta(null);
-          }
         }
-      })
-      .catch((err) => {
-        if (isMounted) setBreakdownError(err.message || 'Unable to load breakdown');
-      })
-      .finally(() => {
-        if (isMounted) setBreakdownLoading(false);
-      });
+      } catch {
+        if (isMounted) setAttendanceMeta(null);
+      } finally {
+        // nothing to do: modal rendering is driven by `breakdown` existence
+      }
+    })();
     return () => { isMounted = false; };
-  }, [detailModalOpen, detailRow]);
+  }, [detailModalOpen, detailRow, payrollMode]);
 
   const openDetailModal = (row) => {
     setDetailRow(row);
@@ -233,41 +317,110 @@ export default function PayrollPage() {
     setDetailModalOpen(false);
     setDetailRow(null);
     setBreakdown(null);
-    setBreakdownError(null);
     setAttendanceMeta(null);
   };
 
-  const activeCount = employees.filter((e) => e.status === 'active').length;
+  const activeMonthlyCount = employees.filter(
+    (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'monthly'
+  ).length;
+  const activeWeeklyCount = employees.filter(
+    (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'weekly'
+  ).length;
+  const activeCount = payrollMode === 'monthly' ? activeMonthlyCount : activeWeeklyCount;
 
   const handleGenerateAll = async (e) => {
     e.preventDefault();
-    const { year: y, month: m } = generateForm;
-    if (!y || !m) {
-      setToast({ type: 'error', message: 'Select year and month' });
+    if (payrollMode === 'monthly') {
+      const { year: y, month: m } = generateForm;
+      if (!y || !m) {
+        setToast({ type: 'error', message: 'Select year and month' });
+        return;
+      }
+
+      const confirmed = window.confirm(
+        `Generate payroll for all ${activeCount} active employees for ${new Date(2000, Number(m) - 1, 1).toLocaleString('default', { month: 'long' })} ${y}? This will create or update records from current attendance.`
+      );
+      if (!confirmed) return;
+
+      try {
+        setGenerating(true);
+        setToast(null);
+        const res = await authFetch('/api/payroll/generate-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            year: Number(y),
+            month: Number(m),
+            include_overtime: generateForm.includeOvertime !== false,
+            treat_holiday_adjacent_absence_as_working:
+              generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
+            no_leave_incentive: Math.max(
+              0,
+              Number(generateForm.noLeaveIncentive) || 0
+            ),
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const msg =
+            errData.code === 'SUBSCRIPTION_EXPIRED'
+              ? errData.message
+              : errData.message || 'Failed to generate payroll';
+          throw new Error(msg);
+        }
+        const json = await res.json();
+        const data = json.data || {};
+        const generated = data.generated ?? 0;
+        const failed = data.failed ?? 0;
+        setModalOpen(false);
+        const successMsg =
+          failed > 0
+            ? `Payroll generated for ${generated} employees. ${failed} failed.`
+            : `Payroll generated for ${generated} employee${
+                generated !== 1 ? 's' : ''
+              }.`;
+        setToast({ type: 'success', message: successMsg });
+        setPage(1);
+        setYear(Number(y));
+        setMonth(m);
+        setEmployeeId('');
+      } catch (err) {
+        setToast({
+          type: 'error',
+          message: err.message || 'Failed to generate payroll',
+        });
+      } finally {
+        setGenerating(false);
+      }
       return;
     }
+
+    // weekly
     const confirmed = window.confirm(
-      `Generate payroll for all ${activeCount} active employees for ${new Date(2000, Number(m) - 1, 1).toLocaleString('default', { month: 'long' })} ${y}? This will create or update records from current attendance.`
+      `Generate weekly payroll for all ${activeCount} active weekly employees for week starting ${weekStartDate}? This will create or update records from current attendance.`
     );
     if (!confirmed) return;
 
     try {
       setGenerating(true);
       setToast(null);
-      const res = await authFetch('/api/payroll/generate-all', {
+      const res = await authFetch('/api/payroll/generate-all-weekly', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          year: Number(y),
-          month: Number(m),
-          include_overtime: generateForm.includeOvertime !== false,
-          treat_holiday_adjacent_absence_as_working: generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
-          no_leave_incentive: Math.max(0, Number(generateForm.noLeaveIncentive) || 0),
+          week_start_date: weekStartDate,
+          include_overtime: weeklyGenerateForm.includeOvertime !== false,
+          treat_holiday_adjacent_absence_as_working:
+            weeklyGenerateForm.treatHolidayAdjacentAbsenceAsWorking === true,
+          apply_advance_repayments: weeklyGenerateForm.applyAdvanceRepayments === true,
         }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        const msg = errData.code === 'SUBSCRIPTION_EXPIRED' ? errData.message : (errData.message || 'Failed to generate payroll');
+        const msg =
+          errData.code === 'SUBSCRIPTION_EXPIRED'
+            ? errData.message
+            : errData.message || 'Failed to generate weekly payroll';
         throw new Error(msg);
       }
       const json = await res.json();
@@ -277,15 +430,18 @@ export default function PayrollPage() {
       setModalOpen(false);
       const successMsg =
         failed > 0
-          ? `Payroll generated for ${generated} employees. ${failed} failed.`
-          : `Payroll generated for ${generated} employee${generated !== 1 ? 's' : ''}.`;
+          ? `Weekly payroll generated for ${generated} employees. ${failed} failed.`
+          : `Weekly payroll generated for ${generated} employee${
+              generated !== 1 ? 's' : ''
+            }.`;
       setToast({ type: 'success', message: successMsg });
       setPage(1);
-      setYear(Number(y));
-      setMonth(m);
       setEmployeeId('');
     } catch (err) {
-      setToast({ type: 'error', message: err.message || 'Failed to generate payroll' });
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to generate weekly payroll',
+      });
     } finally {
       setGenerating(false);
     }
@@ -344,29 +500,87 @@ export default function PayrollPage() {
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
-            <label className="text-[11px] font-medium text-slate-600">Year</label>
-            <select
-              value={year}
-              onChange={(e) => { setYear(Number(e.target.value)); setPage(1); }}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
+            <button
+              type="button"
+              onClick={() => {
+                setPayrollMode('monthly');
+                setPage(1);
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                payrollMode === 'monthly'
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
             >
-              {[currentYear(), currentYear() - 1, currentYear() - 2].map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-[11px] font-medium text-slate-600">Month</label>
-            <select
-              value={month}
-              onChange={(e) => { setMonth(e.target.value); setPage(1); }}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
+              Monthly
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPayrollMode('weekly');
+                setPage(1);
+              }}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                payrollMode === 'weekly'
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+              }`}
             >
-              {MONTHS.map((m) => (
-                <option key={m.value || 'all'} value={m.value}>{m.label}</option>
-              ))}
-            </select>
+              Weekly
+            </button>
           </div>
+
+          {payrollMode === 'monthly' ? (
+            <>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] font-medium text-slate-600">Year</label>
+                <select
+                  value={year}
+                  onChange={(e) => {
+                    setYear(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
+                >
+                  {[currentYear(), currentYear() - 1, currentYear() - 2].map((y) => (
+                    <option key={y} value={y}>
+                      {y}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-[11px] font-medium text-slate-600">Month</label>
+                <select
+                  value={month}
+                  onChange={(e) => {
+                    setMonth(e.target.value);
+                    setPage(1);
+                  }}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
+                >
+                  {MONTHS.map((m) => (
+                    <option key={m.value || 'all'} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-medium text-slate-600">Week start</label>
+              <input
+                type="date"
+                value={weekStartDate}
+                onChange={(e) => {
+                  setWeekStartDate(snapToSundayYmd(e.target.value));
+                  setPage(1);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"
+              />
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <label className="text-[11px] font-medium text-slate-600">Employee</label>
             <select
@@ -430,7 +644,12 @@ export default function PayrollPage() {
                         <span className="ml-1 text-slate-500">({row.employee_code})</span>
                       </td>
                       <td className="py-3 pr-3 text-slate-700">
-                        {new Date(row.year, row.month - 1, 1).toLocaleString('default', { month: 'short', year: 'numeric' })}
+                        {payrollMode === 'monthly'
+                          ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+                              month: 'short',
+                              year: 'numeric',
+                            })
+                          : formatWeekLabel(row.week_start_date, row.week_end_date)}
                       </td>
                       <td className="py-3 pr-3 text-right text-slate-700">
                         {row.present_days} / {row.total_days}
@@ -494,45 +713,82 @@ export default function PayrollPage() {
       {modalOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40">
           <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
-            <h2 className="text-sm font-semibold text-slate-900">Generate payroll for all</h2>
+            <h2 className="text-sm font-semibold text-slate-900">
+              {payrollMode === 'monthly' ? 'Generate payroll for all' : 'Generate weekly payroll for all'}
+            </h2>
             <p className="mt-1 text-[11px] text-slate-500">
               {activeCount > 0
-                ? `Create or update payroll for all ${activeCount} active employees for the selected month. Uses current attendance data.`
-                : 'No active employees. Add active employees to generate payroll.'}
+                ? payrollMode === 'monthly'
+                  ? `Create or update payroll for all ${activeCount} active employees for the selected month. Uses current attendance data.`
+                  : `Create or update weekly payroll for all ${activeCount} active weekly employees starting from ${weekStartDate}. Uses current attendance data.`
+                : 'No eligible employees. Add active employees to generate payroll.'}
             </p>
             <form onSubmit={handleGenerateAll} className="mt-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-medium text-slate-700">Year</label>
-                  <select
-                    value={generateForm.year}
-                    onChange={(e) => setGenerateForm((f) => ({ ...f, year: e.target.value }))}
-                    className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
-                  >
-                    {[currentYear(), currentYear() - 1].map((y) => (
-                      <option key={y} value={y}>{y}</option>
-                    ))}
-                  </select>
+              {payrollMode === 'monthly' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-700">Year</label>
+                    <select
+                      value={generateForm.year}
+                      onChange={(e) =>
+                        setGenerateForm((f) => ({ ...f, year: e.target.value }))
+                      }
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+                    >
+                      {[currentYear(), currentYear() - 1].map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-700">Month</label>
+                    <select
+                      value={generateForm.month}
+                      onChange={(e) =>
+                        setGenerateForm((f) => ({ ...f, month: e.target.value }))
+                      }
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+                    >
+                      {MONTHS.filter((m) => m.value).map((m) => (
+                        <option key={m.value} value={m.value}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[11px] font-medium text-slate-700">Month</label>
-                  <select
-                    value={generateForm.month}
-                    onChange={(e) => setGenerateForm((f) => ({ ...f, month: e.target.value }))}
-                    className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
-                  >
-                    {MONTHS.filter((m) => m.value).map((m) => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                  </select>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                  <div>
+                    <label className="text-[11px] font-medium text-slate-700">Week start (Sunday)</label>
+                    <input
+                      type="date"
+                      value={weekStartDate}
+                      onChange={(e) => setWeekStartDate(snapToSundayYmd(e.target.value))}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
               <div className="space-y-2 border-t border-slate-100 pt-3">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={generateForm.includeOvertime}
-                    onChange={(e) => setGenerateForm((f) => ({ ...f, includeOvertime: e.target.checked }))}
+                    checked={
+                      payrollMode === 'monthly'
+                        ? generateForm.includeOvertime
+                        : weeklyGenerateForm.includeOvertime
+                    }
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (payrollMode === 'monthly') {
+                        setGenerateForm((f) => ({ ...f, includeOvertime: checked }));
+                      } else {
+                        setWeeklyGenerateForm((f) => ({ ...f, includeOvertime: checked }));
+                      }
+                    }}
                     className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
                   <span className="text-[11px] text-slate-700">Include overtime in pay</span>
@@ -540,8 +796,25 @@ export default function PayrollPage() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={generateForm.treatHolidayAdjacentAbsenceAsWorking}
-                    onChange={(e) => setGenerateForm((f) => ({ ...f, treatHolidayAdjacentAbsenceAsWorking: e.target.checked }))}
+                    checked={
+                      payrollMode === 'monthly'
+                        ? generateForm.treatHolidayAdjacentAbsenceAsWorking
+                        : weeklyGenerateForm.treatHolidayAdjacentAbsenceAsWorking
+                    }
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (payrollMode === 'monthly') {
+                        setGenerateForm((f) => ({
+                          ...f,
+                          treatHolidayAdjacentAbsenceAsWorking: checked,
+                        }));
+                      } else {
+                        setWeeklyGenerateForm((f) => ({
+                          ...f,
+                          treatHolidayAdjacentAbsenceAsWorking: checked,
+                        }));
+                      }
+                    }}
                     className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
                   <span className="text-[11px] text-slate-700">Treat holiday as working day when adjacent day is absent</span>
@@ -550,21 +823,49 @@ export default function PayrollPage() {
                   If enabled, e.g. Sunday is holiday and staff is absent Monday, both Sunday and Monday count as absent (2 days).
                 </p>
               </div>
-              <div>
-                <label className="text-[11px] font-medium text-slate-700">Incentive for no leave (₹)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0"
-                  value={generateForm.noLeaveIncentive}
-                  onChange={(e) => setGenerateForm((f) => ({ ...f, noLeaveIncentive: e.target.value }))}
-                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
-                />
-                <p className="text-[10px] text-slate-500 mt-0.5">
-                  Added to staff present all working days. Applies only when the month is complete (run at month-end).
-                </p>
-              </div>
+              {payrollMode === 'monthly' ? (
+                <div>
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Incentive for no leave (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    placeholder="0"
+                    value={generateForm.noLeaveIncentive}
+                    onChange={(e) =>
+                      setGenerateForm((f) => ({ ...f, noLeaveIncentive: e.target.value }))
+                    }
+                    className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    Added to staff present all working days. Applies only when the month is complete (run at month-end).
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={weeklyGenerateForm.applyAdvanceRepayments === true}
+                      onChange={(e) =>
+                        setWeeklyGenerateForm((f) => ({
+                          ...f,
+                          applyAdvanceRepayments: e.target.checked,
+                        }))
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      Apply advance repayments now
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-500">
+                    If unchecked, advance repayments remain pending and can be deducted in a later week.
+                  </p>
+                </div>
+              )}
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
@@ -579,7 +880,7 @@ export default function PayrollPage() {
                   disabled={generating || activeCount === 0}
                   className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {generating ? 'Generating...' : 'Generate for all'}
+                  {generating ? 'Generating...' : payrollMode === 'monthly' ? 'Generate for all' : 'Generate weekly for all'}
                 </button>
               </div>
             </form>

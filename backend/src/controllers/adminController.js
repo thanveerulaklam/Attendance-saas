@@ -83,9 +83,16 @@ async function getAdminOverview(req, res, next) {
            WHERE d.company_id = c.id
          ) AS last_device_sync_at,
          (
-           SELECT MAX(p.generated_at)
-           FROM payroll_records p
-           WHERE p.company_id = c.id
+          SELECT MAX(at)
+          FROM (
+            SELECT MAX(p.generated_at) AS at
+            FROM payroll_records p
+            WHERE p.company_id = c.id
+            UNION ALL
+            SELECT MAX(w.generated_at) AS at
+            FROM weekly_payroll_records w
+            WHERE w.company_id = c.id
+          ) x
          ) AS last_payroll_generated_at,
          (
            SELECT MAX(a.created_at)

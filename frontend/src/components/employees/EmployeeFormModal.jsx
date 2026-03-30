@@ -28,6 +28,7 @@ export default function EmployeeFormModal({
   const [status, setStatus] = useState('active');
   const [shiftId, setShiftId] = useState('');
   const [branchId, setBranchId] = useState('');
+  const [payrollFrequency, setPayrollFrequency] = useState('monthly');
 
   const [shifts, setShifts] = useState([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
@@ -92,6 +93,7 @@ export default function EmployeeFormModal({
         setBranchId(
           employee.branch_id != null ? String(employee.branch_id) : ''
         );
+        setPayrollFrequency(employee.payroll_frequency || 'monthly');
       } else {
         setName('');
         setEmployeeCode('');
@@ -106,6 +108,7 @@ export default function EmployeeFormModal({
         setStatus('active');
         setShiftId('');
         setBranchId('');
+        setPayrollFrequency('monthly');
       }
       setErrors({});
       setToast(null);
@@ -215,6 +218,7 @@ export default function EmployeeFormModal({
         join_date: joinDate,
         status,
         shift_id: shiftId === '' ? null : Number(shiftId),
+        payroll_frequency: payrollFrequency,
       };
 
       const resolvedBranch =
@@ -574,6 +578,20 @@ export default function EmployeeFormModal({
             {errors.shift_id && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.shift_id}</p>
             )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              Payroll frequency
+              <select
+                value={payrollFrequency}
+                onChange={(e) => setPayrollFrequency(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+              >
+                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </label>
           </div>
         </form>
 

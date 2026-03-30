@@ -1,4 +1,13 @@
-const { generateMonthlyPayroll, generateMonthlyPayrollForAllActive, listPayrollRecords, getPayrollBreakdown } = require('../services/payrollService');
+const {
+  generateMonthlyPayroll,
+  generateMonthlyPayrollForAllActive,
+  listPayrollRecords,
+  getPayrollBreakdown,
+  generateWeeklyPayroll,
+  generateWeeklyPayrollForAllActive,
+  listWeeklyPayrollRecords,
+  getWeeklyPayrollBreakdown,
+} = require('../services/payrollService');
 const auditService = require('../services/auditService');
 
 /**
@@ -170,5 +179,180 @@ async function breakdown(req, res, next) {
   }
 }
 
-module.exports = { list, generate, generateAll, breakdown };
+/**
+ * GET /api/payroll/weekly
+ * Query: week_start_date?, page?, limit?, employee_id?
+ */
+async function listWeekly(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { week_start_date: weekStartDate, page, limit, employee_id: employeeId } = req.query || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const result = await listWeeklyPayrollRecords(companyId, {
+      week_start_date: weekStartDate,
+      page,
+      limit,
+      employee_id: employeeId,
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/payroll/generate-weekly
+ * Auth: admin or hr (JWT)
+ * Body: { employee_id, week_start_date, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_salary_advances?, apply_advance_repayments? }
+ */
+async function generateWeekly(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const {
+      employee_id: employeeIdRaw,
+      week_start_date: weekStartDateRaw,
+      include_overtime: includeOvertimeRaw,
+      treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
+      apply_salary_advances: applySalaryAdvancesRaw,
+      apply_advance_repayments: applyAdvanceRepaymentsRaw,
+    } = req.body || {};
+
+    const employeeId = Number(employeeIdRaw);
+    const weekStartDate = String(weekStartDateRaw || '').slice(0, 10);
+    const includeOvertime = includeOvertimeRaw !== false;
+    const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
+
+    const applySalaryAdvances = applySalaryAdvancesRaw !== false;
+    const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
+
+    if (!companyId || !employeeId || !weekStartDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token), employee_id, and week_start_date are required',
+      });
+    }
+
+    const result = await generateWeeklyPayroll(companyId, employeeId, weekStartDate, {
+      includeOvertime,
+      treatHolidayAdjacentAbsenceAsWorking,
+      allowedBranchIds: req.allowedBranchIds,
+      apply_salary_advances: applySalaryAdvances,
+      apply_advance_repayments: applyAdvanceRepayments,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.generate_weekly', 'payroll', result.payroll?.id, {
+        employee_id: employeeId,
+        week_start_date: weekStartDate,
+      })
+      .catch(() => {});
+
+    return res.status(201).json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/payroll/generate-all-weekly
+ * Body: { week_start_date, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_salary_advances?, apply_advance_repayments? }
+ */
+async function generateAllWeekly(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const {
+      week_start_date: weekStartDateRaw,
+      include_overtime: includeOvertimeRaw,
+      treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
+      apply_salary_advances: applySalaryAdvancesRaw,
+      apply_advance_repayments: applyAdvanceRepaymentsRaw,
+    } = req.body || {};
+
+    const weekStartDate = String(weekStartDateRaw || '').slice(0, 10);
+    const includeOvertime = includeOvertimeRaw !== false;
+    const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
+    const applySalaryAdvances = applySalaryAdvancesRaw !== false;
+    const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
+
+    if (!companyId || !weekStartDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and week_start_date are required',
+      });
+    }
+
+    const result = await generateWeeklyPayrollForAllActive(companyId, weekStartDate, {
+      includeOvertime,
+      treatHolidayAdjacentAbsenceAsWorking,
+      allowedBranchIds: req.allowedBranchIds,
+      apply_salary_advances: applySalaryAdvances,
+      apply_advance_repayments: applyAdvanceRepayments,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.generate_all_weekly', 'payroll', null, {
+        week_start_date: weekStartDate,
+        generated: result.generated,
+        failed: result.failed,
+      })
+      .catch(() => {});
+
+    return res.status(201).json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/payroll/weekly/breakdown
+ * Query: employee_id, week_start_date
+ */
+async function breakdownWeekly(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { employee_id: employeeIdRaw, week_start_date: weekStartDateRaw } = req.query || {};
+
+    const employeeId = Number(employeeIdRaw);
+    const weekStartDate = String(weekStartDateRaw || '').slice(0, 10);
+
+    if (!companyId || !employeeId || !weekStartDate) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token), employee_id, and week_start_date are required',
+      });
+    }
+
+    const data = await getWeeklyPayrollBreakdown(companyId, employeeId, weekStartDate, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    return res.json({
+      success: true,
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { list, generate, generateAll, breakdown, listWeekly, generateWeekly, generateAllWeekly, breakdownWeekly };
+
 

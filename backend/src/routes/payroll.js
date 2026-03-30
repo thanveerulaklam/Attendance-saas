@@ -1,5 +1,14 @@
 const express = require('express');
-const { list, generate, generateAll, breakdown } = require('../controllers/payrollController');
+const {
+  list,
+  generate,
+  generateAll,
+  breakdown,
+  listWeekly,
+  generateWeekly,
+  generateAllWeekly,
+  breakdownWeekly,
+} = require('../controllers/payrollController');
 const {
   authenticate,
   requireRole,
@@ -30,6 +39,26 @@ router.post(
   requireHrBranchForMutation,
   requireActiveSubscription,
   generateAll
+);
+
+// Weekly payroll (Sun–Sat)
+router.get('/weekly', withAuth, listWeekly);
+router.get('/weekly/breakdown', withAuth, breakdownWeekly);
+
+router.post(
+  '/generate-weekly',
+  withAuth,
+  requireHrBranchForMutation,
+  requireActiveSubscription,
+  generateWeekly
+);
+
+router.post(
+  '/generate-all-weekly',
+  withAuth,
+  requireHrBranchForMutation,
+  requireActiveSubscription,
+  generateAllWeekly
 );
 
 module.exports = router;

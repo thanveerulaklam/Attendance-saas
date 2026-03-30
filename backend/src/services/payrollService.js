@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { istYmdFromDate, todayIstYmd, SQL_PUNCH_IST_DATE, addDaysIst } = require('../utils/istDate');
 const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceService');
-const { getHolidayDatesForMonth } = require('./holidayService');
+const { getHolidayDatesForMonth, getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
 
@@ -56,6 +56,12 @@ function rowToShiftConfig(row) {
         ? 'shift_based'
         : 'day_based';
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
+  const weeklyOffDaysRaw = Array.isArray(row.weekly_off_days) ? row.weekly_off_days : [];
+  const weeklyOffDays = [...new Set(
+    weeklyOffDaysRaw
+      .map((d) => Number(d))
+      .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+  )];
   return {
     id: row.id,
     startHour,
@@ -72,6 +78,7 @@ function rowToShiftConfig(row) {
     lunchOverDeductionAmount: Number(row.lunch_over_deduction_amount || 0),
     noLeaveIncentive: Number(row.no_leave_incentive || 0),
     paidLeaveDays: Number(row.paid_leave_days || 0),
+    weeklyOffDays,
     attendanceMode,
     requiredHoursPerDay,
   };
@@ -91,6 +98,7 @@ async function getDefaultShiftForCompany(client, companyId) {
        lunch_over_deduction_amount,
        no_leave_incentive,
        paid_leave_days,
+       weekly_off_days,
        attendance_mode,
        required_hours_per_day
      FROM shifts
@@ -125,6 +133,7 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          lunch_over_deduction_minutes, lunch_over_deduction_amount,
          no_leave_incentive,
          paid_leave_days,
+         weekly_off_days,
          attendance_mode,
          required_hours_per_day
        FROM shifts
@@ -518,6 +527,862 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 }
 
 /**
+ * Get paid holiday dates (company holidays + weekly off days) for any range.
+ * Weekly off days are derived from the employee's shift when available; otherwise fall back to company_weekly_offs.
+ */
+async function getHolidayDatesForRange(companyId, startDateStr, endDateStr, shiftWeeklyOffDays = null) {
+  const start = String(startDateStr).slice(0, 10);
+  const end = String(endDateStr).slice(0, 10);
+
+  const [holidaysResult, companyWeeklyOffs] = await Promise.all([
+    pool.query(
+      `SELECT holiday_date
+       FROM company_holidays
+       WHERE company_id = $1
+         AND holiday_date >= $2::date
+         AND holiday_date <= $3::date`,
+      [companyId, start, end]
+    ),
+    shiftWeeklyOffDays && Array.isArray(shiftWeeklyOffDays) && shiftWeeklyOffDays.length > 0
+      ? Promise.resolve([])
+      : getWeeklyOffs(companyId),
+  ]);
+
+  const shiftWeeklyOffs = Array.isArray(shiftWeeklyOffDays) ? shiftWeeklyOffDays : [];
+  const weeklyOffDays =
+    shiftWeeklyOffs.length > 0
+      ? shiftWeeklyOffs
+      : companyWeeklyOffs;
+
+  const set = new Set(
+    holidaysResult.rows.map((r) => r.holiday_date.toISOString().slice(0, 10))
+  );
+
+  // Add recurring weekly-off days
+  let cur = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  while (cur.getTime() <= endDate.getTime()) {
+    const dayKey = cur.toISOString().slice(0, 10);
+    const dayOfWeek = cur.getUTCDay(); // 0=Sunday..6=Saturday
+    if (weeklyOffDays.includes(dayOfWeek)) set.add(dayKey);
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+
+  return set;
+}
+
+function parseYmd(ymdStr) {
+  const [y, m, d] = String(ymdStr).slice(0, 10).split('-').map(Number);
+  return { y, m, d };
+}
+
+/**
+ * Attendance summary for a date range (used for weekly payroll).
+ * - Holidays/weekly-offs are treated as *paid* (count as presentDays) so they do not reduce salary.
+ * - Weekly payroll uses no paid-leave adjustment by default (paidLeaveDaysAllowed = 0).
+ */
+async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr, endDateStr, options = {}) {
+  const {
+    treatHolidayAdjacentAbsenceAsWorking = false,
+    asOfDate = null,
+    disablePaidLeave = true,
+    holidayCountAsPresent = true,
+  } = options;
+
+  const client = await pool.connect();
+  try {
+    const startStr = String(startDateStr).slice(0, 10);
+    const endStr = String(endDateStr).slice(0, 10);
+    const lastDateToConsider = asOfDate ? String(asOfDate).slice(0, 10) : endStr;
+
+    const shift = await getShiftForEmployee(client, companyId, employeeId);
+
+    const needOvernightRange =
+      shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
+    const rangeStart = needOvernightRange ? addDays(startStr, -1) : startStr;
+    const rangeEnd = needOvernightRange ? addDays(endStr, 1) : endStr;
+
+    const [logsResult, holidaySet] = await Promise.all([
+      client.query(
+        `SELECT punch_time, punch_type
+         FROM attendance_logs
+         WHERE company_id = $1
+           AND employee_id = $2
+           AND ${SQL_PUNCH_IST_DATE} >= $3::date
+           AND ${SQL_PUNCH_IST_DATE} <= $4::date
+         ORDER BY punch_time ASC`,
+        [companyId, employeeId, rangeStart, rangeEnd]
+      ),
+      getHolidayDatesForRange(companyId, startStr, endStr, shift.weeklyOffDays),
+    ]);
+
+    // Build logs by attendance day key
+    const logsByDay = new Map();
+    for (const row of logsResult.rows) {
+      const punchTime = new Date(row.punch_time);
+      let key;
+      if (shift.attendanceMode === 'hours_based') {
+        key = istYmdFromDate(punchTime);
+      } else if (shift.attendanceMode === 'shift_based' && shift.isOvernightClock) {
+        key = attributedShiftStartDateStr(punchTime, shift);
+      } else {
+        key = istYmdFromDate(punchTime);
+      }
+      if (key < startStr || key > endStr) continue;
+      if (!logsByDay.has(key)) logsByDay.set(key, []);
+      logsByDay.get(key).push({
+        punchTime,
+        punchType: String(row.punch_type || '').toLowerCase(),
+      });
+    }
+
+    // Count working days (non-holidays) up to lastDateToConsider.
+    let workingDays = 0;
+    let presentDays = 0;
+    let presentWorkingDays = 0;
+    let totalLateMs = 0;
+    let totalLunchOverMs = 0;
+    let lateDays = 0;
+    let lunchOverDays = 0;
+    let totalOvertimeMs = 0;
+
+    const presentDayKeys = new Set();
+    const dayDetails = [];
+
+    // Iterate day-by-day across the range (inclusive)
+    let cur = new Date(`${startStr}T00:00:00Z`);
+    const endConsider = new Date(`${lastDateToConsider}T00:00:00Z`);
+    while (cur.getTime() <= endConsider.getTime()) {
+      const dayKey = cur.toISOString().slice(0, 10);
+      const isHoliday = holidaySet.has(dayKey);
+      const dayLogs = logsByDay.get(dayKey) || [];
+
+      if (shift.attendanceMode === 'hours_based') {
+        const required = Number(shift.requiredHoursPerDay || 8);
+
+        // Holiday/weekly-off is paid: count as full-day present.
+        if (holidayCountAsPresent && isHoliday) {
+          presentDayKeys.add(dayKey);
+          presentDays += 1;
+          // Keep holiday days out of presentWorkingDays (travel etc. should be excluded)
+          dayDetails.push({
+            date: dayKey,
+            firstInTime: null,
+            totalHoursInside: 0,
+            late: false,
+            minutesLate: 0,
+            status: 'present',
+          });
+          cur.setUTCDate(cur.getUTCDate() + 1);
+          continue;
+        }
+
+        const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+        const hoursInside = computeHoursInsideForDay(sorted);
+
+        let presentFraction = 0;
+        let statusLabel = 'absent';
+        if (hoursInside >= required) {
+          presentFraction = 1;
+          statusLabel = 'present';
+          totalOvertimeMs += (hoursInside - required) * 60 * 60 * 1000;
+        } else if (hoursInside >= required * 0.5) {
+          presentFraction = 0.5;
+          statusLabel = 'half_day';
+        }
+
+        // Late detection (non-holiday only)
+        let isLate = false;
+        let minutesLate = 0;
+        const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
+        if (firstInTime) {
+          const { y, m, d } = parseYmd(dayKey);
+          const shiftStartMs = getShiftStartMsForDate(
+            y,
+            m,
+            d,
+            shift.startHour,
+            shift.startMinute
+          );
+          const allowedStartMs = shiftStartMs + shift.graceMs;
+          if (firstInTime.getTime() > allowedStartMs) {
+            isLate = true;
+            const diffMs = firstInTime.getTime() - allowedStartMs;
+            minutesLate = Math.round(diffMs / (60 * 1000));
+            totalLateMs += diffMs;
+            lateDays += 1;
+          }
+        }
+
+        if (presentFraction > 0) {
+          presentDayKeys.add(dayKey);
+          presentDays += presentFraction;
+          if (!isHoliday) presentWorkingDays += presentFraction;
+        } else if (!isHoliday) {
+          // full absence => counted in effectiveWorkingDays - presentWorkingDays later
+        }
+
+        // Track workingDays for absence math (non-holidays only)
+        if (!isHoliday) workingDays += 1;
+
+        dayDetails.push({
+          date: dayKey,
+          firstInTime: firstInTime ? firstInTime.toISOString() : null,
+          totalHoursInside: hoursInside,
+          late: isLate,
+          minutesLate,
+          status: statusLabel,
+        });
+      } else {
+        // day_based / shift_based
+        if (!isHoliday) workingDays += 1;
+
+        // Holiday/weekly-off is paid: count as present even if there are no valid logs.
+        if (holidayCountAsPresent && isHoliday && dayLogs.length === 0) {
+          presentDayKeys.add(dayKey);
+          presentDays += 1;
+          cur.setUTCDate(cur.getUTCDate() + 1);
+          continue;
+        }
+
+        const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+        const logsForStatus = sorted.map((l) => ({
+          punch_time: l.punchTime.toISOString(),
+          punch_type: l.punchType,
+        }));
+
+        const status = computeDayStatus(logsForStatus, shift, dayKey);
+
+        // If it's a holiday but status says absent (e.g. invalid punch pattern), still pay full day.
+        const shouldCountPresent = status.present || (holidayCountAsPresent && isHoliday);
+        if (!shouldCountPresent) {
+          cur.setUTCDate(cur.getUTCDate() + 1);
+          continue;
+        }
+
+        const presentFraction = isHoliday ? 1 : status.halfDay ? 0.5 : 1;
+        presentDayKeys.add(dayKey);
+        presentDays += presentFraction;
+        if (!isHoliday) presentWorkingDays += presentFraction;
+
+        if (status.overtimeHours && status.overtimeHours > 0) {
+          totalOvertimeMs += status.overtimeHours * 60 * 60 * 1000;
+        }
+
+        if (status.late && !isHoliday) {
+          const { y, m, d } = parseYmd(dayKey);
+          const shiftStartMs = getShiftStartMsForDate(
+            y,
+            m,
+            d,
+            shift.startHour,
+            shift.startMinute
+          );
+          const allowedStartMs = shiftStartMs + shift.graceMs;
+          const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
+          if (firstInTime) {
+            totalLateMs += Math.max(0, firstInTime.getTime() - allowedStartMs);
+            lateDays += 1;
+          }
+        }
+
+        if (status.lunchOverMinutes && status.lunchOverMinutes > 0) {
+          totalLunchOverMs += status.lunchOverMinutes * 60 * 1000;
+          lunchOverDays += 1;
+        }
+
+        dayDetails.push({
+          date: dayKey,
+          firstInTime: status.firstInTime ? status.firstInTime.toISOString() : null,
+          totalHoursInside: null,
+          late: Boolean(status.late),
+          minutesLate: status.minutesLate ?? 0,
+          status: status.present ? (status.halfDay ? 'half_day' : 'present') : 'present',
+        });
+      }
+
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+
+    let effectiveWorkingDays = workingDays;
+    if (treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0) {
+      let holidaysCountedAsWorking = 0;
+      for (const holidayKey of holidaySet) {
+        if (holidayKey > lastDateToConsider) continue;
+        const prevKey = addDays(holidayKey, -1);
+        const nextKey = addDays(holidayKey, 1);
+        const absentPrev =
+          prevKey >= startStr && prevKey <= lastDateToConsider && !presentDayKeys.has(prevKey);
+        const absentNext =
+          nextKey >= startStr && nextKey <= lastDateToConsider && !presentDayKeys.has(nextKey);
+        if (absentPrev || absentNext) {
+          holidaysCountedAsWorking += 1;
+        }
+      }
+      effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
+    }
+
+    const rawAbsenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
+    const paidLeaveDaysAllowed = disablePaidLeave ? 0 : Number(shift.paidLeaveDays || 0);
+    const paidLeaveUsed = disablePaidLeave ? 0 : Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
+    const absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+
+    const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
+    const lateMinutes = totalLateMs / (60 * 1000);
+    const lunchOverMinutes = totalLunchOverMs / (60 * 1000);
+
+    const daysInRange = (() => {
+      const a = new Date(`${startStr}T00:00:00Z`).getTime();
+      const b = new Date(`${lastDateToConsider}T00:00:00Z`).getTime();
+      const diffDays = Math.round((b - a) / (24 * 60 * 60 * 1000));
+      return diffDays + 1;
+    })();
+
+    return {
+      daysInRange,
+      workingDaysUpToDate: lastDateToConsider,
+      workingDays,
+      presentDays,
+      presentWorkingDays,
+      overtimeHours,
+      lateMinutes,
+      lunchOverMinutes,
+      lateDays,
+      lunchOverDays,
+      lateDeductionMinutes: shift.lateDeductionMinutes,
+      lateDeductionAmount: shift.lateDeductionAmount,
+      lunchOverDeductionMinutes: shift.lunchOverDeductionMinutes,
+      lunchOverDeductionAmount: shift.lunchOverDeductionAmount,
+      noLeaveIncentiveFromShift: disablePaidLeave ? 0 : shift.noLeaveIncentive,
+      paidLeaveDaysAllowed,
+      paidLeaveUsed,
+      rawAbsenceDays,
+      absenceDays,
+      attendanceMode: shift.attendanceMode || 'day_based',
+      requiredHoursPerDay: shift.requiredHoursPerDay || 8,
+      dayDetails,
+    };
+  } finally {
+    client.release();
+  }
+}
+
+function getWeekEndDate(weekStartDateStr) {
+  return addDays(String(weekStartDateStr).slice(0, 10), 6);
+}
+
+function getDaysInMonth(year, month1to12) {
+  return new Date(year, month1to12, 0).getDate(); // month1to12: 1=Jan..12=Dec
+}
+
+/**
+ * Generate weekly payroll for one employee (Sun–Sat).
+ */
+async function generateWeeklyPayroll(
+  companyId,
+  employeeId,
+  weekStartDateStr,
+  payrollOptions = {}
+) {
+  const {
+    includeOvertime = true,
+    treatHolidayAdjacentAbsenceAsWorking = false,
+    allowedBranchIds = null,
+    apply_salary_advances: applySalaryAdvancesRaw = true,
+    apply_advance_repayments: applyAdvanceRepaymentsRaw = true,
+  } = payrollOptions;
+
+  const applySalaryAdvances = applySalaryAdvancesRaw !== false;
+  const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
+
+  const weekStart = String(weekStartDateStr).slice(0, 10);
+  const weekEnd = getWeekEndDate(weekStart);
+
+  const { y: endYear, m: endMonth } = parseYmd(weekEnd);
+  const monthLastDay = getDaysInMonth(endYear, endMonth);
+  const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
+  const shouldDeductEsi = weekEnd === monthLastDayStr;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const employeeResult = await client.query(
+      `SELECT id, basic_salary, status, daily_travel_allowance, esi_amount
+       FROM employees
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, employeeId]
+    );
+
+    if (employeeResult.rowCount === 0) {
+      throw new AppError('Employee not found for this company', 404);
+    }
+
+    const employee = employeeResult.rows[0];
+
+    await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
+
+    if (employee.status !== 'active') {
+      throw new AppError('Cannot generate payroll for inactive employee', 400);
+    }
+
+    const todayStr = todayIstYmd();
+    const isCurrentWeek = todayStr >= weekStart && todayStr <= weekEnd;
+    const asOfDate = isCurrentWeek ? todayStr : null;
+
+    const { y: startYear, m: startMonth } = parseYmd(weekStart);
+    const basicSalary = Number(employee.basic_salary || 0);
+    const daysInStartMonth = getDaysInMonth(startYear, startMonth);
+    const dailyRate = daysInStartMonth > 0 ? basicSalary / daysInStartMonth : 0;
+    const hourlyRate = dailyRate / 8;
+
+    const summary = await getAttendanceSummaryForRange(companyId, employeeId, weekStart, weekEnd, {
+      treatHolidayAdjacentAbsenceAsWorking,
+      asOfDate,
+      disablePaidLeave: true,
+      holidayCountAsPresent: true,
+    });
+
+    const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
+    const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
+    const travelAllowance = dailyTravelAllowance * (summary.presentWorkingDays ?? 0);
+
+    // Weekly payroll ignores paid leave and incentives.
+    const earnedBasic = dailyRate * (summary.presentDays ?? 0);
+
+    let absenceDeduction = 0;
+    if (summary.attendanceMode === 'hours_based') {
+      absenceDeduction = dailyRate * (summary.absenceDays || 0);
+    }
+
+    let lateDeduction = 0;
+    if (
+      (summary.lateDays || 0) > 0 &&
+      summary.lateDeductionMinutes > 0 &&
+      summary.lateDeductionAmount > 0
+    ) {
+      lateDeduction = summary.lateDays * summary.lateDeductionAmount;
+    }
+
+    let lunchOverDeduction = 0;
+    if (
+      (summary.lunchOverDays || 0) > 0 &&
+      summary.lunchOverDeductionMinutes > 0 &&
+      summary.lunchOverDeductionAmount > 0
+    ) {
+      lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
+    }
+
+    const esiDeduction = shouldDeductEsi ? Number(employee.esi_amount || 0) : 0;
+    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+
+    const salaryAdvanceBase = applySalaryAdvances
+      ? await getAdvanceForEmployeeMonth(companyId, employeeId, endYear, endMonth)
+      : 0;
+
+    const repaymentRowsResult = applyAdvanceRepayments
+      ? await client.query(
+          `SELECT
+             r.id,
+             r.loan_id,
+             r.repayment_amount
+           FROM employee_advance_repayments r
+           INNER JOIN employee_advance_loans l
+             ON l.id = r.loan_id
+            AND l.company_id = r.company_id
+           WHERE r.company_id = $1
+             AND r.employee_id = $2
+             AND r.year = $3
+             AND r.month = $4
+             AND r.status = 'pending'
+             AND l.status = 'active'
+           ORDER BY r.id ASC`,
+          [companyId, employeeId, endYear, endMonth]
+        )
+      : { rows: [] };
+
+    const repaymentRows = repaymentRowsResult.rows || [];
+    const newRepaymentAdvance = repaymentRows.reduce(
+      (sum, row) => sum + Number(row.repayment_amount || 0),
+      0
+    );
+
+    const salaryAdvance = salaryAdvanceBase + newRepaymentAdvance;
+
+    const grossSalary = earnedBasic + overtimePay + travelAllowance;
+    const netSalary = grossSalary - deductions - salaryAdvance;
+
+    const insertResult = await client.query(
+      `INSERT INTO weekly_payroll_records (
+         company_id,
+         employee_id,
+         week_start_date,
+         week_end_date,
+         total_days,
+         present_days,
+         overtime_hours,
+         gross_salary,
+         deductions,
+         salary_advance,
+         no_leave_incentive,
+         net_salary
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       ON CONFLICT (company_id, employee_id, week_start_date)
+       DO UPDATE SET
+         week_end_date = EXCLUDED.week_end_date,
+         total_days = EXCLUDED.total_days,
+         present_days = EXCLUDED.present_days,
+         overtime_hours = EXCLUDED.overtime_hours,
+         gross_salary = EXCLUDED.gross_salary,
+         deductions = EXCLUDED.deductions,
+         salary_advance = EXCLUDED.salary_advance,
+         no_leave_incentive = EXCLUDED.no_leave_incentive,
+         net_salary = EXCLUDED.net_salary,
+         generated_at = NOW()
+       RETURNING *`,
+      [
+        companyId,
+        employeeId,
+        weekStart,
+        weekEnd,
+        summary.daysInRange,
+        summary.presentDays,
+        summary.overtimeHours,
+        grossSalary,
+        deductions,
+        salaryAdvance,
+        0,
+        netSalary,
+      ]
+    );
+
+    if (applyAdvanceRepayments) {
+      for (const repayment of repaymentRows) {
+        await markRepaymentDeducted(
+          companyId,
+          repayment.loan_id,
+          endYear,
+          endMonth,
+          Number(repayment.repayment_amount || 0),
+          { client }
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      summary,
+      payroll: insertResult.rows[0],
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function generateWeeklyPayrollForAllActive(companyId, weekStartDateStr, payrollOptions = {}) {
+  const {
+    allowedBranchIds = null,
+    ...rest
+  } = payrollOptions || {};
+
+  const weekStart = String(weekStartDateStr).slice(0, 10);
+  const client = await pool.connect();
+  let employeeIds = [];
+  try {
+    if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+      employeeIds = [];
+    } else if (allowedBranchIds != null) {
+      const result = await client.query(
+        `SELECT id
+         FROM employees
+         WHERE company_id = $1
+           AND status = 'active'
+           AND payroll_frequency = 'weekly'
+           AND branch_id = ANY($2::bigint[])
+         ORDER BY id`,
+        [companyId, allowedBranchIds]
+      );
+      employeeIds = result.rows.map((r) => r.id);
+    } else {
+      const result = await client.query(
+        `SELECT id
+         FROM employees
+         WHERE company_id = $1
+           AND status = 'active'
+           AND payroll_frequency = 'weekly'
+         ORDER BY id`,
+        [companyId]
+      );
+      employeeIds = result.rows.map((r) => r.id);
+    }
+  } finally {
+    client.release();
+  }
+
+  const results = [];
+  const errors = [];
+  const options = { ...rest, allowedBranchIds };
+  for (const employeeId of employeeIds) {
+    try {
+      const result = await generateWeeklyPayroll(companyId, employeeId, weekStart, options);
+      results.push({ employee_id: employeeId, payroll_id: result.payroll?.id });
+    } catch (err) {
+      errors.push({ employee_id: employeeId, message: err.message || 'Failed to generate weekly payroll' });
+    }
+  }
+
+  return {
+    generated: results.length,
+    failed: errors.length,
+    results,
+    errors,
+  };
+}
+
+/**
+ * List weekly payroll records (Sun–Sat) with optional filters + pagination.
+ */
+async function listWeeklyPayrollRecords(
+  companyId,
+  {
+    week_start_date: weekStartDate,
+    page = 1,
+    limit = 20,
+    employee_id: employeeId,
+    allowedBranchIds = null,
+  } = {}
+) {
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+  const offset = (pageNum - 1) * limitNum;
+
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    return { data: [], page: pageNum, limit: limitNum, total: 0 };
+  }
+
+  const conditions = ['w.company_id = $1'];
+  const params = [companyId];
+  let paramIndex = 2;
+
+  if (weekStartDate != null && weekStartDate !== '') {
+    conditions.push(`w.week_start_date = $${paramIndex}`);
+    params.push(String(weekStartDate).slice(0, 10));
+    paramIndex += 1;
+  }
+
+  if (employeeId != null && employeeId !== '') {
+    conditions.push(`w.employee_id = $${paramIndex}`);
+    params.push(Number(employeeId));
+    paramIndex += 1;
+  }
+
+  if (allowedBranchIds != null) {
+    conditions.push(`e.branch_id = ANY($${paramIndex}::bigint[])`);
+    params.push(allowedBranchIds);
+    paramIndex += 1;
+  }
+
+  const whereClause = conditions.join(' AND ');
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS total
+     FROM weekly_payroll_records w
+     INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
+     WHERE ${whereClause}`,
+    params
+  );
+  const total = Number(countResult.rows[0]?.total || 0);
+
+  const listResult = await pool.query(
+    `SELECT
+       w.id,
+       w.company_id,
+       w.employee_id,
+       w.week_start_date,
+       w.week_end_date,
+       w.total_days,
+       w.present_days,
+       w.overtime_hours,
+       w.gross_salary,
+       w.deductions,
+       w.salary_advance,
+       w.no_leave_incentive,
+       w.net_salary,
+       w.generated_at,
+       e.name AS employee_name,
+       e.employee_code AS employee_code
+     FROM weekly_payroll_records w
+     INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
+     WHERE ${whereClause}
+     ORDER BY w.week_start_date DESC, e.name ASC
+     LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
+    [...params, limitNum, offset]
+  );
+
+  return {
+    data: listResult.rows,
+    page: pageNum,
+    limit: limitNum,
+    total,
+  };
+}
+
+/**
+ * Get weekly payroll breakdown for one employee for one week.
+ * Used by weekly breakdown modal (no DB writes).
+ */
+async function getWeeklyPayrollBreakdown(
+  companyId,
+  employeeId,
+  weekStartDateStr,
+  options = {}
+) {
+  const {
+    includeOvertime = true,
+    treatHolidayAdjacentAbsenceAsWorking = false,
+    allowedBranchIds = null,
+  } = options;
+
+  await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
+
+  const weekStart = String(weekStartDateStr).slice(0, 10);
+  const weekEnd = getWeekEndDate(weekStart);
+  const { y: startYear, m: startMonth } = parseYmd(weekStart);
+  const { y: endYear, m: endMonth } = parseYmd(weekEnd);
+
+  const weekPayrollRowResult = await pool.query(
+    `SELECT *
+     FROM weekly_payroll_records
+     WHERE company_id = $1 AND employee_id = $2 AND week_start_date = $3`,
+    [companyId, employeeId, weekStart]
+  );
+  if (weekPayrollRowResult.rowCount === 0) {
+    throw new AppError('Weekly payroll record not found', 404);
+  }
+  const weekPayrollRow = weekPayrollRowResult.rows[0];
+
+  const todayStr = todayIstYmd();
+  const isCurrentWeek = todayStr >= weekStart && todayStr <= weekEnd;
+  const asOfDate = isCurrentWeek ? todayStr : null;
+  const isWeekComplete = !isCurrentWeek || todayStr >= weekEnd;
+
+  const employeeResult = await pool.query(
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount
+     FROM employees
+     WHERE company_id = $1 AND id = $2`,
+    [companyId, employeeId]
+  );
+  if (employeeResult.rowCount === 0) {
+    throw new AppError('Employee not found for this company', 404);
+  }
+  const employee = employeeResult.rows[0];
+
+  const shiftSummary = await getAttendanceSummaryForRange(companyId, employeeId, weekStart, weekEnd, {
+    treatHolidayAdjacentAbsenceAsWorking,
+    asOfDate,
+    disablePaidLeave: true,
+    holidayCountAsPresent: true,
+  });
+
+  const daysInStartMonth = getDaysInMonth(startYear, startMonth);
+  const basicSalary = Number(employee.basic_salary || 0);
+  const dailyRate = daysInStartMonth > 0 ? basicSalary / daysInStartMonth : 0;
+  const hourlyRate = dailyRate / 8;
+
+  const overtimePay = includeOvertime ? (shiftSummary.overtimeHours * hourlyRate) : 0;
+  const travelAllowance =
+    Number(employee.daily_travel_allowance || 0) * (shiftSummary.presentWorkingDays ?? 0);
+
+  const earnedBasic = dailyRate * (shiftSummary.presentDays ?? 0);
+
+  let absenceDeduction = 0;
+  if (shiftSummary.attendanceMode === 'hours_based') {
+    absenceDeduction = dailyRate * (shiftSummary.absenceDays || 0);
+  }
+
+  let lateDeduction = 0;
+  if (
+    (shiftSummary.lateDays || 0) > 0 &&
+    shiftSummary.lateDeductionMinutes > 0 &&
+    shiftSummary.lateDeductionAmount > 0
+  ) {
+    lateDeduction = shiftSummary.lateDays * shiftSummary.lateDeductionAmount;
+  }
+
+  let lunchOverDeduction = 0;
+  if (
+    (shiftSummary.lunchOverDays || 0) > 0 &&
+    shiftSummary.lunchOverDeductionMinutes > 0 &&
+    shiftSummary.lunchOverDeductionAmount > 0
+  ) {
+    lunchOverDeduction = shiftSummary.lunchOverDays * shiftSummary.lunchOverDeductionAmount;
+  }
+
+  const monthLastDay = getDaysInMonth(endYear, endMonth);
+  const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
+  const shouldDeductEsi = weekEnd === monthLastDayStr;
+  const esiDeduction = shouldDeductEsi ? Number(employee.esi_amount || 0) : 0;
+
+  const grossSalary = earnedBasic + overtimePay + travelAllowance;
+  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+
+  const salaryAdvance = Number(weekPayrollRow.salary_advance || 0);
+  const netSalary = Number(weekPayrollRow.net_salary || 0);
+
+  return {
+    employee: {
+      id: employee.id,
+      name: employee.name,
+      employee_code: employee.employee_code,
+      basic_salary: basicSalary,
+    },
+    period: { week_start_date: weekStart, week_end_date: weekEnd },
+    attendance: {
+      workingDaysUpToDate: shiftSummary.workingDaysUpToDate,
+      workingDays: shiftSummary.workingDays,
+      daysInRange: shiftSummary.daysInRange,
+      presentDays: shiftSummary.presentDays,
+      presentWorkingDays: shiftSummary.presentWorkingDays,
+      absenceDays: shiftSummary.absenceDays,
+      overtimeHours: shiftSummary.overtimeHours,
+      lateMinutes: shiftSummary.lateMinutes,
+      lunchOverMinutes: shiftSummary.lunchOverMinutes,
+      lateDays: shiftSummary.lateDays,
+      lunchOverDays: shiftSummary.lunchOverDays,
+      attendanceMode: shiftSummary.attendanceMode,
+      requiredHoursPerDay: shiftSummary.requiredHoursPerDay,
+      dayDetails: shiftSummary.dayDetails,
+    },
+    breakdown: {
+      isWeekComplete,
+      basicSalary: earnedBasic,
+      overtimePay,
+      travelAllowance,
+      noLeaveIncentive: 0,
+      presentWorkingDays: shiftSummary.presentWorkingDays,
+      grossSalary,
+      absenceDeduction,
+      lateDeduction,
+      lunchOverDeduction,
+      esiDeduction,
+      totalDeductions,
+      salaryAdvance,
+      netSalary,
+    },
+    advance_repayments: [],
+  };
+}
+
+/**
+ * Parse request fields (aliases) into service-friendly flags.
+ */
+
+/**
  * @param {Object} [payrollOptions]
  * @param {boolean} [payrollOptions.includeOvertime=true] - If false, overtime is not added to gross.
  * @param {boolean} [payrollOptions.treatHolidayAdjacentAbsenceAsWorking=false] - If true, holidays adjacent to an absent day count as working (extra absence).
@@ -535,7 +1400,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, payroll_frequency
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -551,6 +1416,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     if (employee.status !== 'active') {
       throw new AppError('Cannot generate payroll for inactive employee', 400);
+    }
+
+    if (String(employee.payroll_frequency || 'monthly').toLowerCase() !== 'monthly') {
+      throw new AppError('This employee is configured for weekly payroll', 400);
     }
 
     const todayStr = todayIstYmd();
@@ -990,14 +1859,22 @@ async function generateMonthlyPayrollForAllActive(companyId, year, month, payrol
     } else if (allowedBranchIds != null) {
       const result = await client.query(
         `SELECT id FROM employees
-         WHERE company_id = $1 AND status = 'active' AND branch_id = ANY($2::bigint[])
+         WHERE company_id = $1
+           AND status = 'active'
+           AND payroll_frequency = 'monthly'
+           AND branch_id = ANY($2::bigint[])
          ORDER BY id`,
         [companyId, allowedBranchIds]
       );
       employeeIds = result.rows.map((r) => r.id);
     } else {
       const result = await client.query(
-        `SELECT id FROM employees WHERE company_id = $1 AND status = 'active' ORDER BY id`,
+        `SELECT id
+         FROM employees
+         WHERE company_id = $1
+           AND status = 'active'
+           AND payroll_frequency = 'monthly'
+         ORDER BY id`,
         [companyId]
       );
       employeeIds = result.rows.map((r) => r.id);
@@ -1032,8 +1909,13 @@ async function generateMonthlyPayrollForAllActive(companyId, year, month, payrol
 module.exports = {
   getAttendanceSummary,
   getPayrollBreakdown,
+  getAttendanceSummaryForRange,
+  getWeeklyPayrollBreakdown,
   generateMonthlyPayroll,
   generateMonthlyPayrollForAllActive,
+  generateWeeklyPayroll,
+  generateWeeklyPayrollForAllActive,
   listPayrollRecords,
+  listWeeklyPayrollRecords,
 };
 

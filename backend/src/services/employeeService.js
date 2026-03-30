@@ -27,6 +27,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         basic_salary,
         join_date,
         status,
+        payroll_frequency,
         shift_id,
         daily_travel_allowance,
         esi_amount,
@@ -178,6 +179,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
   const payload = validateCreateEmployee(data);
 
   const shiftId = payload.shift_id != null ? payload.shift_id : null;
+  const payrollFrequency = payload.payroll_frequency || 'monthly';
 
   const dailyTravelAllowance =
     payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
@@ -207,11 +209,12 @@ async function createEmployee(companyId, data, branchContext = {}) {
         basic_salary,
         join_date,
         status,
+        payroll_frequency,
         shift_id,
         daily_travel_allowance,
         esi_amount
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -225,6 +228,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         payload.basic_salary,
         payload.join_date,
         payload.status,
+        payrollFrequency,
         shiftId,
         dailyTravelAllowance,
         esiAmount,
