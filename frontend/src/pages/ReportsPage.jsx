@@ -304,9 +304,12 @@ export default function ReportsPage() {
         const y = doc.internal.pageSize.getHeight() - 44;
         doc.setFontSize(18);
         doc.setFont(undefined, 'bold');
-        doc.text(`TOTAL PAYROLL: INR ${formatMoney(payrollTotal)}`, doc.internal.pageSize.getWidth() - 24, y, {
-          align: 'right',
-        });
+        doc.text(
+          `₹${formatMoney(payrollTotal)}`,
+          doc.internal.pageSize.getWidth() - 24,
+          y,
+          { align: 'right' }
+        );
       }
       savePdf(doc, `${type}-${year}-${String(month).padStart(2, '0')}.pdf`);
       setToast({ type: 'success', message: `${type} PDF downloaded` });
