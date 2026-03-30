@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
+import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 
 const PAGE_SIZE = 10;
 const MONTHS = [
@@ -23,6 +24,224 @@ function formatMoney(n) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(Number(n));
+}
+
+function escapeCsvCell(value) {
+  const str = value == null ? '' : String(value);
+  if (/[,"\r\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function payrollRowsToCsv(rows, payrollMode) {
+  const headers =
+    payrollMode === 'monthly'
+      ? [
+          'Employee',
+          'Code',
+          'Period',
+          'Present days',
+          'Total days',
+          'Overtime (hrs)',
+          'Gross',
+          'Deductions',
+          'Advance',
+          'Incentive',
+          'Net salary',
+        ]
+      : [
+          'Employee',
+          'Code',
+          'Week',
+          'Present days',
+          'Total days',
+          'Overtime (hrs)',
+          'Gross',
+          'Deductions',
+          'Advance',
+          'Incentive',
+          'Net salary',
+        ];
+  const lines = [headers.map(escapeCsvCell).join(',')];
+  rows.forEach((row) => {
+    const period =
+      payrollMode === 'monthly'
+        ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+            month: 'long',
+            year: 'numeric',
+          })
+        : formatWeekLabel(row.week_start_date, row.week_end_date);
+    lines.push(
+      [
+        row.employee_name,
+        row.employee_code,
+        period,
+        row.present_days,
+        row.total_days,
+        row.overtime_hours,
+        row.gross_salary,
+        row.deductions,
+        row.salary_advance,
+        row.no_leave_incentive,
+        row.net_salary,
+      ]
+        .map(escapeCsvCell)
+        .join(',')
+    );
+  });
+  return lines.join('\r\n');
+}
+
+function triggerDownloadCsv(content, filename) {
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function buildPayrollPrintDocument(rows, payrollMode, companyName) {
+  const title = companyName ? `${companyName} — Payroll` : 'Payroll';
+  const rowsHtml = rows
+    .map((row) => {
+      const period =
+        payrollMode === 'monthly'
+          ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+              month: 'short',
+              year: 'numeric',
+            })
+          : formatWeekLabel(row.week_start_date, row.week_end_date);
+      return `<tr>
+        <td>${escapeHtml(row.employee_name || '')}</td>
+        <td>${escapeHtml(row.employee_code || '')}</td>
+        <td>${escapeHtml(period)}</td>
+        <td class="num">${row.present_days ?? ''} / ${row.total_days ?? ''}</td>
+        <td class="num">${row.overtime_hours ?? ''}</td>
+        <td class="num">${formatMoney(row.gross_salary)}</td>
+        <td class="num">${formatMoney(row.deductions)}</td>
+        <td class="num">${formatMoney(row.salary_advance)}</td>
+        <td class="num">${formatMoney(row.no_leave_incentive)}</td>
+        <td class="num"><strong>${formatMoney(row.net_salary)}</strong></td>
+      </tr>`;
+    })
+    .join('');
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; font-size: 12px; color: #0f172a; padding: 24px; }
+    h1 { font-size: 16px; margin: 0 0 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #e2e8f0; padding: 6px 8px; text-align: left; }
+    th { background: #f8fafc; font-weight: 600; font-size: 11px; }
+    td.num { text-align: right; }
+    @media print { body { padding: 12px; } }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>Employee</th>
+        <th>Code</th>
+        <th>${payrollMode === 'monthly' ? 'Period' : 'Week'}</th>
+        <th>Present</th>
+        <th>OT (hrs)</th>
+        <th>Gross</th>
+        <th>Deductions</th>
+        <th>Advance</th>
+        <th>Incentive</th>
+        <th>Net</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+</body>
+</html>`;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function payrollRowsToPdfData(rows, payrollMode) {
+  const header = [
+    'Employee',
+    'Code',
+    payrollMode === 'monthly' ? 'Period' : 'Week',
+    'Present / Total',
+    'OT (hrs)',
+    'Gross',
+    'Deductions',
+    'Advance',
+    'Incentive',
+    'Net salary',
+  ];
+  const body = rows.map((row) => {
+    const period =
+      payrollMode === 'monthly'
+        ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+            month: 'long',
+            year: 'numeric',
+          })
+        : formatWeekLabel(row.week_start_date, row.week_end_date);
+    return [
+      String(row.employee_name ?? ''),
+      String(row.employee_code ?? ''),
+      period,
+      `${row.present_days ?? ''} / ${row.total_days ?? ''}`,
+      String(row.overtime_hours ?? ''),
+      formatMoney(row.gross_salary),
+      formatMoney(row.deductions),
+      formatMoney(row.salary_advance),
+      formatMoney(row.no_leave_incentive),
+      formatMoney(row.net_salary),
+    ];
+  });
+  const netTotal = rows.reduce((s, r) => s + (Number(r.net_salary) || 0), 0);
+  return { header, body, netTotal };
+}
+
+function buildPayrollPdfDocument(rows, payrollMode, company, periodLabel) {
+  const { header, body, netTotal } = payrollRowsToPdfData(rows, payrollMode);
+  const doc = createPdf({ orientation: 'landscape' });
+  const startY = addReportHeader(doc, {
+    companyName: company?.name,
+    companyPhone: company?.phone,
+    companyAddress: company?.address,
+    title: 'Payroll',
+    periodLabel,
+    generatedAt: new Date().toLocaleString(),
+    totalEmployees: rows.length,
+  });
+  addAutoTable(doc, [header], body, {
+    startY,
+    margin: { left: 24, right: 24 },
+    styles: { fontSize: 7 },
+  });
+  const marginRight = 24;
+  const marginLeft = 24;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const y = doc.internal.pageSize.getHeight() - 44;
+  doc.setFontSize(18);
+  doc.setFont(undefined, 'bold');
+  const label = `₹${formatMoney(netTotal)}`;
+  const textWidth = doc.getTextWidth(label);
+  const xLeft = Math.max(marginLeft, pageWidth - marginRight - textWidth);
+  doc.text(label, xLeft, y);
+  return doc;
 }
 
 function toYmdLocal(date) {
@@ -95,6 +314,9 @@ export default function PayrollPage() {
   const [detailRow, setDetailRow] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
   const [attendanceMeta, setAttendanceMeta] = useState(null);
+  const [selectedPayroll, setSelectedPayroll] = useState(() => new Map());
+  const [exporting, setExporting] = useState(false);
+  const selectAllHeaderRef = useRef(null);
 
   const subscription = getSubscriptionStatus(company);
   const subscriptionAllowed = subscription.allowed;
@@ -164,6 +386,210 @@ export default function PayrollPage() {
       });
     return () => { isMounted = false; };
   }, [payrollMode, year, month, weekStartDate, page, employeeId]);
+
+  useEffect(() => {
+    setSelectedPayroll(new Map());
+  }, [payrollMode, year, month, weekStartDate, employeeId]);
+
+  const allOnPageSelected =
+    records.length > 0 && records.every((r) => selectedPayroll.has(r.id));
+  const someOnPageSelected = records.some((r) => selectedPayroll.has(r.id));
+
+  useEffect(() => {
+    const el = selectAllHeaderRef.current;
+    if (el) {
+      el.indeterminate = someOnPageSelected && !allOnPageSelected;
+    }
+  }, [someOnPageSelected, allOnPageSelected, records]);
+
+  async function fetchAllPayrollRecordsForExport() {
+    const all = [];
+    let pageNum = 1;
+    const limit = 500;
+    let totalCount = null;
+    while (true) {
+      const params = new URLSearchParams();
+      if (payrollMode === 'monthly') {
+        params.set('year', String(year));
+        if (month) params.set('month', month);
+      } else {
+        params.set('week_start_date', String(weekStartDate));
+      }
+      params.set('page', String(pageNum));
+      params.set('limit', String(limit));
+      if (employeeId) params.set('employee_id', employeeId);
+
+      const url = payrollMode === 'monthly' ? `/api/payroll?${params}` : `/api/payroll/weekly?${params}`;
+      const res = await authFetch(url, { headers: { 'Content-Type': 'application/json' } });
+      if (!res.ok) throw new Error('Failed to load payroll');
+      const json = await res.json();
+      const chunk = json.data?.data || [];
+      if (totalCount == null) totalCount = Number(json.data?.total ?? 0);
+      all.push(...chunk);
+      if (chunk.length === 0 || chunk.length < limit || all.length >= totalCount) break;
+      pageNum += 1;
+    }
+    return all;
+  }
+
+  function toggleSelectRow(row, checked) {
+    setSelectedPayroll((prev) => {
+      const next = new Map(prev);
+      if (checked) next.set(row.id, row);
+      else next.delete(row.id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllOnPage(checked) {
+    setSelectedPayroll((prev) => {
+      const next = new Map(prev);
+      if (checked) {
+        records.forEach((r) => next.set(r.id, r));
+      } else {
+        records.forEach((r) => next.delete(r.id));
+      }
+      return next;
+    });
+  }
+
+  function handleDownloadPayrollCsv(allRows) {
+    const periodSlug =
+      payrollMode === 'monthly'
+        ? month
+          ? `${year}-${String(month).padStart(2, '0')}`
+          : `${year}-all-months`
+        : weekStartDate;
+    const csv = payrollRowsToCsv(allRows, payrollMode);
+    triggerDownloadCsv(csv, `payroll-${payrollMode}-${periodSlug}.csv`);
+    setToast({ type: 'success', message: 'Payroll CSV downloaded' });
+  }
+
+  async function handleExportAllCsv() {
+    try {
+      setExporting(true);
+      setToast(null);
+      const rows = await fetchAllPayrollRecordsForExport();
+      if (rows.length === 0) {
+        setToast({ type: 'error', message: 'No payroll records to export' });
+        return;
+      }
+      await handleDownloadPayrollCsv(rows);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Export failed' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function handleExportSelectedCsv() {
+    const rows = Array.from(selectedPayroll.values());
+    if (rows.length === 0) {
+      setToast({ type: 'error', message: 'Select at least one row' });
+      return;
+    }
+    setToast(null);
+    handleDownloadPayrollCsv(rows);
+  }
+
+  function getPayrollExportPeriodLabel() {
+    if (payrollMode === 'monthly') {
+      if (month) {
+        return `${new Date(2000, Number(month) - 1, 1).toLocaleString('default', {
+          month: 'long',
+        })} ${year}`;
+      }
+      return `Year ${year} (all months)`;
+    }
+    return `Week starting ${weekStartDate}`;
+  }
+
+  function payrollPdfFilename() {
+    return payrollMode === 'monthly'
+      ? month
+        ? `payroll-${payrollMode}-${year}-${String(month).padStart(2, '0')}.pdf`
+        : `payroll-${payrollMode}-${year}-all-months.pdf`
+      : `payroll-${payrollMode}-${weekStartDate}.pdf`;
+  }
+
+  function savePayrollPdf(rows) {
+    if (rows.length === 0) {
+      setToast({ type: 'error', message: 'No payroll records to export' });
+      return;
+    }
+    const doc = buildPayrollPdfDocument(
+      rows,
+      payrollMode,
+      company,
+      getPayrollExportPeriodLabel()
+    );
+    savePdf(doc, payrollPdfFilename());
+    setToast({ type: 'success', message: 'Payroll PDF downloaded' });
+  }
+
+  async function handleExportAllPdf() {
+    try {
+      setExporting(true);
+      setToast(null);
+      const rows = await fetchAllPayrollRecordsForExport();
+      savePayrollPdf(rows);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'PDF export failed' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function handleExportSelectedPdf() {
+    const rows = Array.from(selectedPayroll.values());
+    if (rows.length === 0) {
+      setToast({ type: 'error', message: 'Select at least one row' });
+      return;
+    }
+    setToast(null);
+    savePayrollPdf(rows);
+  }
+
+  function printPayrollRows(rows) {
+    if (rows.length === 0) {
+      setToast({ type: 'error', message: 'No payroll records to print' });
+      return;
+    }
+    const html = buildPayrollPrintDocument(rows, payrollMode, company?.name);
+    const w = window.open('', '_blank');
+    if (!w) {
+      setToast({ type: 'error', message: 'Allow pop-ups to print' });
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => {
+      try {
+        w.focus();
+        w.print();
+      } catch {
+        /* ignore */
+      }
+    }, 250);
+  }
+
+  async function handlePrintAll() {
+    try {
+      setExporting(true);
+      setToast(null);
+      const rows = await fetchAllPayrollRecordsForExport();
+      printPayrollRows(rows);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to load payroll' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function handlePrintSelected() {
+    setToast(null);
+    printPayrollRows(Array.from(selectedPayroll.values()));
+  }
 
   useEffect(() => {
     if (!detailModalOpen || !detailRow) return;
@@ -602,6 +1028,65 @@ export default function PayrollPage() {
           </div>
         )}
 
+        {!loading && total > 0 && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3">
+            <span className="text-[11px] font-medium text-slate-600">Export</span>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void handleExportAllCsv()}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+            >
+              {exporting ? 'Loading...' : 'Download CSV (all)'}
+            </button>
+            <button
+              type="button"
+              disabled={exporting || selectedPayroll.size === 0}
+              onClick={handleExportSelectedCsv}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+            >
+              Download CSV (selected)
+            </button>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void handleExportAllPdf()}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+            >
+              {exporting ? 'Loading...' : 'Download PDF (all)'}
+            </button>
+            <button
+              type="button"
+              disabled={exporting || selectedPayroll.size === 0}
+              onClick={handleExportSelectedPdf}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+            >
+              Download PDF (selected)
+            </button>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void handlePrintAll()}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+            >
+              {exporting ? 'Loading...' : 'Print (all)'}
+            </button>
+            <button
+              type="button"
+              disabled={exporting || selectedPayroll.size === 0}
+              onClick={handlePrintSelected}
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+            >
+              Print (selected)
+            </button>
+            {selectedPayroll.size > 0 && (
+              <span className="text-[11px] text-slate-500">
+                {selectedPayroll.size} selected
+              </span>
+            )}
+          </div>
+        )}
+
         {loading ? (
           <div className="space-y-2">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -621,6 +1106,16 @@ export default function PayrollPage() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-slate-600">
+                    <th className="w-10 pb-2 pr-2 font-medium">
+                      <input
+                        ref={selectAllHeaderRef}
+                        type="checkbox"
+                        checked={allOnPageSelected}
+                        onChange={(e) => toggleSelectAllOnPage(e.target.checked)}
+                        className="rounded border-slate-300 text-blue-600"
+                        aria-label="Select all on this page"
+                      />
+                    </th>
                     <th className="pb-2 pr-3 font-medium">Employee</th>
                     <th className="pb-2 pr-3 font-medium">Period</th>
                     <th className="pb-2 pr-3 font-medium text-right">Present</th>
@@ -639,6 +1134,18 @@ export default function PayrollPage() {
                       onClick={() => openDetailModal(row)}
                       className="border-b border-slate-100 hover:bg-slate-50/50 cursor-pointer"
                     >
+                      <td
+                        className="py-3 pr-2 align-middle"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedPayroll.has(row.id)}
+                          onChange={(e) => toggleSelectRow(row, e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600"
+                          aria-label={`Select ${row.employee_name || 'row'}`}
+                        />
+                      </td>
                       <td className="py-3 pr-3">
                         <span className="font-medium text-slate-900">{row.employee_name}</span>
                         <span className="ml-1 text-slate-500">({row.employee_code})</span>
