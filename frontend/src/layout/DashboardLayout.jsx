@@ -72,13 +72,30 @@ export default function DashboardLayout() {
 
       {/* Sidebar */}
       <aside className="w-64 bg-slate-950 text-slate-100 flex flex-col py-6 px-4">
-        <div className="flex items-center gap-2 px-2 mb-8">
-          <div className="h-9 w-9 rounded-2xl bg-primary-500 flex items-center justify-center text-white font-semibold shadow-soft">
-            A
+        <div className="flex items-center gap-3 px-2 mb-8">
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#D4A843]"
+            aria-hidden
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#0A0A0A"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
           </div>
           <div>
-            <div className="text-sm font-semibold tracking-wide">PunchPay</div>
-            <div className="text-xs text-slate-400">Punch in. Pay out.</div>
+            <div className="font-syne text-lg font-extrabold tracking-tight text-slate-100">
+              Punch<span className="text-[#D4A843]">Pay</span>
+            </div>
+            <div className="text-[10px] tracking-wide text-[#A07820]">Punch in. Pay out.</div>
           </div>
         </div>
 
