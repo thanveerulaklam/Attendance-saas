@@ -290,6 +290,8 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     lunchMinutes: null,
     lunchMinutesAllotted: shiftConfig.lunchMinutesAllotted ?? 60,
     lunchOverMinutes: null,
+    firstInTime: null,
+    lastOutTime: null,
   };
 
   if (!dayLogs.length) {
@@ -390,6 +392,7 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     lunchMinutesAllotted: allotted,
     lunchOverMinutes: lunchOverMinutes !== null ? lunchOverMinutes : null,
     firstInTime,
+    lastOutTime,
     minutesLate:
       present && firstInTime != null && late
         ? Math.max(
@@ -418,6 +421,7 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
     totalHoursInside: 0,
     halfDay: false,
     firstInTime: null,
+    lastOutTime: null,
     minutesLate: 0,
   };
   if (!dayLogs.length) return empty;
@@ -496,6 +500,14 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
     }
   }
 
+  let lastOutTime = null;
+  for (let i = sorted.length - 1; i >= 0; i -= 1) {
+    if (String(sorted[i].punch_type || '').toLowerCase() === 'out') {
+      lastOutTime = new Date(sorted[i].punch_time);
+      break;
+    }
+  }
+
   return {
     present,
     late,
@@ -508,6 +520,7 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
     totalHoursInside,
     halfDay,
     firstInTime,
+    lastOutTime,
     minutesLate,
   };
 }
@@ -837,6 +850,8 @@ async function getMonthlyAttendance(
         shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       const byDay = logsByEmployeeAndDay.get(emp.id) || new Map();
       const days = [];
+      const todayStr = todayIstYmd();
+      const nowMs = Date.now();
       for (let d = 1; d <= daysInMonth; d += 1) {
         const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const rawDayLogs = byDay.get(key) || [];
@@ -846,6 +861,18 @@ async function getMonthlyAttendance(
           shiftConfig.attendanceMode === 'hours_based'
             ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayBounds)
             : computeDayStatus(dayLogs, shiftConfig, key);
+        const isCurrentDate = key === todayStr;
+        const workedMsFromShiftStart = computeWorkedMsFromShiftStartToNow(
+          dayLogs,
+          shiftConfig,
+          key,
+          isCurrentDate,
+          nowMs
+        );
+        const total_hours_from_shift_start =
+          shiftConfig.attendanceMode === 'shift_based'
+            ? Math.round((workedMsFromShiftStart / (60 * 60 * 1000)) * 100) / 100
+            : null;
         days.push({
           date: key,
           day: d,
@@ -867,6 +894,9 @@ async function getMonthlyAttendance(
             shiftConfig.attendanceMode === 'hours_based'
               ? Math.round((status.totalHoursInside || 0) * 100) / 100
               : null,
+          total_hours_from_shift_start,
+          first_in_time: status.firstInTime ? status.firstInTime.toISOString() : null,
+          last_out_time: status.lastOutTime ? status.lastOutTime.toISOString() : null,
         });
       }
       const presentDays = days.filter((d) => d.present).length;

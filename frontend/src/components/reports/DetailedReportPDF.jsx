@@ -1,5 +1,17 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
 import { authFetch } from '../../utils/api';
+import { formatIstTime } from '../../utils/istDisplay';
+
+function formatTotalHoursForPdf(day) {
+  if (!day) return '';
+  if (day.attendance_mode === 'hours_based' && day.total_hours_inside != null) {
+    return `${day.total_hours_inside} h`;
+  }
+  if (day.attendance_mode === 'shift_based' && day.total_hours_from_shift_start != null) {
+    return `${day.total_hours_from_shift_start} h`;
+  }
+  return '';
+}
 
 function formatMonthLabel(year, month) {
   if (!year || !month) return '';
@@ -142,18 +154,15 @@ export async function generateDetailedAttendancePdf({
       if (!includeWeekends && isWeekend && !holidayByDate.has(date)) return;
 
       const holidayName = holidayByDate.get(date);
-      const statusParts = [];
-      let status = 'Absent ❌';
+      let status = 'Absent';
       if (holidayName) {
-        status = 'Holiday 🎉';
+        status = 'Holiday';
       } else if (isWeekend) {
-        status = 'Weekly Off 🔵';
+        status = 'Weekly Off';
       } else if (day.present) {
-        if (day.half_day) status = 'Half Day 🔸';
-        else status = 'Present ✅';
+        if (day.half_day) status = 'Half Day';
+        else status = 'Present';
       }
-
-      if (day.late) statusParts.push('Late');
 
       const notes = [];
       if (holidayName) {
@@ -166,9 +175,9 @@ export async function generateDetailedAttendancePdf({
       bodyRows.push([
         date,
         weekday,
-        '', // First IN (not available from monthly summary)
-        '', // Last OUT
-        day.total_hours_inside != null ? `${day.total_hours_inside} h` : '',
+        day.first_in_time ? formatIstTime(day.first_in_time) : '',
+        day.last_out_time ? formatIstTime(day.last_out_time) : '',
+        formatTotalHoursForPdf(day),
         status,
         day.late ? 'Yes' : 'No',
         notes.join('; '),

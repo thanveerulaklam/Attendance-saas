@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
+import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -47,6 +48,42 @@ async function downloadCsv(url, defaultFilename) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(blobUrl);
+}
+
+function parseCsvLine(line) {
+  const out = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === ',' && !inQuotes) {
+      out.push(cur);
+      cur = '';
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+function parseCsvText(csvText) {
+  const lines = String(csvText || '')
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== '');
+  if (lines.length === 0) return { header: [], rows: [] };
+  const header = parseCsvLine(lines[0]);
+  const rows = lines.slice(1).map(parseCsvLine);
+  return { header, rows };
 }
 
 export default function ReportsPage() {
@@ -221,6 +258,51 @@ export default function ReportsPage() {
     }
   };
 
+  const handleDownloadPdf = (type) => async () => {
+    try {
+      setLoading(`${type}-pdf`);
+      setToast(null);
+      const [companyRes, csvRes] = await Promise.all([
+        authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
+        authFetch(`${base}/${type}.csv?${params}`, { headers: { Accept: 'text/csv' } }),
+      ]);
+      if (!csvRes.ok) {
+        const err = await csvRes.json().catch(() => ({}));
+        throw new Error(err.message || `Download failed (${csvRes.status})`);
+      }
+      const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
+      const company = companyJson.data || {};
+      const csvText = await csvRes.text();
+      const { header, rows } = parseCsvText(csvText);
+      if (header.length === 0) {
+        throw new Error('No data available for selected period');
+      }
+
+      const monthLabel = MONTHS.find((m) => m.value === month)?.label || '';
+      const doc = createPdf({ orientation: 'landscape' });
+      const startY = addReportHeader(doc, {
+        companyName: company.name,
+        companyPhone: company.phone,
+        companyAddress: company.address,
+        title: `${type.charAt(0).toUpperCase()}${type.slice(1)} Report`,
+        periodLabel: `${monthLabel} ${year}`,
+        generatedAt: new Date().toLocaleString(),
+        totalEmployees: rows.length,
+      });
+      addAutoTable(doc, [header], rows, {
+        startY,
+        margin: { left: 24, right: 24 },
+        styles: { fontSize: 7 },
+      });
+      savePdf(doc, `${type}-${year}-${String(month).padStart(2, '0')}.pdf`);
+      setToast({ type: 'success', message: `${type} PDF downloaded` });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'PDF generation failed' });
+    } finally {
+      setLoading(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -327,7 +409,7 @@ export default function ReportsPage() {
 
         <h2 className="mt-6 text-sm font-semibold text-slate-900">Download</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
-          Click a button to download the CSV file for {MONTHS.find((m) => m.value === month)?.label} {year}.
+          Download CSV or PDF for {MONTHS.find((m) => m.value === month)?.label} {year}.
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <button
@@ -340,6 +422,14 @@ export default function ReportsPage() {
           </button>
           <button
             type="button"
+            onClick={handleDownloadPdf('attendance')}
+            disabled={loading != null}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
+          >
+            {loading === 'attendance-pdf' ? 'Generating...' : 'Download attendance PDF'}
+          </button>
+          <button
+            type="button"
             onClick={handleDownload('payroll')}
             disabled={loading != null}
             className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
@@ -348,11 +438,27 @@ export default function ReportsPage() {
           </button>
           <button
             type="button"
+            onClick={handleDownloadPdf('payroll')}
+            disabled={loading != null}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
+          >
+            {loading === 'payroll-pdf' ? 'Generating...' : 'Download payroll PDF'}
+          </button>
+          <button
+            type="button"
             onClick={handleDownload('overtime')}
             disabled={loading != null}
             className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
           >
             {loading === 'overtime' ? 'Downloading...' : 'Download overtime CSV'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadPdf('overtime')}
+            disabled={loading != null}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
+          >
+            {loading === 'overtime-pdf' ? 'Generating...' : 'Download overtime PDF'}
           </button>
         </div>
 
