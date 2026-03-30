@@ -574,6 +574,7 @@ export default function AttendancePage() {
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Timings</th>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Day status</th>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Lunch</th>
+                    <th className="text-right py-2 px-2 font-medium text-slate-600">Total hours</th>
                     <th className="text-right py-2 px-2 font-medium text-slate-600">Actions</th>
                   </tr>
                 </thead>
@@ -651,6 +652,9 @@ export default function AttendancePage() {
                       row.lunch_over_minutes != null && row.lunch_over_minutes > 0
                         ? 'text-amber-600'
                         : 'text-slate-600';
+                    const totalHoursNum = Number(row.total_hours_from_shift_start ?? 0);
+                    const totalHoursDisplay =
+                      row.present || totalHoursNum > 0 ? `${totalHoursNum.toFixed(2)}h` : '—';
                     return (
                       <tr key={row.employee_id} className="border-t border-slate-100 hover:bg-slate-50/50">
                         <td className="py-1.5 px-2 font-medium text-slate-800">{row.name}</td>
@@ -672,6 +676,7 @@ export default function AttendancePage() {
                           </div>
                         </td>
                         <td className={`py-1.5 px-2 ${lunchCls}`}>{lunch}</td>
+                        <td className="py-1.5 px-2 text-right">{totalHoursDisplay}</td>
                         <td className="py-1.5 px-2 text-right">
                           {punches.length > 0 && punches.some((p) => p.id) ? (
                             <button

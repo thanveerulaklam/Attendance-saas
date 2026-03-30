@@ -206,6 +206,75 @@ function normalizePunchTypesByOrder(dayLogs) {
 }
 
 /**
+ * Compute total worked milliseconds from shift start to:
+ * - `now` for the currently selected attendance date
+ * - full day logs for historical dates
+ *
+ * Uses normalized punch_type ordering (in/out) so lunch breaks (out->in) are excluded.
+ */
+function computeWorkedMsFromShiftStartToNow(
+  dayLogs,
+  shiftConfig,
+  calendarDateStr,
+  isCurrentDate,
+  nowMs
+) {
+  if (!Array.isArray(dayLogs) || dayLogs.length === 0) return 0;
+
+  const [y, mo, dd] = calendarDateStr.split('-').map(Number);
+  const shiftStartMs = getShiftStartMsForDate(
+    y,
+    mo,
+    dd,
+    shiftConfig.startHour,
+    shiftConfig.startMinute
+  );
+
+  // If still working on the selected date, end at "now". Otherwise, use log-pair endpoints.
+  const endMs = isCurrentDate ? nowMs : Number.POSITIVE_INFINITY;
+  const maxSessionMinutes = 24 * 60; // safety against bad punches
+  const maxSessionMs = maxSessionMinutes * 60 * 1000;
+
+  let workedMs = 0;
+  let currentInMs = null;
+
+  const sorted = [...dayLogs].sort(
+    (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
+  );
+
+  for (const log of sorted) {
+    const tMs = new Date(log.punch_time).getTime();
+    const type = (log.punch_type || '').toLowerCase();
+
+    if (type === 'in') {
+      currentInMs = tMs;
+      continue;
+    }
+
+    if (type === 'out' && currentInMs != null) {
+      const startMs = Math.max(currentInMs, shiftStartMs);
+      const endPairMs = Math.min(tMs, endMs);
+      const diffMs = endPairMs - startMs;
+      if (diffMs > 0 && diffMs <= maxSessionMs) {
+        workedMs += diffMs;
+      }
+      currentInMs = null;
+    }
+  }
+
+  // Unpaired IN: only count it for the currently selected date.
+  if (currentInMs != null && isCurrentDate) {
+    const startMs = Math.max(currentInMs, shiftStartMs);
+    const diffMs = nowMs - startMs;
+    if (diffMs > 0 && diffMs <= maxSessionMs) {
+      workedMs += diffMs;
+    }
+  }
+
+  return workedMs;
+}
+
+/**
  * Compute present, late, overtime, full-day, left-during-lunch, and lunch duration for one day's logs.
  * Expects 4-punch pattern: 1=IN, 2=OUT (lunch start), 3=IN (lunch end), 4=OUT (end of day).
  * shiftConfig: { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted }
@@ -483,6 +552,7 @@ async function getDailyAttendance(
 
   const bounds = istDayBounds(dateStr);
   const isCurrentDate = todayIstYmd() === dateStr;
+  const nowMs = Date.now();
 
   const client = await pool.connect();
   try {
@@ -599,6 +669,16 @@ async function getDailyAttendance(
         punch_type: (l.punch_type || '').toLowerCase(),
         device_id: l.device_id || null,
       }));
+
+      const workedMsFromShiftStart = computeWorkedMsFromShiftStartToNow(
+        dayLogs,
+        shiftConfig,
+        dateStr,
+        isCurrentDate,
+        nowMs
+      );
+      const total_hours_from_shift_start =
+        Math.round((workedMsFromShiftStart / (60 * 60 * 1000)) * 100) / 100;
       return {
         employee_id: emp.id,
         name: emp.name,
@@ -614,6 +694,7 @@ async function getDailyAttendance(
         lunch_minutes: status.lunchMinutes,
         lunch_minutes_allotted: status.lunchMinutesAllotted,
         lunch_over_minutes: status.lunchOverMinutes,
+        total_hours_from_shift_start,
         attendance_mode: shiftConfig.attendanceMode,
         required_hours_per_day:
           shiftConfig.attendanceMode === 'hours_based'
