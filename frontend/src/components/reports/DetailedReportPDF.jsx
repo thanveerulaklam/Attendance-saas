@@ -12,13 +12,23 @@ export async function generateDetailedAttendancePdf({
   month,
   fromDate,
   toDate,
-  employeeId,
+  department,
+  employeeIds,
   includeWeekends,
 }) {
+  const selectedEmployeeIds = Array.isArray(employeeIds)
+    ? employeeIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
+    : [];
+  const monthlyQuery = new URLSearchParams({
+    year,
+    month,
+    ...(department ? { department } : {}),
+  }).toString();
+
   const [companyRes, empRes, monthlyRes, holidaysRes] = await Promise.all([
     authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
     authFetch('/api/employees?limit=500', { headers: { 'Content-Type': 'application/json' } }),
-    authFetch(`/api/attendance/monthly?${new URLSearchParams({ year, month, ...(employeeId ? { employee_id: employeeId } : {}) }).toString()}`, {
+    authFetch(`/api/attendance/monthly?${monthlyQuery}`, {
       headers: { 'Content-Type': 'application/json' },
     }),
     authFetch(`/api/holidays?${new URLSearchParams({ year, month }).toString()}`, {
@@ -35,6 +45,21 @@ export async function generateDetailedAttendancePdf({
   const monthly = monthlyJson.data;
   if (!monthly || !Array.isArray(monthly.employees) || monthly.employees.length === 0) {
     throw new Error('No attendance data available for selected period');
+  }
+
+  const employeeById = new Map((employeesJson.data?.data || []).map((e) => [Number(e.id), e]));
+  const selectedIdSet = new Set(selectedEmployeeIds);
+  const filteredMonthlyEmployees = (monthly.employees || []).filter((emp) => {
+    const empId = Number(emp.employee_id);
+    if (selectedIdSet.size > 0 && !selectedIdSet.has(empId)) return false;
+    if (department) {
+      const fullEmp = employeeById.get(empId);
+      return (fullEmp?.department || '') === department;
+    }
+    return true;
+  });
+  if (filteredMonthlyEmployees.length === 0) {
+    throw new Error('No attendance data available for selected filters');
   }
 
   const holidayByDate = new Map();
@@ -54,10 +79,10 @@ export async function generateDetailedAttendancePdf({
     title: 'Attendance Report',
     periodLabel,
     generatedAt: new Date().toLocaleString(),
-    totalEmployees: monthly.employees.length,
+    totalEmployees: filteredMonthlyEmployees.length,
   });
 
-  const summaryBody = monthly.employees.map((emp) => {
+  const summaryBody = filteredMonthlyEmployees.map((emp) => {
     const totalDays = monthly.daysInMonth || 0;
     const present = emp.summary?.presentDays ?? 0;
     const absent = emp.summary?.absenceDays ?? 0;
@@ -89,7 +114,7 @@ export async function generateDetailedAttendancePdf({
     }
   );
 
-  monthly.employees.forEach((emp, idx) => {
+  filteredMonthlyEmployees.forEach((emp, idx) => {
     if (idx > 0) {
       doc.addPage();
     }
