@@ -21,13 +21,10 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [company, setCompany] = useState(null);
-  const isCompanyAdmin = user?.role === 'admin' && Number(user?.company_id) > 0;
   const isSuperAdmin =
     user?.role === 'admin' &&
     (user?.company_id == null || Number(user?.company_id) === 0);
-  const navItems = isCompanyAdmin
-    ? [...baseNavItems, { to: '/settings/change-password', label: 'Change Password' }]
-    : baseNavItems;
+  const navItems = baseNavItems;
   const adminNavItems = isSuperAdmin ? [{ to: '/enquiries', label: 'Enquiries' }] : [];
   const subscription = getSubscriptionStatus(company);
   const showBanner = company && (

@@ -12,6 +12,13 @@ export default function CompanySettingsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
 
+  const [cpCurrentPassword, setCpCurrentPassword] = useState('');
+  const [cpNewPassword, setCpNewPassword] = useState('');
+  const [cpConfirmNewPassword, setCpConfirmNewPassword] = useState('');
+  const [cpSaving, setCpSaving] = useState(false);
+  const [cpError, setCpError] = useState('');
+  const [cpSuccess, setCpSuccess] = useState('');
+
   const [form, setForm] = useState({
     name: '',
     phone: '',
@@ -131,6 +138,52 @@ export default function CompanySettingsPage() {
       setError(err.message || 'Failed to save company profile');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    if (cpSaving) return;
+
+    setCpError('');
+    setCpSuccess('');
+
+    if (!cpCurrentPassword || !cpNewPassword || !cpConfirmNewPassword) {
+      setCpError('All fields are required.');
+      return;
+    }
+    if (cpNewPassword.length < 8) {
+      setCpError('New password must be at least 8 characters.');
+      return;
+    }
+    if (cpNewPassword !== cpConfirmNewPassword) {
+      setCpError('New password and confirm password do not match.');
+      return;
+    }
+
+    try {
+      setCpSaving(true);
+      const res = await authFetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: cpCurrentPassword,
+          new_password: cpNewPassword,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to change password.');
+      }
+
+      setCpSuccess(json.message || 'Password changed successfully.');
+      setCpCurrentPassword('');
+      setCpNewPassword('');
+      setCpConfirmNewPassword('');
+    } catch (err) {
+      setCpError(err.message || 'Failed to change password.');
+    } finally {
+      setCpSaving(false);
     }
   };
 
@@ -285,6 +338,80 @@ export default function CompanySettingsPage() {
             >
               {branchSaving ? 'Adding…' : 'Add branch'}
             </button>
+          </form>
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Change password</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Update your company admin login password.
+          </p>
+
+          <form onSubmit={handleChangePassword} className="mt-4 space-y-4">
+            {(cpError || cpSuccess) && (
+              <div
+                className={`rounded-md border px-3 py-2 text-sm ${
+                  cpError
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                {cpError || cpSuccess}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-700">Current password</label>
+              <input
+                type="password"
+                value={cpCurrentPassword}
+                onChange={(e) => setCpCurrentPassword(e.target.value)}
+                disabled={cpSaving}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                autoComplete="current-password"
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-700">New password</label>
+              <input
+                type="password"
+                value={cpNewPassword}
+                onChange={(e) => setCpNewPassword(e.target.value)}
+                disabled={cpSaving}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                autoComplete="new-password"
+                minLength={8}
+                required
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-700">Confirm new password</label>
+              <input
+                type="password"
+                value={cpConfirmNewPassword}
+                onChange={(e) => setCpConfirmNewPassword(e.target.value)}
+                disabled={cpSaving}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                autoComplete="new-password"
+                minLength={8}
+                required
+              />
+            </div>
+
+            <div className="flex items-center gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="submit"
+                disabled={cpSaving}
+                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {cpSaving ? 'Updating…' : 'Update password'}
+              </button>
+            </div>
           </form>
         </section>
       )}
