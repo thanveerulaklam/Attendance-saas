@@ -316,12 +316,12 @@ export default function PayrollPage() {
   const [generateForm, setGenerateForm] = useState({
     year: currentYear(),
     month: String(new Date().getMonth() + 1),
-    includeOvertime: true,
+    includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
-    includeOvertime: true,
+    includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: true,
   });

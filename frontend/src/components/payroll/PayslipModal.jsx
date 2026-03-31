@@ -253,6 +253,7 @@ export default function PayslipModal({
       ['Lunch Deduct.', formatMoney(b.lunchOverDeduction)],
       ['Advance Repayment', formatMoney(b.salaryAdvance)],
       ['Absent Deduct.', formatMoney(b.absenceDeduction)],
+      ['ESI Deduction', formatMoney(b.esiDeduction)],
     ];
 
     earnings.forEach(([label, value], idx) => {
@@ -519,6 +520,12 @@ punchpay.in
                   <span>Absent Deduct.</span>
                   <span className="font-medium text-amber-700">
                     ₹{formatMoney(breakdown.breakdown?.absenceDeduction)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>ESI Deduction</span>
+                  <span className="font-medium text-amber-700">
+                    ₹{formatMoney(breakdown.breakdown?.esiDeduction)}
                   </span>
                 </div>
               </div>

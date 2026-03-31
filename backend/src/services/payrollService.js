@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { istYmdFromDate, todayIstYmd, SQL_PUNCH_IST_DATE, addDaysIst } = require('../utils/istDate');
 const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceService');
-const { getHolidayDatesForMonth, getWeeklyOffs } = require('./holidayService');
+const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
 const { computeMonthlyBaseAndAbsence } = require('./payrollMath');
@@ -224,7 +224,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
          ORDER BY punch_time ASC`,
         [companyId, employeeId, rangeStart, rangeEnd]
       ),
-      getHolidayDatesForMonth(companyId, year, month),
+      getHolidayDatesForRange(companyId, monthFirstStr, monthLastStr, shift.weeklyOffDays),
     ]);
 
     const firstDayStr = `${year}-${String(month).padStart(2, '0')}-01`;
