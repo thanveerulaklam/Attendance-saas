@@ -493,7 +493,7 @@ async function waiveLoan(companyId, loanId, reason) {
 /**
  * Mark a pending repayment as deducted manually (same effect as payroll deduction).
  */
-async function markRepaymentPaidManually(companyId, repaymentId) {
+async function markRepaymentPaidManually(companyId, repaymentId, data = {}) {
   const result = await pool.query(
     `SELECT
        r.id,
@@ -516,12 +516,17 @@ async function markRepaymentPaidManually(companyId, repaymentId) {
   if (!['active', 'on_hold'].includes(row.loan_status)) {
     throw new AppError('Repayment can only be marked paid when the loan is active or on hold', 400);
   }
+  const paidAmountRaw = data.repayment_amount;
+  const paidAmount = paidAmountRaw != null ? toMoney(paidAmountRaw) : Number(row.repayment_amount || 0);
+  if (!(paidAmount > 0)) {
+    throw new AppError('repayment_amount must be greater than 0', 400);
+  }
   const out = await markRepaymentDeducted(
     companyId,
     row.loan_id,
     row.year,
     row.month,
-    Number(row.repayment_amount || 0),
+    paidAmount,
     { repaymentId: row.id }
   );
   if (!out) {

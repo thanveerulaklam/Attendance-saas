@@ -1340,6 +1340,15 @@ async function getWeeklyPayrollBreakdown(
 
   const grossSalary = earnedBasic + overtimePay + travelAllowance;
   const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+  const pendingAdvanceBalanceResult = await pool.query(
+    `SELECT COALESCE(SUM(outstanding_balance), 0) AS balance
+     FROM employee_advance_loans
+     WHERE company_id = $1
+       AND employee_id = $2
+       AND status IN ('active', 'on_hold')`,
+    [companyId, employeeId]
+  );
+  const pendingAdvanceBalance = Number(pendingAdvanceBalanceResult.rows[0]?.balance || 0);
 
   const salaryAdvance = Number(weekPayrollRow.salary_advance || 0);
   const netSalary = Number(weekPayrollRow.net_salary || 0);
@@ -1382,6 +1391,7 @@ async function getWeeklyPayrollBreakdown(
       esiDeduction,
       totalDeductions,
       salaryAdvance,
+      pendingAdvanceBalance,
       netSalary,
     },
     advance_repayments: [],
@@ -1739,6 +1749,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     existingPayrollResult.rowCount > 0
       ? Number(existingPayrollResult.rows[0].no_leave_incentive || 0)
       : 0;
+  const pendingAdvanceBalanceResult = await pool.query(
+    `SELECT COALESCE(SUM(outstanding_balance), 0) AS balance
+     FROM employee_advance_loans
+     WHERE company_id = $1
+       AND employee_id = $2
+       AND status IN ('active', 'on_hold')`,
+    [companyId, employeeId]
+  );
+  const pendingAdvanceBalance = Number(pendingAdvanceBalanceResult.rows[0]?.balance || 0);
   const netSalary = grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
 
   return {
@@ -1780,6 +1799,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       totalDeductions,
       salaryAdvance,
       noLeaveIncentive,
+      pendingAdvanceBalance,
       netSalary,
     },
     advance_repayments: advanceRepayments,

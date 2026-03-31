@@ -250,13 +250,27 @@ export default function AdvancesPage() {
     }
   }
 
-  async function handleMarkRepaymentPaid(repaymentId) {
+  function askPaidAmount(defaultAmount) {
+    const raw = window.prompt('Enter paid amount for this installment', String(defaultAmount ?? ''));
+    if (raw == null) return null;
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setToast({ type: 'error', message: 'Please enter a valid amount greater than 0' });
+      return null;
+    }
+    return amount;
+  }
+
+  async function handleMarkRepaymentPaid(repaymentId, defaultAmount) {
     if (!window.confirm('Mark this installment as paid? This updates the loan balance like a payroll deduction.')) return;
+    const paidAmount = askPaidAmount(defaultAmount);
+    if (paidAmount == null) return;
     setMarkPaidRepaymentId(repaymentId);
     try {
       const res = await authFetch(`/api/advance-loans/repayments/${repaymentId}/mark-paid`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repayment_amount: paidAmount }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Could not mark as paid');
@@ -387,7 +401,7 @@ export default function AdvancesPage() {
                                       <button
                                         type="button"
                                         disabled={markPaidRepaymentId === r.id}
-                                        onClick={() => handleMarkRepaymentPaid(r.id)}
+                                        onClick={() => handleMarkRepaymentPaid(r.id, r.repayment_amount)}
                                         className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                                       >
                                         {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
@@ -459,7 +473,7 @@ export default function AdvancesPage() {
                         <button
                           type="button"
                           disabled={markPaidRepaymentId === r.id}
-                          onClick={() => handleMarkRepaymentPaid(r.id)}
+                          onClick={() => handleMarkRepaymentPaid(r.id, r.repayment_amount)}
                           className="text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}

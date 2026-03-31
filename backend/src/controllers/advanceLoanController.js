@@ -112,7 +112,7 @@ async function markPaid(req, res, next) {
   try {
     const companyId = req.companyId;
     const repaymentId = Number(req.params.repaymentId);
-    const data = await service.markRepaymentPaidManually(companyId, repaymentId);
+    const data = await service.markRepaymentPaidManually(companyId, repaymentId, req.body || {});
     return res.json({ success: true, data });
   } catch (err) {
     return next(err);

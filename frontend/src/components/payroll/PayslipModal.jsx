@@ -517,6 +517,12 @@ punchpay.in
                   </span>
                 </div>
                 <div className="flex justify-between">
+                  <span>Pending Advance Balance</span>
+                  <span className="font-medium text-amber-700">
+                    ₹{formatMoney(breakdown.breakdown?.pendingAdvanceBalance)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span>Absent Deduct.</span>
                   <span className="font-medium text-amber-700">
                     ₹{formatMoney(breakdown.breakdown?.absenceDeduction)}
