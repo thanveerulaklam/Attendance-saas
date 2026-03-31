@@ -309,7 +309,7 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
       : await client.query(
           `UPDATE employee_advance_repayments
            SET status = 'deducted',
-               repayment_amount = $6,
+               repayment_amount = $5,
                updated_at = NOW()
            WHERE company_id = $1
              AND loan_id = $2
@@ -317,7 +317,7 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
              AND month = $4
              AND status = 'pending'
            RETURNING *`,
-          [companyId, Number(loanId), Number(year), Number(month), 'deducted', repaymentAmount]
+          [companyId, Number(loanId), Number(year), Number(month), repaymentAmount]
         );
     if (repaymentResult.rowCount === 0) {
       if (ownClient) await client.query('COMMIT');
