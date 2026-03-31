@@ -991,7 +991,8 @@ async function generateWeeklyPayroll(
           `SELECT
              r.id,
              r.loan_id,
-             r.repayment_amount
+             r.repayment_amount,
+             r.status
            FROM employee_advance_repayments r
            INNER JOIN employee_advance_loans l
              ON l.id = r.loan_id
@@ -1000,20 +1001,21 @@ async function generateWeeklyPayroll(
              AND r.employee_id = $2
              AND r.year = $3
              AND r.month = $4
-             AND r.status = 'pending'
-             AND l.status = 'active'
+             AND r.status IN ('pending', 'deducted')
+             AND l.status IN ('active', 'on_hold', 'cleared')
            ORDER BY r.id ASC`,
           [companyId, employeeId, endYear, endMonth]
         )
       : { rows: [] };
 
     const repaymentRows = repaymentRowsResult.rows || [];
-    const newRepaymentAdvance = repaymentRows.reduce(
+    const pendingRepaymentRows = repaymentRows.filter((row) => row.status === 'pending');
+    const monthRepaymentAdvance = repaymentRows.reduce(
       (sum, row) => sum + Number(row.repayment_amount || 0),
       0
     );
 
-    const salaryAdvance = salaryAdvanceBase + newRepaymentAdvance;
+    const salaryAdvance = salaryAdvanceBase + monthRepaymentAdvance;
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance;
     const netSalary = grossSalary - deductions - salaryAdvance;
@@ -1067,7 +1069,7 @@ async function generateWeeklyPayroll(
     );
 
     if (applyAdvanceRepayments) {
-      for (const repayment of repaymentRows) {
+      for (const repayment of pendingRepaymentRows) {
         await markRepaymentDeducted(
           companyId,
           repayment.loan_id,
@@ -1507,7 +1509,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           `SELECT
              r.id,
              r.loan_id,
-             r.repayment_amount
+             r.repayment_amount,
+             r.status
            FROM employee_advance_repayments r
            INNER JOIN employee_advance_loans l
              ON l.id = r.loan_id
@@ -1516,15 +1519,16 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
              AND r.employee_id = $2
              AND r.year = $3
              AND r.month = $4
-             AND r.status = 'pending'
-             AND l.status = 'active'
+             AND r.status IN ('pending', 'deducted')
+             AND l.status IN ('active', 'on_hold', 'cleared')
            ORDER BY r.id ASC`,
           [companyId, employeeId, year, month]
         )
       : { rows: [] };
     const repaymentRows = repaymentRowsResult.rows;
-    const newRepaymentAdvance = repaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
-    const salaryAdvance = oldSalaryAdvance + newRepaymentAdvance;
+    const pendingRepaymentRows = repaymentRows.filter((row) => row.status === 'pending');
+    const monthRepaymentAdvance = repaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
+    const salaryAdvance = oldSalaryAdvance + monthRepaymentAdvance;
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
     const globalIncentive = Number(noLeaveIncentive) || 0;
     const effectiveNoLeaveIncentive = shiftIncentive > 0 ? shiftIncentive : globalIncentive;
@@ -1587,7 +1591,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     );
 
     if (applyAdvanceRepayments) {
-      for (const repayment of repaymentRows) {
+      for (const repayment of pendingRepaymentRows) {
         await markRepaymentDeducted(
           companyId,
           repayment.loan_id,

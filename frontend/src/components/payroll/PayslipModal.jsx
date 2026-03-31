@@ -131,6 +131,38 @@ export default function PayslipModal({
   breakdown,
   attendanceDetails,
 }) {
+  const dayDetails = Array.isArray(breakdown?.attendance?.dayDetails)
+    ? breakdown.attendance.dayDetails
+    : [];
+  const fallbackAbsentDates = useMemo(
+    () => dayDetails.filter((d) => d?.status === 'absent').map((d) => d.date).filter(Boolean),
+    [dayDetails]
+  );
+  const fallbackHalfDayDates = useMemo(
+    () => dayDetails.filter((d) => d?.status === 'half_day').map((d) => d.date).filter(Boolean),
+    [dayDetails]
+  );
+  const fallbackLateDetails = useMemo(
+    () =>
+      dayDetails
+        .filter((d) => d?.late === true)
+        .map((d) => ({ date: d.date, minutes: d.minutesLate ?? null }))
+        .filter((d) => Boolean(d.date)),
+    [dayDetails]
+  );
+  const effectiveAbsentDates =
+    Array.isArray(attendanceDetails?.absentDates) && attendanceDetails.absentDates.length > 0
+      ? attendanceDetails.absentDates
+      : fallbackAbsentDates;
+  const effectiveHalfDayDates =
+    Array.isArray(attendanceDetails?.halfDayDates) && attendanceDetails.halfDayDates.length > 0
+      ? attendanceDetails.halfDayDates
+      : fallbackHalfDayDates;
+  const effectiveLateDetails =
+    Array.isArray(attendanceDetails?.lateDetails) && attendanceDetails.lateDetails.length > 0
+      ? attendanceDetails.lateDetails
+      : fallbackLateDetails;
+
   const periodLabel = useMemo(() => {
     if (!payrollRow) return '';
     if (payrollRow.week_start_date && payrollRow.week_end_date) {
@@ -449,11 +481,11 @@ punchpay.in
             </div>
             <div className="mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
-              <p className="mt-0.5">{renderGroupedDayNumbers(attendanceDetails?.absentDates || [])}</p>
+              <p className="mt-0.5">{renderGroupedDayNumbers(effectiveAbsentDates)}</p>
               <p className="mt-2 font-semibold">Late Arrival Dates:</p>
-              <p className="mt-0.5">{renderGroupedLateDetails(attendanceDetails?.lateDetails || [])}</p>
+              <p className="mt-0.5">{renderGroupedLateDetails(effectiveLateDetails)}</p>
               <p className="mt-2 font-semibold">Half Day Dates:</p>
-              <p className="mt-0.5">{renderGroupedDayNumbers(attendanceDetails?.halfDayDates || [])}</p>
+              <p className="mt-0.5">{renderGroupedDayNumbers(effectiveHalfDayDates)}</p>
             </div>
           </section>
 
