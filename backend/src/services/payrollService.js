@@ -1526,9 +1526,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           deductions,
           salary_advance,
           no_leave_incentive,
+          treat_holiday_adjacent_absence_as_working,
           net_salary
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (company_id, employee_id, year, month)
        DO UPDATE SET
           total_days = EXCLUDED.total_days,
@@ -1538,6 +1539,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           deductions = EXCLUDED.deductions,
           salary_advance = EXCLUDED.salary_advance,
           no_leave_incentive = EXCLUDED.no_leave_incentive,
+          treat_holiday_adjacent_absence_as_working = EXCLUDED.treat_holiday_adjacent_absence_as_working,
           net_salary = EXCLUDED.net_salary,
           generated_at = NOW()
        RETURNING *`,
@@ -1553,6 +1555,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         deductions,
         salaryAdvance,
         noLeaveIncentiveAmount,
+        treatHolidayAdjacentAbsenceAsWorking,
         netSalary,
       ]
     );
@@ -1595,6 +1598,19 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
 
+  const existingPayrollResult = await pool.query(
+    `SELECT treat_holiday_adjacent_absence_as_working
+     FROM payroll_records
+     WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
+    [companyId, employeeId, year, month]
+  );
+  const persistedTreatHoliday =
+    existingPayrollResult.rowCount > 0
+      ? Boolean(existingPayrollResult.rows[0].treat_holiday_adjacent_absence_as_working)
+      : false;
+  const effectiveTreatHolidayAdjacentAbsenceAsWorking =
+    options.treatHolidayAdjacentAbsenceAsWorking === true || persistedTreatHoliday;
+
   const todayStr = todayIstYmd();
   const [ty, tm, td] = todayStr.split('-').map(Number);
   const isCurrentMonth = year === ty && month === tm;
@@ -1613,7 +1629,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   const employee = employeeResult.rows[0];
   const summary = await getAttendanceSummary(companyId, employeeId, year, month, {
-    treatHolidayAdjacentAbsenceAsWorking,
+    treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,
     asOfDate,
   });
 
@@ -1727,6 +1743,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       lunchOverDays: summary.lunchOverDays,
       attendanceMode: summary.attendanceMode,
       requiredHoursPerDay: summary.requiredHoursPerDay,
+      treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,
       dayDetails: summary.dayDetails,
     },
     breakdown: {

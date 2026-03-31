@@ -736,9 +736,27 @@ export default function PayrollPage() {
               const holidayDateSet = new Set([...explicitHolidaySet, ...weeklyOffDateSet]);
               if (employee) {
                 const days = employee.days || [];
-                empMeta.absentDates = days
+                const baseAbsentDates = days
                   .filter((d) => !d.present && !holidayDateSet.has(d.date))
                   .map((d) => d.date);
+                const adjustedAbsentDates = [...baseAbsentDates];
+                const treatAdjacentHolidayAsAbsent =
+                  json?.data?.attendance?.treatHolidayAdjacentAbsenceAsWorking === true;
+                if (treatAdjacentHolidayAsAbsent) {
+                  const absentSet = new Set(baseAbsentDates);
+                  for (const holidayDate of holidayDateSet) {
+                    const prev = new Date(`${holidayDate}T00:00:00Z`);
+                    prev.setUTCDate(prev.getUTCDate() - 1);
+                    const next = new Date(`${holidayDate}T00:00:00Z`);
+                    next.setUTCDate(next.getUTCDate() + 1);
+                    const prevKey = prev.toISOString().slice(0, 10);
+                    const nextKey = next.toISOString().slice(0, 10);
+                    if (absentSet.has(prevKey) || absentSet.has(nextKey)) {
+                      adjustedAbsentDates.push(holidayDate);
+                    }
+                  }
+                }
+                empMeta.absentDates = [...new Set(adjustedAbsentDates)].sort();
                 empMeta.halfDayDates = days
                   .filter((d) => d.half_day && !holidayDateSet.has(d.date))
                   .map((d) => d.date);
