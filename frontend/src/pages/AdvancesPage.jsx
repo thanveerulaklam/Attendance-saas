@@ -45,6 +45,7 @@ export default function AdvancesPage() {
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideRepayment, setOverrideRepayment] = useState(null);
   const [skipPending, setSkipPending] = useState(null);
+  const [deletePendingLoanId, setDeletePendingLoanId] = useState(null);
   const [form, setForm] = useState({
     employee_id: '',
     loan_amount: '',
@@ -237,6 +238,29 @@ export default function AdvancesPage() {
     await loadAll();
   }
 
+  async function handleDeleteLoan(loanId) {
+    if (!window.confirm('Delete this advance loan? This cannot be undone.')) return;
+    setDeletePendingLoanId(loanId);
+    try {
+      const res = await authFetch(`/api/advance-loans/${loanId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Unable to delete loan');
+      if (expandedLoanId === loanId) {
+        setExpandedLoanId(null);
+        setExpandedLoan(null);
+      }
+      setToast({ type: 'success', message: 'Advance loan deleted' });
+      await loadAll();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Unable to delete loan' });
+    } finally {
+      setDeletePendingLoanId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -296,7 +320,10 @@ export default function AdvancesPage() {
                       <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
                       <td className="py-2 pr-3">
                         <button type="button" className="mr-2 text-blue-600" onClick={() => openLoanDetails(loan.id)}>Details</button>
-                        <button type="button" className="text-rose-600" onClick={() => handleWaive(loan.id)}>Waive</button>
+                        <button type="button" className="mr-2 text-rose-600" onClick={() => handleWaive(loan.id)}>Waive</button>
+                        <button type="button" className="text-rose-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deletePendingLoanId === loan.id} onClick={() => handleDeleteLoan(loan.id)}>
+                          {deletePendingLoanId === loan.id ? 'Deleting...' : 'Delete'}
+                        </button>
                       </td>
                     </tr>
                     {expandedLoanId === loan.id && expandedLoan && (
@@ -398,6 +425,7 @@ export default function AdvancesPage() {
                 <th className="pb-2 pr-3">Given On</th>
                 <th className="pb-2 pr-3">Closed On</th>
                 <th className="pb-2 pr-3">Status</th>
+                <th className="pb-2 pr-3">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -408,6 +436,11 @@ export default function AdvancesPage() {
                   <td className="py-2 pr-3">{fmtDate(loan.loan_date)}</td>
                   <td className="py-2 pr-3">{fmtDate((loan.updated_at || '').slice(0, 10))}</td>
                   <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
+                  <td className="py-2 pr-3">
+                    <button type="button" className="text-rose-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deletePendingLoanId === loan.id} onClick={() => handleDeleteLoan(loan.id)}>
+                      {deletePendingLoanId === loan.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

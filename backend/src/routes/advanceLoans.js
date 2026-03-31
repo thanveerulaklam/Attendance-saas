@@ -5,6 +5,7 @@ const {
   getEmployeeLoans,
   getMonthly,
   waive,
+  remove,
   getOne,
   updateRepayment,
   skip,
@@ -21,6 +22,7 @@ router.get('/monthly', withAuth, getMonthly);
 router.put('/repayments/:repaymentId', withAuth, updateRepayment);
 router.post('/repayments/:repaymentId/skip', withAuth, skip);
 router.put('/:loanId/waive', withAuth, waive);
+router.delete('/:loanId', withAuth, remove);
 router.get('/:loanId', withAuth, getOne);
 
 module.exports = router;

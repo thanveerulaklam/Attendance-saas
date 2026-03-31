@@ -63,6 +63,17 @@ async function waive(req, res, next) {
   }
 }
 
+async function remove(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const loanId = Number(req.params.loanId);
+    const data = await service.deleteLoan(companyId, loanId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function getOne(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -103,6 +114,7 @@ module.exports = {
   getEmployeeLoans,
   getMonthly,
   waive,
+  remove,
   getOne,
   updateRepayment,
   skip,

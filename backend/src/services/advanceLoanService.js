@@ -26,9 +26,9 @@ async function createRepaymentSchedule(client, loan, loanDateStr, installments, 
     throw new AppError('Invalid loan date provided', 400);
   }
 
-  // Repayments start from next month after loan date.
+  // Repayments start from the same month as the loan date by default.
   let repaymentYear = loanDate.getFullYear();
-  let repaymentMonth = loanDate.getMonth() + 2;
+  let repaymentMonth = loanDate.getMonth() + 1;
   if (repaymentMonth > 12) {
     repaymentMonth = 1;
     repaymentYear += 1;
@@ -456,6 +456,52 @@ async function waiveLoan(companyId, loanId, reason) {
   }
 }
 
+async function deleteLoan(companyId, loanId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `SELECT id
+       FROM employee_advance_loans
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, Number(loanId)]
+    );
+    if (existing.rowCount === 0) throw new AppError('Loan not found', 404);
+
+    const deducted = await client.query(
+      `SELECT COUNT(*)::int AS count
+       FROM employee_advance_repayments
+       WHERE company_id = $1 AND loan_id = $2 AND status = 'deducted'`,
+      [companyId, Number(loanId)]
+    );
+    if (Number(deducted.rows[0]?.count || 0) > 0) {
+      throw new AppError('Cannot delete loan with deducted repayments', 400);
+    }
+
+    await client.query(
+      `DELETE FROM employee_advance_repayments
+       WHERE company_id = $1 AND loan_id = $2`,
+      [companyId, Number(loanId)]
+    );
+
+    const removed = await client.query(
+      `DELETE FROM employee_advance_loans
+       WHERE company_id = $1 AND id = $2
+       RETURNING id`,
+      [companyId, Number(loanId)]
+    );
+
+    await client.query('COMMIT');
+    return { id: removed.rows[0].id, deleted: true };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   createAdvanceLoan,
   getCompanyLoans,
@@ -468,4 +514,5 @@ module.exports = {
   getEmployeeLoanSummary,
   addLoanToEmployee,
   waiveLoan,
+  deleteLoan,
 };
