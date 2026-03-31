@@ -293,35 +293,69 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
   try {
     if (ownClient) await client.query('BEGIN');
 
-    const repaymentResult = await client.query(
-      `UPDATE employee_advance_repayments
-       SET status = 'deducted',
-           repayment_amount = $6,
-           updated_at = NOW()
-       WHERE company_id = $1
-         AND loan_id = $2
-         AND year = $3
-         AND month = $4
-         AND status = 'pending'
-       RETURNING *`,
-      [companyId, Number(loanId), Number(year), Number(month), 'deducted', toMoney(actualAmount)]
-    );
+    const repaymentAmount = toMoney(actualAmount);
+    const repaymentResult = opts.repaymentId
+      ? await client.query(
+          `UPDATE employee_advance_repayments
+           SET status = 'deducted',
+               repayment_amount = $3,
+               updated_at = NOW()
+           WHERE company_id = $1
+             AND id = $2
+             AND status = 'pending'
+           RETURNING *`,
+          [companyId, Number(opts.repaymentId), repaymentAmount]
+        )
+      : await client.query(
+          `UPDATE employee_advance_repayments
+           SET status = 'deducted',
+               repayment_amount = $6,
+               updated_at = NOW()
+           WHERE company_id = $1
+             AND loan_id = $2
+             AND year = $3
+             AND month = $4
+             AND status = 'pending'
+           RETURNING *`,
+          [companyId, Number(loanId), Number(year), Number(month), 'deducted', repaymentAmount]
+        );
     if (repaymentResult.rowCount === 0) {
       if (ownClient) await client.query('COMMIT');
       return null;
     }
     const repayment = repaymentResult.rows[0];
 
-    const amt = toMoney(actualAmount != null ? actualAmount : repayment.repayment_amount);
+    const loanIdToUpdate = Number(repayment.loan_id);
     const loanUpdateResult = await client.query(
-      `UPDATE employee_advance_loans
-       SET total_repaid = ROUND((total_repaid + $3)::numeric, 2),
-           outstanding_balance = GREATEST(ROUND((outstanding_balance - $3)::numeric, 2), 0),
-           status = CASE WHEN (outstanding_balance - $3) <= 0 THEN 'cleared' ELSE status END,
+      `WITH repaid AS (
+         SELECT
+           l.id,
+           l.company_id,
+           l.loan_amount,
+           l.status AS current_status,
+           COALESCE(SUM(r.repayment_amount) FILTER (WHERE r.status = 'deducted'), 0)::numeric AS deducted_total
+         FROM employee_advance_loans l
+         LEFT JOIN employee_advance_repayments r
+           ON r.company_id = l.company_id
+          AND r.loan_id = l.id
+         WHERE l.company_id = $1 AND l.id = $2
+         GROUP BY l.id, l.company_id, l.loan_amount, l.status
+       )
+       UPDATE employee_advance_loans l
+       SET total_repaid = ROUND(repaid.deducted_total, 2),
+           outstanding_balance = GREATEST(ROUND((l.loan_amount - repaid.deducted_total)::numeric, 2), 0),
+           status = CASE
+             WHEN l.status = 'waived' THEN 'waived'
+             WHEN repaid.deducted_total >= l.loan_amount THEN 'cleared'
+             WHEN l.status = 'on_hold' THEN 'on_hold'
+             ELSE 'active'
+           END,
            updated_at = NOW()
-       WHERE company_id = $1 AND id = $2
-       RETURNING *`,
-      [companyId, Number(loanId), amt]
+       FROM repaid
+       WHERE l.company_id = repaid.company_id
+         AND l.id = repaid.id
+       RETURNING l.*`,
+      [companyId, loanIdToUpdate]
     );
 
     if (ownClient) await client.query('COMMIT');
@@ -487,7 +521,8 @@ async function markRepaymentPaidManually(companyId, repaymentId) {
     row.loan_id,
     row.year,
     row.month,
-    Number(row.repayment_amount || 0)
+    Number(row.repayment_amount || 0),
+    { repaymentId: row.id }
   );
   if (!out) {
     throw new AppError('Could not mark repayment as paid', 400);
