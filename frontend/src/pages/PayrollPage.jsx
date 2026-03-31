@@ -1185,7 +1185,7 @@ export default function PayrollPage() {
                     <th className="pb-2 pr-3 font-medium">Period</th>
                     <th className="pb-2 pr-3 font-medium text-right">Present</th>
                     <th className="pb-2 pr-3 font-medium text-right">Overtime (hrs)</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Gross</th>
+                    <th className="pb-2 pr-3 font-medium text-right">Absent days</th>
                     <th className="pb-2 pr-3 font-medium text-right">Deductions</th>
                     <th className="pb-2 pr-3 font-medium text-right">Advance</th>
                     <th className="pb-2 pr-3 font-medium text-right">Incentive</th>
@@ -1232,7 +1232,7 @@ export default function PayrollPage() {
                         </span>
                       </td>
                       <td className="py-3 pr-3 text-right text-slate-800">
-                        {formatMoney(row.gross_salary)}
+                        {Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0)).toFixed(2)}
                       </td>
                       <td className="py-3 pr-3 text-right text-amber-700 font-medium">
                         −{formatMoney(row.deductions)}
