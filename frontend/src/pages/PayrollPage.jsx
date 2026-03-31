@@ -65,6 +65,7 @@ function payrollRowsToCsv(rows, payrollMode) {
           'Period',
           'Present days',
           'Total days',
+          'Absent days',
           'Overtime (hrs)',
           'Gross',
           'Deductions',
@@ -78,6 +79,7 @@ function payrollRowsToCsv(rows, payrollMode) {
           'Week',
           'Present days',
           'Total days',
+          'Absent days',
           'Overtime (hrs)',
           'Gross',
           'Deductions',
@@ -101,6 +103,7 @@ function payrollRowsToCsv(rows, payrollMode) {
         period,
         row.present_days,
         row.total_days,
+        row.absence_days ?? Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0)),
         row.overtime_hours,
         row.gross_salary,
         row.deductions,
@@ -143,6 +146,11 @@ function buildPayrollPrintDocument(rows, payrollMode, companyName) {
         <td>${escapeHtml(row.employee_code || '')}</td>
         <td>${escapeHtml(period)}</td>
         <td class="num">${row.present_days ?? ''} / ${row.total_days ?? ''}</td>
+        <td class="num">${
+          row.absence_days != null
+            ? row.absence_days
+            : Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0))
+        }</td>
         <td class="num">${row.overtime_hours ?? ''}</td>
         <td class="num">${formatMoney(row.gross_salary)}</td>
         <td class="num">${formatMoney(row.deductions)}</td>
@@ -176,6 +184,7 @@ function buildPayrollPrintDocument(rows, payrollMode, companyName) {
         <th>Code</th>
         <th>${payrollMode === 'monthly' ? 'Period' : 'Week'}</th>
         <th>Present</th>
+        <th>Absent</th>
         <th>OT (hrs)</th>
         <th>Gross</th>
         <th>Deductions</th>
@@ -204,6 +213,7 @@ function payrollRowsToPdfData(rows, payrollMode) {
     'Code',
     payrollMode === 'monthly' ? 'Period' : 'Week',
     'Present / Total',
+    'Absent days',
     'OT (hrs)',
     'Gross',
     'Deductions',
@@ -224,6 +234,11 @@ function payrollRowsToPdfData(rows, payrollMode) {
       String(row.employee_code ?? ''),
       period,
       `${row.present_days ?? ''} / ${row.total_days ?? ''}`,
+      String(
+        row.absence_days != null
+          ? row.absence_days
+          : Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0))
+      ),
       String(row.overtime_hours ?? ''),
       formatMoney(row.gross_salary),
       formatMoney(row.deductions),
