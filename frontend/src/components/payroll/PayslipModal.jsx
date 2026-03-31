@@ -153,6 +153,10 @@ export default function PayslipModal({
   }, [payrollRow]);
 
   if (!open || !payrollRow || !breakdown) return null;
+  const b = breakdown.breakdown || {};
+  const isCompletePeriod =
+    b.isMonthComplete != null ? Boolean(b.isMonthComplete) : (b.isWeekComplete != null ? Boolean(b.isWeekComplete) : true);
+  const basicEarnedLabel = isCompletePeriod ? 'Basic Earned' : 'Basic Earned (MTD)';
 
   const handlePrint = () => {
     window.print();
@@ -235,9 +239,11 @@ export default function PayslipModal({
     y += 10;
     doc.setFont(undefined, 'normal');
 
-    const b = breakdown.breakdown;
     const earnings = [
-      ['Basic Salary', formatMoney(b.basicSalary)],
+      ...(isCompletePeriod
+        ? [['Basic Salary', formatMoney(breakdown.employee?.basic_salary)]]
+        : []),
+      [basicEarnedLabel, formatMoney(b.basicSalary)],
       ['Travel Allow.', formatMoney(b.travelAllowance)],
       ['Overtime Pay', formatMoney(b.overtimePay)],
       ['No Leave Bonus', formatMoney(b.noLeaveIncentive)],
@@ -288,7 +294,6 @@ export default function PayslipModal({
 
   const handleShareWhatsappSummary = () => {
     const att = breakdown.attendance;
-    const b = breakdown.breakdown;
     const overtimeHours = formatHours(att?.overtimeHours);
     const payslipText = `
 PAYSLIP — ${periodLabel}
@@ -457,8 +462,14 @@ punchpay.in
                 EARNINGS
               </h3>
               <div className="space-y-1.5">
+                {isCompletePeriod && (
+                  <div className="flex justify-between">
+                    <span>Basic Salary</span>
+                    <span className="font-medium">₹{formatMoney(breakdown.employee?.basic_salary)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
-                  <span>Basic Salary</span>
+                  <span>{basicEarnedLabel}</span>
                   <span className="font-medium">₹{formatMoney(breakdown.breakdown?.basicSalary)}</span>
                 </div>
                 <div className="flex justify-between">

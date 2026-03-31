@@ -5,6 +5,7 @@ const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceS
 const { getHolidayDatesForMonth, getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
+const { computeMonthlyBaseAndAbsence } = require('./payrollMath');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 
@@ -1446,20 +1447,15 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
 
-    let earnedBasic;
-    let absenceDeduction = 0;
-    if (isMonthComplete) {
-      // For full months, pay for all worked days plus the shift's paid leave allowance.
-      // Example: 30-day month, 27 present, 4 paid leave → salary for 31 days.
-      earnedBasic = dailyRate * (summary.presentDays + paidLeaveDaysAllowed);
-    } else {
-      // For partial months, pay only for days actually worked.
-      earnedBasic = dailyRate * summary.presentDays;
-    }
-    // For hours_based shifts, apply salary deduction based on hours-driven absences.
-    if (summary.attendanceMode === 'hours_based') {
-      absenceDeduction = dailyRate * (summary.absenceDays || 0);
-    }
+    const { earnedBasic, absenceDeduction } = computeMonthlyBaseAndAbsence({
+      isMonthComplete,
+      attendanceMode: summary.attendanceMode,
+      basicSalary,
+      dailyRate,
+      presentDays: summary.presentDays,
+      paidLeaveDaysAllowed,
+      absenceDays: summary.absenceDays,
+    });
 
     let lateDeduction = 0;
     if (
@@ -1636,16 +1632,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
 
-  let earnedBasic;
-  let absenceDeduction = 0;
-  if (isMonthComplete) {
-    earnedBasic = dailyRate * (summary.presentDays + paidLeaveDaysAllowed);
-  } else {
-    earnedBasic = dailyRate * summary.presentDays;
-  }
-  if (summary.attendanceMode === 'hours_based') {
-    absenceDeduction = dailyRate * (summary.absenceDays || 0);
-  }
+  const { earnedBasic, absenceDeduction } = computeMonthlyBaseAndAbsence({
+    isMonthComplete,
+    attendanceMode: summary.attendanceMode,
+    basicSalary,
+    dailyRate,
+    presentDays: summary.presentDays,
+    paidLeaveDaysAllowed,
+    absenceDays: summary.absenceDays,
+  });
 
   let lateDeduction = 0;
   if (

@@ -26,6 +26,28 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+function buildWeeklyOffDateSet(year, month, weeklyOffDays) {
+  const y = Number(year);
+  const m = Number(month);
+  const days = Array.isArray(weeklyOffDays)
+    ? [...new Set(weeklyOffDays.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6))]
+    : [];
+  if (!y || !m || m < 1 || m > 12 || days.length === 0) {
+    return new Set();
+  }
+
+  const result = new Set();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  for (let d = 1; d <= daysInMonth; d += 1) {
+    const utcDate = new Date(Date.UTC(y, m - 1, d));
+    if (days.includes(utcDate.getUTCDay())) {
+      const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      result.add(key);
+    }
+  }
+  return result;
+}
+
 function escapeCsvCell(value) {
   const str = value == null ? '' : String(value);
   if (/[,"\r\n]/.test(str)) {
@@ -655,9 +677,20 @@ export default function PayrollPage() {
               year: String(detailRow.year),
               month: String(detailRow.month),
             });
-            const holidaysRes = await authFetch(`/api/holidays?${holidayParams}`, {
-              headers: { 'Content-Type': 'application/json' },
-            });
+            const [holidaysRes, weeklyOffRes, empRes, shiftsRes] = await Promise.all([
+              authFetch(`/api/holidays?${holidayParams}`, {
+                headers: { 'Content-Type': 'application/json' },
+              }),
+              authFetch('/api/holidays/weekly-off', {
+                headers: { 'Content-Type': 'application/json' },
+              }),
+              authFetch(`/api/employees/${detailRow.employee_id}`, {
+                headers: { 'Content-Type': 'application/json' },
+              }),
+              authFetch('/api/shifts?limit=200', {
+                headers: { 'Content-Type': 'application/json' },
+              }),
+            ]);
             const empMeta = {
               designation: null,
               department: null,
@@ -674,12 +707,32 @@ export default function PayrollPage() {
               const monthlyJson = await monthlyRes.json();
               const data = monthlyJson.data;
               const employee = Array.isArray(data?.employees) ? data.employees[0] : null;
+              const empJson = empRes.ok ? await empRes.json() : null;
+              const employeeRecord = empJson?.data || null;
+              const shiftsJson = shiftsRes.ok ? await shiftsRes.json() : null;
+              const shifts = Array.isArray(shiftsJson?.data) ? shiftsJson.data : [];
+              const employeeShift = shifts.find((s) => Number(s.id) === Number(employeeRecord?.shift_id));
+              const shiftWeeklyOffDays = Array.isArray(employeeShift?.weekly_off_days)
+                ? employeeShift.weekly_off_days
+                : [];
+              const companyWeeklyOffJson = weeklyOffRes.ok ? await weeklyOffRes.json() : null;
+              const companyWeeklyOffDays = Array.isArray(companyWeeklyOffJson?.data?.days)
+                ? companyWeeklyOffJson.data.days
+                : [];
+              const effectiveWeeklyOffDays =
+                shiftWeeklyOffDays.length > 0 ? shiftWeeklyOffDays : companyWeeklyOffDays;
               const holidayJson = holidaysRes.ok ? await holidaysRes.json() : { data: [] };
-              const holidayDateSet = new Set(
+              const explicitHolidaySet = new Set(
                 (holidayJson.data || [])
                   .map((h) => (h?.holiday_date || h?.date || '').slice(0, 10))
                   .filter(Boolean)
               );
+              const weeklyOffDateSet = buildWeeklyOffDateSet(
+                detailRow.year,
+                detailRow.month,
+                effectiveWeeklyOffDays
+              );
+              const holidayDateSet = new Set([...explicitHolidaySet, ...weeklyOffDateSet]);
               if (employee) {
                 const days = employee.days || [];
                 empMeta.absentDates = days
@@ -697,19 +750,14 @@ export default function PayrollPage() {
                   }));
                 empMeta.lateCount = empMeta.lateDetails.length;
               }
-            }
-            const empRes = await authFetch(`/api/employees/${detailRow.employee_id}`, {
-              headers: { 'Content-Type': 'application/json' },
-            });
-            if (empRes.ok) {
-              const empJson = await empRes.json();
-              const e = empJson.data;
-              if (e) {
-                empMeta.designation = e.designation || null;
-                empMeta.department = e.department || null;
-                empMeta.join_date = e.join_date || null;
-                empMeta.shift_name = e.shift_name || null;
-                empMeta.phone = e.phone || null;
+              if (employeeRecord) {
+                empMeta.designation = employeeRecord.designation || null;
+                empMeta.department = employeeRecord.department || null;
+                empMeta.join_date = employeeRecord.join_date || null;
+                empMeta.phone = employeeRecord.phone_number || null;
+              }
+              if (employeeShift) {
+                empMeta.shift_name = employeeShift.shift_name || null;
               }
             }
             if (isMounted) {
