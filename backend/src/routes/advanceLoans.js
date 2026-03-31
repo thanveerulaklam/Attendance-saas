@@ -9,6 +9,7 @@ const {
   getOne,
   updateRepayment,
   skip,
+  markPaid,
 } = require('../controllers/advanceLoanController');
 const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
 
@@ -21,6 +22,7 @@ router.get('/employee/:employeeId', withAuth, getEmployeeLoans);
 router.get('/monthly', withAuth, getMonthly);
 router.put('/repayments/:repaymentId', withAuth, updateRepayment);
 router.post('/repayments/:repaymentId/skip', withAuth, skip);
+router.post('/repayments/:repaymentId/mark-paid', withAuth, markPaid);
 router.put('/:loanId/waive', withAuth, waive);
 router.delete('/:loanId', withAuth, remove);
 router.get('/:loanId', withAuth, getOne);

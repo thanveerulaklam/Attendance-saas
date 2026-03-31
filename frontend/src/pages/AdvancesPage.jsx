@@ -49,6 +49,7 @@ export default function AdvancesPage() {
   const [overrideRepayment, setOverrideRepayment] = useState(null);
   const [skipPending, setSkipPending] = useState(null);
   const [deletePendingLoanId, setDeletePendingLoanId] = useState(null);
+  const [markPaidRepaymentId, setMarkPaidRepaymentId] = useState(null);
   const [form, setForm] = useState({
     employee_id: '',
     loan_amount: '',
@@ -241,6 +242,34 @@ export default function AdvancesPage() {
     await loadAll();
   }
 
+  async function refreshExpandedLoan(loanId) {
+    const res = await authFetch(`/api/advance-loans/${loanId}`, { headers: { 'Content-Type': 'application/json' } });
+    if (res.ok) {
+      const json = await res.json();
+      setExpandedLoan(json.data);
+    }
+  }
+
+  async function handleMarkRepaymentPaid(repaymentId) {
+    if (!window.confirm('Mark this installment as paid? This updates the loan balance like a payroll deduction.')) return;
+    setMarkPaidRepaymentId(repaymentId);
+    try {
+      const res = await authFetch(`/api/advance-loans/repayments/${repaymentId}/mark-paid`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Could not mark as paid');
+      setToast({ type: 'success', message: 'Installment marked as paid' });
+      if (expandedLoanId) await refreshExpandedLoan(expandedLoanId);
+      await loadAll();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Could not mark as paid' });
+    } finally {
+      setMarkPaidRepaymentId(null);
+    }
+  }
+
   async function handleDeleteLoan(loanId) {
     if (!window.confirm('Delete this advance loan? This cannot be undone.')) return;
     setDeletePendingLoanId(loanId);
@@ -343,6 +372,7 @@ export default function AdvancesPage() {
                                 <th className="pb-1 pr-2">Suggested</th>
                                 <th className="pb-1 pr-2">Amount</th>
                                 <th className="pb-1 pr-2">Status</th>
+                                <th className="pb-1 pr-2"> </th>
                               </tr>
                             </thead>
                             <tbody>
@@ -352,6 +382,18 @@ export default function AdvancesPage() {
                                   <td className="py-1 pr-2">₹{formatMoney(r.suggested_amount)}</td>
                                   <td className="py-1 pr-2">₹{formatMoney(r.repayment_amount)}</td>
                                   <td className="py-1 pr-2">{r.status}</td>
+                                  <td className="py-1 pr-2 text-right">
+                                    {r.status === 'pending' && ['active', 'on_hold'].includes(expandedLoan.status) && (
+                                      <button
+                                        type="button"
+                                        disabled={markPaidRepaymentId === r.id}
+                                        onClick={() => handleMarkRepaymentPaid(r.id)}
+                                        className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
+                                      </button>
+                                    )}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -413,6 +455,16 @@ export default function AdvancesPage() {
                       >
                         Skip Month
                       </button>
+                      {r.status === 'pending' && ['active', 'on_hold'].includes(r.loan_status) && (
+                        <button
+                          type="button"
+                          disabled={markPaidRepaymentId === r.id}
+                          onClick={() => handleMarkRepaymentPaid(r.id)}
+                          className="text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

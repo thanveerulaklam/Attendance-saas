@@ -456,6 +456,45 @@ async function waiveLoan(companyId, loanId, reason) {
   }
 }
 
+/**
+ * Mark a pending repayment as deducted manually (same effect as payroll deduction).
+ */
+async function markRepaymentPaidManually(companyId, repaymentId) {
+  const result = await pool.query(
+    `SELECT
+       r.id,
+       r.loan_id,
+       r.year,
+       r.month,
+       r.repayment_amount,
+       r.status,
+       l.status AS loan_status
+     FROM employee_advance_repayments r
+     INNER JOIN employee_advance_loans l ON l.id = r.loan_id AND l.company_id = r.company_id
+     WHERE r.company_id = $1 AND r.id = $2`,
+    [companyId, Number(repaymentId)]
+  );
+  if (result.rowCount === 0) throw new AppError('Repayment not found', 404);
+  const row = result.rows[0];
+  if (row.status !== 'pending') {
+    throw new AppError('Only pending repayments can be marked as paid', 400);
+  }
+  if (!['active', 'on_hold'].includes(row.loan_status)) {
+    throw new AppError('Repayment can only be marked paid when the loan is active or on hold', 400);
+  }
+  const out = await markRepaymentDeducted(
+    companyId,
+    row.loan_id,
+    row.year,
+    row.month,
+    Number(row.repayment_amount || 0)
+  );
+  if (!out) {
+    throw new AppError('Could not mark repayment as paid', 400);
+  }
+  return out;
+}
+
 async function deleteLoan(companyId, loanId) {
   const client = await pool.connect();
   try {
@@ -510,6 +549,7 @@ module.exports = {
   getMonthlyRepayments,
   updateRepayment,
   markRepaymentDeducted,
+  markRepaymentPaidManually,
   skipRepayment,
   getEmployeeLoanSummary,
   addLoanToEmployee,

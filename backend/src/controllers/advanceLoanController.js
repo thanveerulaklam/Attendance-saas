@@ -108,6 +108,17 @@ async function skip(req, res, next) {
   }
 }
 
+async function markPaid(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const repaymentId = Number(req.params.repaymentId);
+    const data = await service.markRepaymentPaidManually(companyId, repaymentId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   listLoans,
   createLoan,
@@ -118,4 +129,5 @@ module.exports = {
   getOne,
   updateRepayment,
   skip,
+  markPaid,
 };
