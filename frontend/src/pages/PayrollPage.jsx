@@ -334,6 +334,7 @@ export default function PayrollPage() {
   const [attendanceMeta, setAttendanceMeta] = useState(null);
   const [selectedPayroll, setSelectedPayroll] = useState(() => new Map());
   const [exporting, setExporting] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
 
   const subscription = getSubscriptionStatus(company);
@@ -403,7 +404,7 @@ export default function PayrollPage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [payrollMode, year, month, weekStartDate, page, employeeId]);
+  }, [payrollMode, year, month, weekStartDate, page, employeeId, reloadKey]);
 
   useEffect(() => {
     setSelectedPayroll(new Map());
@@ -854,6 +855,7 @@ export default function PayrollPage() {
         setYear(Number(y));
         setMonth(m);
         setEmployeeId('');
+        setReloadKey((k) => k + 1);
       } catch (err) {
         setToast({
           type: 'error',
@@ -907,6 +909,7 @@ export default function PayrollPage() {
       setToast({ type: 'success', message: successMsg });
       setPage(1);
       setEmployeeId('');
+      setReloadKey((k) => k + 1);
     } catch (err) {
       setToast({
         type: 'error',
