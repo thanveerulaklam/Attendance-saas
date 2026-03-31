@@ -50,6 +50,9 @@ export default function AdvancesPage() {
   const [skipPending, setSkipPending] = useState(null);
   const [deletePendingLoanId, setDeletePendingLoanId] = useState(null);
   const [markPaidRepaymentId, setMarkPaidRepaymentId] = useState(null);
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
+  const [markPaidTarget, setMarkPaidTarget] = useState(null);
+  const [markPaidAmount, setMarkPaidAmount] = useState('');
   const [form, setForm] = useState({
     employee_id: '',
     loan_amount: '',
@@ -250,21 +253,21 @@ export default function AdvancesPage() {
     }
   }
 
-  function askPaidAmount(defaultAmount) {
-    const raw = window.prompt('Enter paid amount for this installment', String(defaultAmount ?? ''));
-    if (raw == null) return null;
-    const amount = Number(raw);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setToast({ type: 'error', message: 'Please enter a valid amount greater than 0' });
-      return null;
-    }
-    return amount;
+  function openMarkPaidDialog(repayment) {
+    setMarkPaidTarget(repayment);
+    setMarkPaidAmount(String(repayment.repayment_amount || ''));
+    setMarkPaidOpen(true);
   }
 
-  async function handleMarkRepaymentPaid(repaymentId, defaultAmount) {
+  async function handleMarkRepaymentPaidSubmit() {
+    if (!markPaidTarget) return;
+    const repaymentId = markPaidTarget.id;
     if (!window.confirm('Mark this installment as paid? This updates the loan balance like a payroll deduction.')) return;
-    const paidAmount = askPaidAmount(defaultAmount);
-    if (paidAmount == null) return;
+    const paidAmount = Number(markPaidAmount);
+    if (!Number.isFinite(paidAmount) || paidAmount <= 0) {
+      setToast({ type: 'error', message: 'Please enter a valid amount greater than 0' });
+      return;
+    }
     setMarkPaidRepaymentId(repaymentId);
     try {
       const res = await authFetch(`/api/advance-loans/repayments/${repaymentId}/mark-paid`, {
@@ -275,6 +278,9 @@ export default function AdvancesPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Could not mark as paid');
       setToast({ type: 'success', message: 'Installment marked as paid' });
+      setMarkPaidOpen(false);
+      setMarkPaidTarget(null);
+      setMarkPaidAmount('');
       if (expandedLoanId) await refreshExpandedLoan(expandedLoanId);
       await loadAll();
     } catch (err) {
@@ -401,7 +407,7 @@ export default function AdvancesPage() {
                                       <button
                                         type="button"
                                         disabled={markPaidRepaymentId === r.id}
-                                        onClick={() => handleMarkRepaymentPaid(r.id, r.repayment_amount)}
+                                        onClick={() => openMarkPaidDialog(r)}
                                         className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                                       >
                                         {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
@@ -473,7 +479,7 @@ export default function AdvancesPage() {
                         <button
                           type="button"
                           disabled={markPaidRepaymentId === r.id}
-                          onClick={() => handleMarkRepaymentPaid(r.id, r.repayment_amount)}
+                          onClick={() => openMarkPaidDialog(r)}
                           className="text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
@@ -576,6 +582,47 @@ export default function AdvancesPage() {
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setOverrideOpen(false)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs">Cancel</button>
               <button type="button" onClick={handleOverrideSubmit} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs text-white">Save Override</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {markPaidOpen && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
+          <div className="w-full max-w-sm rounded-xl bg-white p-4">
+            <h2 className="text-sm font-semibold text-slate-900">Mark Installment as Paid</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              Enter amount collected for this installment.
+            </p>
+            <div className="mt-3 space-y-2">
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={markPaidAmount}
+                onChange={(e) => setMarkPaidAmount(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setMarkPaidOpen(false);
+                  setMarkPaidTarget(null);
+                  setMarkPaidAmount('');
+                }}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={markPaidRepaymentId != null}
+                onClick={handleMarkRepaymentPaidSubmit}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+              >
+                {markPaidRepaymentId != null ? 'Saving...' : 'Mark Paid'}
+              </button>
             </div>
           </div>
         </div>
