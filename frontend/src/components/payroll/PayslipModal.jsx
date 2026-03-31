@@ -197,84 +197,87 @@ export default function PayslipModal({
   const handleDownloadPdf = () => {
     const doc = createPdf();
     const pageWidth = doc.internal.pageSize.getWidth();
-    let y = 32;
+    const margin = 28;
+    const contentWidth = pageWidth - margin * 2;
+    const rightX = pageWidth - margin;
+    let y = 26;
 
-    doc.setFontSize(14);
+    const drawKvp = (label, value, x, rowY, valueX) => {
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(label), x, rowY);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(String(value ?? '—'), valueX, rowY, { align: 'right' });
+    };
+
+    // Header
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y - 6, contentWidth, 34, 3, 3, 'F');
+    doc.setFontSize(15);
     doc.setFont(undefined, 'bold');
-    doc.text(String(company?.name || 'Company'), pageWidth / 2, y, { align: 'center' });
-    y += 14;
+    doc.setTextColor(15, 23, 42);
+    doc.text(String(company?.name || 'Company'), margin + 6, y + 4);
     doc.setFontSize(9);
     doc.setFont(undefined, 'normal');
+    doc.setTextColor(71, 85, 105);
     const addressLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
-    if (addressLine) {
-      doc.text(addressLine, pageWidth / 2, y, { align: 'center' });
-      y += 12;
-    }
-    doc.setLineWidth(0.5);
-    doc.line(40, y, pageWidth - 40, y);
-
-    y += 18;
-    doc.setFontSize(12);
+    doc.text(addressLine || '—', margin + 6, y + 14);
     doc.setFont(undefined, 'bold');
-    doc.text('PAYSLIP', pageWidth / 2, y, { align: 'center' });
-    y += 12;
-    doc.setFontSize(9);
+    doc.setTextColor(30, 64, 175);
+    doc.text('PAYSLIP', rightX - 6, y + 4, { align: 'right' });
     doc.setFont(undefined, 'normal');
-    doc.text(`Period: ${periodLabel}`, pageWidth / 2, y, { align: 'center' });
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Period: ${periodLabel}`, rightX - 6, y + 14, { align: 'right' });
+    y += 38;
 
-    y += 20;
+    // Employee details
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, y, contentWidth, 46, 3, 3);
     doc.setFontSize(10);
     doc.setFont(undefined, 'bold');
-    doc.text('EMPLOYEE DETAILS', 40, y);
-    y += 10;
-    doc.setFont(undefined, 'normal');
-    const leftX = 40;
-    const midX = 220;
-    const lines = [
-      ['Employee Name', payrollRow.employee_name],
-      ['Employee Code', payrollRow.employee_code],
-      ['Designation', attendanceDetails?.designation || ''],
-      ['Department', attendanceDetails?.department || ''],
-      ['Date of Joining', formatJoinDate(attendanceDetails?.join_date)],
-      ['Shift', attendanceDetails?.shift_name || ''],
-    ];
-    lines.forEach(([label, value], idx) => {
-      const targetX = idx < 3 ? leftX : midX;
-      const rowY = y + (Math.floor(idx / 2) * 12);
-      doc.text(`${label} : ${value || '—'}`, targetX, rowY);
-    });
+    doc.setTextColor(51, 65, 85);
+    doc.text('EMPLOYEE DETAILS', margin + 6, y + 10);
+    const col1X = margin + 6;
+    const col2X = margin + contentWidth / 2 + 2;
+    const row1 = y + 20;
+    const rowGap = 8;
+    drawKvp('Employee Name', payrollRow.employee_name, col1X, row1, margin + contentWidth / 2 - 8);
+    drawKvp('Employee Code', payrollRow.employee_code, col1X, row1 + rowGap, margin + contentWidth / 2 - 8);
+    drawKvp('Designation', attendanceDetails?.designation || '—', col1X, row1 + rowGap * 2, margin + contentWidth / 2 - 8);
+    drawKvp('Department', attendanceDetails?.department || '—', col2X, row1, rightX - 6);
+    drawKvp('Date of Joining', formatJoinDate(attendanceDetails?.join_date), col2X, row1 + rowGap, rightX - 6);
+    drawKvp('Shift', attendanceDetails?.shift_name || '—', col2X, row1 + rowGap * 2, rightX - 6);
+    y += 54;
 
-    y += 40;
+    // Attendance summary
+    doc.roundedRect(margin, y, contentWidth, 40, 3, 3);
+    doc.setFontSize(10);
     doc.setFont(undefined, 'bold');
-    doc.text('ATTENDANCE SUMMARY', 40, y);
-    y += 10;
-    doc.setFont(undefined, 'normal');
+    doc.setTextColor(51, 65, 85);
+    doc.text('ATTENDANCE SUMMARY', margin + 6, y + 10);
     const att = breakdown.attendance;
     const overtimeHours = formatHours(att?.overtimeHours);
-    const attLines = [
-      ['Working Days', att?.workingDays ?? '—'],
-      ['Days Present', att?.presentDays ?? '—'],
-      ['Days Absent', att?.absenceDays ?? '—'],
-      ['Half Days', attendanceDetails?.halfDayCount ?? '—'],
-      ['Late Arrivals', attendanceDetails?.lateCount ?? '—'],
-      ['Overtime Hours', overtimeHours === '—' ? '—' : `${overtimeHours} hrs`],
-    ];
-    attLines.forEach(([label, value], idx) => {
-      const rowY = y + idx * 12;
-      doc.text(`${label} : ${value}`, 40, rowY);
-    });
+    const attRow = y + 20;
+    drawKvp('Working Days', att?.workingDays ?? '—', col1X, attRow, margin + contentWidth / 2 - 8);
+    drawKvp('Days Present', att?.presentDays ?? '—', col1X, attRow + rowGap, margin + contentWidth / 2 - 8);
+    drawKvp('Days Absent', att?.absenceDays ?? '—', col1X, attRow + rowGap * 2, margin + contentWidth / 2 - 8);
+    drawKvp('Half Days', attendanceDetails?.halfDayCount ?? '—', col2X, attRow, rightX - 6);
+    drawKvp('Late Arrivals', `${attendanceDetails?.lateCount ?? '—'} times`, col2X, attRow + rowGap, rightX - 6);
+    drawKvp('Overtime', overtimeHours === '—' ? '—' : `${overtimeHours} hrs`, col2X, attRow + rowGap * 2, rightX - 6);
+    y += 48;
 
-    y += 80;
+    // Earnings and deductions
+    const sectionWidth = (contentWidth - 8) / 2;
+    doc.roundedRect(margin, y, sectionWidth, 58, 3, 3);
+    doc.roundedRect(margin + sectionWidth + 8, y, sectionWidth, 58, 3, 3);
     doc.setFont(undefined, 'bold');
-    doc.text('EARNINGS', 40, y);
-    doc.text('DEDUCTIONS', pageWidth / 2 + 20, y);
-    y += 10;
-    doc.setFont(undefined, 'normal');
-
+    doc.setTextColor(51, 65, 85);
+    doc.text('EARNINGS', margin + 6, y + 10);
+    doc.text('DEDUCTIONS', margin + sectionWidth + 14, y + 10);
+    doc.setFontSize(9);
     const earnings = [
-      ...(isCompletePeriod
-        ? [['Basic Salary', formatMoney(breakdown.employee?.basic_salary)]]
-        : []),
+      ...(isCompletePeriod ? [[ 'Basic Salary', formatMoney(breakdown.employee?.basic_salary) ]] : []),
       [basicEarnedLabel, formatMoney(b.basicSalary)],
       ['Travel Allow.', formatMoney(b.travelAllowance)],
       ['Overtime Pay', formatMoney(b.overtimePay)],
@@ -284,34 +287,31 @@ export default function PayslipModal({
       ['Late Deduction', formatMoney(b.lateDeduction)],
       ['Lunch Deduct.', formatMoney(b.lunchOverDeduction)],
       ['Advance Repayment', formatMoney(b.salaryAdvance)],
+      ['Pending Advance', formatMoney(b.pendingAdvanceBalance)],
       ['Absent Deduct.', formatMoney(b.absenceDeduction)],
       ['ESI Deduction', formatMoney(b.esiDeduction)],
     ];
+    earnings.forEach(([label, value], idx) => drawKvp(label, `₹${value}`, margin + 6, y + 20 + idx * 7, margin + sectionWidth - 8));
+    deductions.forEach(([label, value], idx) => drawKvp(label, `₹${value}`, margin + sectionWidth + 14, y + 20 + idx * 7, rightX - 6));
+    y += 66;
 
-    earnings.forEach(([label, value], idx) => {
-      const rowY = y + idx * 12;
-      doc.text(`${label}  ₹${value}`, 40, rowY);
-    });
-    deductions.forEach(([label, value], idx) => {
-      const rowY = y + idx * 12;
-      doc.text(`${label}  ₹${value}`, pageWidth / 2 + 20, rowY);
-    });
-
-    y += 64;
-    doc.setFont(undefined, 'bold');
-    doc.text(`GROSS SALARY    ₹${formatMoney(b.grossSalary)}`, 40, y);
-    y += 14;
-    doc.text(`TOTAL DEDUCT.   ₹${formatMoney(b.totalDeductions + b.salaryAdvance)}`, 40, y);
-    y += 18;
-    doc.setFontSize(12);
-    doc.text(`NET SALARY: ₹${formatMoney(b.netSalary)}`, 40, y);
-    y += 18;
+    // Totals
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y, contentWidth, 26, 3, 3, 'F');
     doc.setFontSize(9);
-    doc.setFont(undefined, 'normal');
-    doc.text(`ESI Amount : ₹${formatMoney(b.esiDeduction)}`, 40, y);
-
-    const footerY = doc.internal.pageSize.getHeight() - 28;
+    drawKvp('Gross Salary', `₹${formatMoney(b.grossSalary)}`, margin + 6, y + 10, margin + contentWidth / 3 - 8);
+    drawKvp('Total Deductions', `₹${formatMoney(b.totalDeductions + b.salaryAdvance)}`, margin + contentWidth / 3 + 6, y + 10, margin + (contentWidth * 2) / 3 - 8);
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(5, 150, 105);
+    doc.text(`Net Salary: ₹${formatMoney(b.netSalary)}`, rightX - 6, y + 10, { align: 'right' });
     doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`ESI: ₹${formatMoney(b.esiDeduction)}`, rightX - 6, y + 19, { align: 'right' });
+
+    const footerY = doc.internal.pageSize.getHeight() - 14;
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
     doc.text('Generated by PunchPay | punchpay.in', pageWidth / 2, footerY, { align: 'center' });
 
     const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
