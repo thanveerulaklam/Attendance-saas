@@ -1617,7 +1617,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
 
   const existingPayrollResult = await pool.query(
-    `SELECT treat_holiday_adjacent_absence_as_working
+    `SELECT
+       treat_holiday_adjacent_absence_as_working,
+       salary_advance,
+       no_leave_incentive
      FROM payroll_records
      WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
     [companyId, employeeId, year, month]
@@ -1727,16 +1730,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     outstanding_balance_after: Number(row.outstanding_balance_after || 0),
   }));
   const newSalaryAdvance = advanceRepayments.reduce((sum, row) => sum + Number(row.this_month_deduction || 0), 0);
-  const salaryAdvance = oldSalaryAdvance + newSalaryAdvance;
-  let noLeaveIncentive = 0;
-  const recordResult = await pool.query(
-    `SELECT no_leave_incentive FROM payroll_records
-     WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
-    [companyId, employeeId, year, month]
-  );
-  if (recordResult.rowCount > 0 && Number(recordResult.rows[0].no_leave_incentive) > 0) {
-    noLeaveIncentive = Number(recordResult.rows[0].no_leave_incentive);
-  }
+  const computedSalaryAdvance = oldSalaryAdvance + newSalaryAdvance;
+  const salaryAdvance =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].salary_advance || 0)
+      : computedSalaryAdvance;
+  const noLeaveIncentive =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].no_leave_incentive || 0)
+      : 0;
   const netSalary = grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
 
   return {
