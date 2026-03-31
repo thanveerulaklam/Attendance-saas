@@ -318,12 +318,13 @@ export default function PayrollPage() {
     month: String(new Date().getMonth() + 1),
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
+    applyAdvanceRepayments: false,
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
-    applyAdvanceRepayments: true,
+    applyAdvanceRepayments: false,
   });
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState(null);
@@ -847,6 +848,7 @@ export default function PayrollPage() {
               0,
               Number(generateForm.noLeaveIncentive) || 0
             ),
+            apply_advance_repayments: generateForm.applyAdvanceRepayments === true,
           }),
         });
         if (!res.ok) {
@@ -1405,7 +1407,26 @@ export default function PayrollPage() {
                 </p>
               </div>
               {payrollMode === 'monthly' ? (
-                <div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={generateForm.applyAdvanceRepayments === true}
+                      onChange={(e) =>
+                        setGenerateForm((f) => ({
+                          ...f,
+                          applyAdvanceRepayments: e.target.checked,
+                        }))
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      Deduct advances now
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-500">
+                    If unchecked, advance repayments remain pending and can be deducted later.
+                  </p>
                   <label className="text-[11px] font-medium text-slate-700">
                     Incentive for no leave (₹)
                   </label>
@@ -1439,7 +1460,7 @@ export default function PayrollPage() {
                       className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                     />
                     <span className="text-[11px] text-slate-700">
-                      Apply advance repayments now
+                      Deduct advances now
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">

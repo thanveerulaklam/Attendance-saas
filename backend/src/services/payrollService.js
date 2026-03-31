@@ -1401,9 +1401,11 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
   const {
     includeOvertime = true,
     treatHolidayAdjacentAbsenceAsWorking = false,
+    apply_advance_repayments: applyAdvanceRepaymentsRaw = true,
     noLeaveIncentive = 0,
     allowedBranchIds = null,
   } = payrollOptions;
+  const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
   const client = await pool.connect();
 
   try {
@@ -1490,24 +1492,26 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const esiDeduction = Number(employee.esi_amount || 0);
     const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
     const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
-    const repaymentRowsResult = await client.query(
-      `SELECT
-         r.id,
-         r.loan_id,
-         r.repayment_amount
-       FROM employee_advance_repayments r
-       INNER JOIN employee_advance_loans l
-         ON l.id = r.loan_id
-        AND l.company_id = r.company_id
-       WHERE r.company_id = $1
-         AND r.employee_id = $2
-         AND r.year = $3
-         AND r.month = $4
-         AND r.status = 'pending'
-         AND l.status = 'active'
-       ORDER BY r.id ASC`,
-      [companyId, employeeId, year, month]
-    );
+    const repaymentRowsResult = applyAdvanceRepayments
+      ? await client.query(
+          `SELECT
+             r.id,
+             r.loan_id,
+             r.repayment_amount
+           FROM employee_advance_repayments r
+           INNER JOIN employee_advance_loans l
+             ON l.id = r.loan_id
+            AND l.company_id = r.company_id
+           WHERE r.company_id = $1
+             AND r.employee_id = $2
+             AND r.year = $3
+             AND r.month = $4
+             AND r.status = 'pending'
+             AND l.status = 'active'
+           ORDER BY r.id ASC`,
+          [companyId, employeeId, year, month]
+        )
+      : { rows: [] };
     const repaymentRows = repaymentRowsResult.rows;
     const newRepaymentAdvance = repaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
     const salaryAdvance = oldSalaryAdvance + newRepaymentAdvance;
@@ -1572,15 +1576,17 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       ]
     );
 
-    for (const repayment of repaymentRows) {
-      await markRepaymentDeducted(
-        companyId,
-        repayment.loan_id,
-        year,
-        month,
-        Number(repayment.repayment_amount || 0),
-        { client }
-      );
+    if (applyAdvanceRepayments) {
+      for (const repayment of repaymentRows) {
+        await markRepaymentDeducted(
+          companyId,
+          repayment.loan_id,
+          year,
+          month,
+          Number(repayment.repayment_amount || 0),
+          { client }
+        );
+      }
     }
 
     await client.query('COMMIT');

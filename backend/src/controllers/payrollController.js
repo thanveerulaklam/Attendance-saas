@@ -95,7 +95,7 @@ async function generate(req, res, next) {
 
 /**
  * POST /api/payroll/generate-all
- * Body: { year, month, include_overtime?, treat_holiday_adjacent_absence_as_working? }
+ * Body: { year, month, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_advance_repayments? }
  * Generates payroll for all active employees for the given month.
  */
 async function generateAll(req, res, next) {
@@ -106,6 +106,7 @@ async function generateAll(req, res, next) {
       month: monthRaw,
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
+      apply_advance_repayments: applyAdvanceRepaymentsRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
     } = req.body || {};
 
@@ -113,6 +114,7 @@ async function generateAll(req, res, next) {
     const month = Number(monthRaw);
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
+    const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
     const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
 
     if (!companyId || !year || !month || month < 1 || month > 12) {
@@ -125,6 +127,7 @@ async function generateAll(req, res, next) {
     const result = await generateMonthlyPayrollForAllActive(companyId, year, month, {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
+      apply_advance_repayments: applyAdvanceRepayments,
       noLeaveIncentive,
       allowedBranchIds: req.allowedBranchIds,
     });
