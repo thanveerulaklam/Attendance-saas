@@ -24,6 +24,10 @@ const demoEnquiriesRouter = require('./routes/demoEnquiries');
 
 const app = express();
 
+// Respect reverse proxy headers in production deployments (e.g. Nginx/Render/Railway),
+// so req.ip and rate limits are applied to real client IPs.
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet({ contentSecurityPolicy: false }));
 
