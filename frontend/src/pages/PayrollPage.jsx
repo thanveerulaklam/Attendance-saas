@@ -328,6 +328,8 @@ export default function PayrollPage() {
   });
   const [generating, setGenerating] = useState(false);
   const [toast, setToast] = useState(null);
+  const [generationFailures, setGenerationFailures] = useState([]);
+  const [failureModalOpen, setFailureModalOpen] = useState(false);
   const [company, setCompany] = useState(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailRow, setDetailRow] = useState(null);
@@ -864,6 +866,8 @@ export default function PayrollPage() {
         const generated = data.generated ?? 0;
         const failed = data.failed ?? 0;
         setModalOpen(false);
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        setGenerationFailures(errors);
         const successMsg =
           failed > 0
             ? `Payroll generated for ${generated} employees. ${failed} failed.`
@@ -920,6 +924,8 @@ export default function PayrollPage() {
       const generated = data.generated ?? 0;
       const failed = data.failed ?? 0;
       setModalOpen(false);
+      const errors = Array.isArray(data.errors) ? data.errors : [];
+      setGenerationFailures(errors);
       const successMsg =
         failed > 0
           ? `Weekly payroll generated for ${generated} employees. ${failed} failed.`
@@ -955,10 +961,21 @@ export default function PayrollPage() {
             <div>
               <p className="font-medium">{toast.type === 'error' ? 'Error' : 'Success'}</p>
               <p className="mt-0.5">{toast.message}</p>
+              {toast.type !== 'error' && generationFailures.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFailureModalOpen(true)}
+                  className="mt-1 text-[11px] font-medium text-amber-700 underline hover:text-amber-800"
+                >
+                  View all failures
+                </button>
+              )}
             </div>
             <button
               type="button"
-              onClick={() => setToast(null)}
+              onClick={() => {
+                setToast(null);
+              }}
               className="ml-2 text-[11px] text-slate-400 hover:text-slate-600"
             >
               Close
@@ -1499,6 +1516,44 @@ export default function PayrollPage() {
           breakdown={breakdown}
           attendanceDetails={attendanceMeta}
         />
+      )}
+
+      {failureModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Payroll Generation Failures</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {generationFailures.length} employee{generationFailures.length !== 1 ? 's' : ''} failed in the last generation.
+            </p>
+            <div className="mt-3 max-h-[360px] overflow-y-auto rounded-lg border border-slate-200">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="text-left text-slate-600">
+                    <th className="px-3 py-2">Employee ID</th>
+                    <th className="px-3 py-2">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {generationFailures.map((f, idx) => (
+                    <tr key={`${f.employee_id}-${idx}`} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium text-slate-800">#{f.employee_id}</td>
+                      <td className="px-3 py-2 text-slate-700">{f.message || 'Generation failed'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setFailureModalOpen(false)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
