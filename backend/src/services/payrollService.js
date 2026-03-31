@@ -57,6 +57,8 @@ function rowToShiftConfig(row) {
         ? 'shift_based'
         : 'day_based';
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
+  const halfDayHoursRaw = Number(row.half_day_hours);
+  const halfDayHours = Number.isFinite(halfDayHoursRaw) ? halfDayHoursRaw : null;
   const weeklyOffDaysRaw = Array.isArray(row.weekly_off_days) ? row.weekly_off_days : [];
   const weeklyOffDays = [...new Set(
     weeklyOffDaysRaw
@@ -82,6 +84,7 @@ function rowToShiftConfig(row) {
     weeklyOffDays,
     attendanceMode,
     requiredHoursPerDay,
+    halfDayHours,
   };
 }
 
@@ -101,6 +104,7 @@ async function getDefaultShiftForCompany(client, companyId) {
        paid_leave_days,
        weekly_off_days,
        attendance_mode,
+       half_day_hours,
        required_hours_per_day
      FROM shifts
      WHERE company_id = $1
@@ -136,6 +140,7 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          paid_leave_days,
          weekly_off_days,
          attendance_mode,
+         half_day_hours,
          required_hours_per_day
        FROM shifts
        WHERE company_id = $1 AND id = $2`,

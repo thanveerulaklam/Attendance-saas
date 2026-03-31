@@ -28,6 +28,7 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        no_leave_incentive,
        paid_leave_days,
        attendance_mode,
+       half_day_hours,
        required_hours_per_day,
        created_at
      FROM shifts
@@ -57,6 +58,7 @@ async function createShift(companyId, data) {
     noLeaveIncentive,
     paidLeaveDays,
     attendanceMode,
+    halfDayHours,
     requiredHoursPerDay,
   } = parsed;
 
@@ -82,9 +84,10 @@ async function createShift(companyId, data) {
        no_leave_incentive,
        paid_leave_days,
        attendance_mode,
+       half_day_hours,
        required_hours_per_day
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
      RETURNING
        id,
        company_id,
@@ -101,6 +104,7 @@ async function createShift(companyId, data) {
        no_leave_incentive,
        paid_leave_days,
        attendance_mode,
+       half_day_hours,
        required_hours_per_day,
        created_at`,
     [
@@ -118,6 +122,7 @@ async function createShift(companyId, data) {
       noLeaveIncentive,
       paidLeaveDays,
       attendanceMode,
+      halfDayHours,
       requiredHoursPerDay,
     ]
   );
@@ -162,6 +167,10 @@ function parseShiftData(data) {
   const requiredHoursPerDay = Number.isFinite(requiredHoursPerDayRaw)
     ? Math.min(24, Math.max(1, requiredHoursPerDayRaw))
     : 8;
+  const halfDayHoursRaw = Number(data.half_day_hours);
+  const halfDayHours = Number.isFinite(halfDayHoursRaw)
+    ? Math.min(24, Math.max(0, halfDayHoursRaw))
+    : null;
   const weeklyOffDays = Array.isArray(data.weekly_off_days)
     ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : [];
@@ -180,6 +189,7 @@ function parseShiftData(data) {
     noLeaveIncentive,
     paidLeaveDays,
     attendanceMode,
+    halfDayHours,
     requiredHoursPerDay,
   };
 }
@@ -231,8 +241,9 @@ async function updateShift(companyId, shiftId, data) {
        no_leave_incentive = $12,
        paid_leave_days = $13,
        attendance_mode = $14,
-       required_hours_per_day = $15
-     WHERE company_id = $1 AND id = $16
+       required_hours_per_day = $15,
+       half_day_hours = $16
+     WHERE company_id = $1 AND id = $17
      RETURNING
        id,
        company_id,
@@ -249,6 +260,7 @@ async function updateShift(companyId, shiftId, data) {
        no_leave_incentive,
        paid_leave_days,
        attendance_mode,
+       half_day_hours,
        required_hours_per_day,
        created_at`,
     [
@@ -267,6 +279,7 @@ async function updateShift(companyId, shiftId, data) {
       parsed.paidLeaveDays,
       parsed.attendanceMode,
       parsed.requiredHoursPerDay,
+      parsed.halfDayHours,
       shiftId,
     ]
   );

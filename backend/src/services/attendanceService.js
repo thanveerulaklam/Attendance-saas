@@ -94,6 +94,8 @@ function rowToShiftConfig(row) {
   const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
   const attendanceMode = parseAttendanceMode(row);
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
+  const halfDayHoursRaw = Number(row.half_day_hours);
+  const halfDayHours = Number.isFinite(halfDayHoursRaw) ? halfDayHoursRaw : null;
   const overtimeAllowed = row.allow_overtime === true || row.allow_overtime === 'true';
   return {
     startHour,
@@ -106,6 +108,7 @@ function rowToShiftConfig(row) {
     lunchMinutesAllotted,
     attendanceMode,
     requiredHoursPerDay,
+    halfDayHours,
     overtimeAllowed,
   };
 }
@@ -137,7 +140,7 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
  */
 async function getShiftConfig(companyId) {
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, allow_overtime
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, allow_overtime
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -158,7 +161,7 @@ async function getShiftConfig(companyId) {
 async function getShiftConfigById(shiftId) {
   if (!shiftId) return null;
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, allow_overtime
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, allow_overtime
      FROM shifts WHERE id = $1`,
     [shiftId]
   );
@@ -177,7 +180,7 @@ async function getShiftConfigMap(companyId, shiftIds) {
   const uniqueIds = [...new Set((shiftIds || []).filter(Boolean))];
   if (uniqueIds.length === 0) return map;
   const result = await pool.query(
-    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours
      FROM shifts WHERE id = ANY($1::bigint[])`,
     [uniqueIds]
   );
@@ -374,7 +377,11 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
   const midpointMs = shiftStartMs + (shiftConfig.shiftMs || 0) / 2;
 
   let halfDay = false;
-  if (present && !fullDay && !leftDuringLunch && midpointMs) {
+  const configuredHalfDayHours = Number(shiftConfig.halfDayHours);
+  if (Number.isFinite(configuredHalfDayHours) && configuredHalfDayHours > 0) {
+    const workedHours = workedMs / (60 * 60 * 1000);
+    halfDay = present && workedHours < configuredHalfDayHours;
+  } else if (present && !fullDay && !leftDuringLunch && midpointMs) {
     if (lastOutTime && lastOutTime.getTime() < midpointMs) {
       halfDay = true;
     } else if (firstInTime && firstInTime.getTime() > midpointMs) {

@@ -18,6 +18,7 @@ const emptyForm = () => ({
   paid_leave_days: 0,
   attendance_mode: 'day_based',
   required_hours_per_day: 8,
+  half_day_hours: 0,
 });
 
 export default function ShiftsPage() {
@@ -70,6 +71,7 @@ export default function ShiftsPage() {
       'no_leave_incentive',
       'paid_leave_days',
       'required_hours_per_day',
+      'half_day_hours',
     ];
     const value = numericFields.includes(field)
       ? Number(event.target.value || 0)
@@ -114,6 +116,7 @@ export default function ShiftsPage() {
       paid_leave_days: shift.paid_leave_days ?? 0,
       attendance_mode: shift.attendance_mode || 'day_based',
       required_hours_per_day: shift.required_hours_per_day ?? 8,
+      half_day_hours: shift.half_day_hours ?? 0,
     });
     setEditingShift(shift);
     setError(null);
@@ -278,6 +281,29 @@ export default function ShiftsPage() {
                   />
                 </div>
               </div>
+
+              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Half-day threshold hours (optional)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.5}
+                    value={form.half_day_hours}
+                    onChange={handleChange('half_day_hours')}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="0"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    If set above 0, days with worked hours below this value are treated as half-day.
+                    Leave 0 to use default midpoint logic.
+                  </p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
@@ -499,6 +525,12 @@ export default function ShiftsPage() {
                           {(shift.required_hours_per_day ?? 8)}h / day
                         </span>
                       )}
+                      {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') &&
+                        Number(shift.half_day_hours || 0) > 0 && (
+                          <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                            Half-day &lt; {shift.half_day_hours}h
+                          </span>
+                        )}
                     </div>
                   </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
@@ -684,6 +716,21 @@ export default function ShiftsPage() {
                     step={0.5}
                     value={form.required_hours_per_day}
                     onChange={handleChange('required_hours_per_day')}
+                    disabled={savingEdit}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                  />
+                </div>
+              )}
+              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Half-day threshold hours</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.5}
+                    value={form.half_day_hours}
+                    onChange={handleChange('half_day_hours')}
                     disabled={savingEdit}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
                   />
