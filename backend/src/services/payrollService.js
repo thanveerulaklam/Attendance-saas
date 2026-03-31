@@ -1021,6 +1021,7 @@ async function generateWeeklyPayroll(
          week_end_date,
          total_days,
          present_days,
+         absence_days,
          overtime_hours,
          gross_salary,
          deductions,
@@ -1028,12 +1029,13 @@ async function generateWeeklyPayroll(
          no_leave_incentive,
          net_salary
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        ON CONFLICT (company_id, employee_id, week_start_date)
        DO UPDATE SET
          week_end_date = EXCLUDED.week_end_date,
          total_days = EXCLUDED.total_days,
          present_days = EXCLUDED.present_days,
+         absence_days = EXCLUDED.absence_days,
          overtime_hours = EXCLUDED.overtime_hours,
          gross_salary = EXCLUDED.gross_salary,
          deductions = EXCLUDED.deductions,
@@ -1049,12 +1051,13 @@ async function generateWeeklyPayroll(
         weekEnd,
         summary.daysInRange,
         summary.presentDays,
+        summary.absenceDays,
         summary.overtimeHours,
         grossSalary,
         deductions,
         salaryAdvance,
         0,
-        netSalary,
+        netSalary
       ]
     );
 
@@ -1208,6 +1211,7 @@ async function listWeeklyPayrollRecords(
        w.week_end_date,
        w.total_days,
        w.present_days,
+       w.absence_days,
        w.overtime_hours,
        w.gross_salary,
        w.deductions,
@@ -1521,6 +1525,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           year,
           total_days,
           present_days,
+          absence_days,
           overtime_hours,
           gross_salary,
           deductions,
@@ -1529,11 +1534,12 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           treat_holiday_adjacent_absence_as_working,
           net_salary
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
        ON CONFLICT (company_id, employee_id, year, month)
        DO UPDATE SET
           total_days = EXCLUDED.total_days,
           present_days = EXCLUDED.present_days,
+          absence_days = EXCLUDED.absence_days,
           overtime_hours = EXCLUDED.overtime_hours,
           gross_salary = EXCLUDED.gross_salary,
           deductions = EXCLUDED.deductions,
@@ -1550,6 +1556,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         year,
         summary.daysInMonth,
         summary.presentDays,
+        summary.absenceDays,
         summary.overtimeHours,
         grossSalary,
         deductions,
@@ -1831,6 +1838,7 @@ async function listPayrollRecords(
         p.month,
         p.total_days,
         p.present_days,
+        p.absence_days,
         p.overtime_hours,
         p.gross_salary,
         p.deductions,

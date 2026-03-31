@@ -1232,7 +1232,16 @@ export default function PayrollPage() {
                         </span>
                       </td>
                       <td className="py-3 pr-3 text-right text-slate-800">
-                        {Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0)).toFixed(2)}
+                        {(() => {
+                          const absentDaysRaw = row.absence_days;
+                          const fallback = Math.max(
+                            0,
+                            Number(row.total_days || 0) - Number(row.present_days || 0)
+                          );
+                          const value = absentDaysRaw != null ? Number(absentDaysRaw) : fallback;
+                          if (!Number.isFinite(value)) return '0';
+                          return Number.isInteger(value) ? String(value) : value.toFixed(2);
+                        })()}
                       </td>
                       <td className="py-3 pr-3 text-right text-amber-700 font-medium">
                         −{formatMoney(row.deductions)}

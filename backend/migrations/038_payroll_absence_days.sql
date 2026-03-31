@@ -1,0 +1,6 @@
+ALTER TABLE payroll_records
+ADD COLUMN IF NOT EXISTS absence_days NUMERIC(5,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE weekly_payroll_records
+ADD COLUMN IF NOT EXISTS absence_days NUMERIC(5,2) NOT NULL DEFAULT 0;
+
