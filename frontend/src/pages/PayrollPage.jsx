@@ -336,6 +336,129 @@ function formatWeekLabel(weekStartDate, weekEndDate) {
   return `${sLabel} — ${eLabel} ${sYear}`;
 }
 
+function formatPayslipPeriodLabel(row, payrollMode) {
+  if (payrollMode === 'weekly') {
+    return formatWeekLabel(row.week_start_date, row.week_end_date);
+  }
+  return new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceMeta, isFirstPage }) {
+  if (!isFirstPage) doc.addPage();
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 28;
+  const contentWidth = pageWidth - margin * 2;
+  const rightX = pageWidth - margin;
+  let y = 26;
+  const b = breakdown?.breakdown || {};
+  const att = breakdown?.attendance || {};
+  const periodLabel = formatPayslipPeriodLabel(row, payrollMode);
+
+  const drawKvp = (label, value, x, rowY, valueX) => {
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(String(label), x, rowY);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(String(value ?? '—'), valueX, rowY, { align: 'right' });
+  };
+
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(margin, y - 6, contentWidth, 34, 3, 3, 'F');
+  doc.setFontSize(15);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(String(company?.name || 'Company'), margin + 6, y + 4);
+  doc.setFontSize(9);
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(71, 85, 105);
+  const addressLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
+  doc.text(addressLine || '—', margin + 6, y + 14);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(30, 64, 175);
+  doc.text('PAYSLIP', rightX - 6, y + 4, { align: 'right' });
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Period: ${periodLabel}`, rightX - 6, y + 14, { align: 'right' });
+  y += 38;
+
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(margin, y, contentWidth, 46, 3, 3);
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text('EMPLOYEE DETAILS', margin + 6, y + 10);
+  const col1X = margin + 6;
+  const col2X = margin + contentWidth / 2 + 2;
+  const row1 = y + 20;
+  const rowGap = 8;
+  drawKvp('Employee Name', row.employee_name, col1X, row1, margin + contentWidth / 2 - 8);
+  drawKvp('Employee Code', row.employee_code, col1X, row1 + rowGap, margin + contentWidth / 2 - 8);
+  drawKvp('Department', attendanceMeta?.department || '—', col1X, row1 + rowGap * 2, margin + contentWidth / 2 - 8);
+  drawKvp('Date of Joining', attendanceMeta?.join_date ? new Date(attendanceMeta.join_date).toLocaleDateString('en-IN') : '—', col2X, row1, rightX - 6);
+  drawKvp('Shift', attendanceMeta?.shift_name || '—', col2X, row1 + rowGap, rightX - 6);
+  drawKvp('Payroll Type', payrollMode === 'weekly' ? 'Weekly' : 'Monthly', col2X, row1 + rowGap * 2, rightX - 6);
+  y += 54;
+
+  doc.roundedRect(margin, y, contentWidth, 40, 3, 3);
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text('ATTENDANCE SUMMARY', margin + 6, y + 10);
+  const attRow = y + 20;
+  drawKvp('Working Days', att.workingDays ?? '—', col1X, attRow, margin + contentWidth / 2 - 8);
+  drawKvp('Present Days', att.presentDays ?? '—', col1X, attRow + rowGap, margin + contentWidth / 2 - 8);
+  drawKvp('Absent Days', att.absenceDays ?? '—', col1X, attRow + rowGap * 2, margin + contentWidth / 2 - 8);
+  drawKvp('Late Arrivals', `${att.lateDays ?? 0} times`, col2X, attRow, rightX - 6);
+  drawKvp('Half Days', att.halfDayDays ?? '—', col2X, attRow + rowGap, rightX - 6);
+  drawKvp('Overtime', `${Number(att.overtimeHours || 0)} hrs`, col2X, attRow + rowGap * 2, rightX - 6);
+  y += 48;
+
+  const sectionWidth = (contentWidth - 8) / 2;
+  doc.roundedRect(margin, y, sectionWidth, 58, 3, 3);
+  doc.roundedRect(margin + sectionWidth + 8, y, sectionWidth, 58, 3, 3);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text('EARNINGS', margin + 6, y + 10);
+  doc.text('DEDUCTIONS', margin + sectionWidth + 14, y + 10);
+  doc.setFontSize(9);
+  const earnings = [
+    ['Basic Earned', formatMoney(b.basicSalary)],
+    ['Travel Allow.', formatMoney(b.travelAllowance)],
+    ['Overtime Pay', formatMoney(b.overtimePay)],
+    ['No Leave Bonus', formatMoney(b.noLeaveIncentive)],
+  ];
+  const deductions = [
+    ['Late Deduction', formatMoney(b.lateDeduction)],
+    ['Lunch Deduct.', formatMoney(b.lunchOverDeduction)],
+    ['Advance Repayment', formatMoney(b.salaryAdvance)],
+    ['Absent Deduct.', formatMoney(b.absenceDeduction)],
+    ['ESI Deduction', formatMoney(b.esiDeduction)],
+  ];
+  earnings.forEach(([label, value], idx) => drawKvp(label, `₹${value}`, margin + 6, y + 20 + idx * 7, margin + sectionWidth - 8));
+  deductions.forEach(([label, value], idx) => drawKvp(label, `₹${value}`, margin + sectionWidth + 14, y + 20 + idx * 7, rightX - 6));
+  y += 66;
+
+  doc.setFillColor(248, 250, 252);
+  doc.roundedRect(margin, y, contentWidth, 26, 3, 3, 'F');
+  doc.setFontSize(9);
+  drawKvp('Gross Salary', `₹${formatMoney(b.grossSalary)}`, margin + 6, y + 10, margin + contentWidth / 3 - 8);
+  drawKvp('Total Deductions', `₹${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`, margin + contentWidth / 3 + 6, y + 10, margin + (contentWidth * 2) / 3 - 8);
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(5, 150, 105);
+  doc.text(`Net Salary: ₹${formatMoney(b.netSalary)}`, rightX - 6, y + 10, { align: 'right' });
+
+  const footerY = doc.internal.pageSize.getHeight() - 14;
+  doc.setFontSize(8);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Generated by PunchPay | punchpay.in', pageWidth / 2, footerY, { align: 'center' });
+}
+
 export default function PayrollPage() {
   const [records, setRecords] = useState([]);
   const [total, setTotal] = useState(0);
@@ -606,6 +729,124 @@ export default function PayrollPage() {
     }
     setToast(null);
     savePayrollPdf(rows);
+  }
+
+  async function fetchPayslipPayload(row) {
+    if (payrollMode === 'weekly') {
+      const params = new URLSearchParams({
+        employee_id: String(row.employee_id),
+        week_start_date: String(row.week_start_date),
+      });
+      const [breakdownRes, employeeRes] = await Promise.all([
+        authFetch(`/api/payroll/weekly/breakdown?${params}`, { headers: { 'Content-Type': 'application/json' } }),
+        authFetch(`/api/employees/${row.employee_id}`, { headers: { 'Content-Type': 'application/json' } }),
+      ]);
+      if (!breakdownRes.ok) throw new Error(`Failed payslip for ${row.employee_name}`);
+      const breakdownJson = await breakdownRes.json();
+      const employeeJson = employeeRes.ok ? await employeeRes.json() : null;
+      const e = employeeJson?.data || null;
+      return {
+        breakdown: breakdownJson.data,
+        attendanceMeta: {
+          department: e?.department || null,
+          join_date: e?.join_date || null,
+          shift_name: e?.shift_name || null,
+        },
+      };
+    }
+
+    const params = new URLSearchParams({
+      employee_id: String(row.employee_id),
+      year: String(row.year),
+      month: String(row.month),
+    });
+    const [breakdownRes, employeeRes, shiftsRes] = await Promise.all([
+      authFetch(`/api/payroll/breakdown?${params}`, { headers: { 'Content-Type': 'application/json' } }),
+      authFetch(`/api/employees/${row.employee_id}`, { headers: { 'Content-Type': 'application/json' } }),
+      authFetch('/api/shifts?limit=200', { headers: { 'Content-Type': 'application/json' } }),
+    ]);
+    if (!breakdownRes.ok) throw new Error(`Failed payslip for ${row.employee_name}`);
+
+    const [breakdownJson, employeeJson, shiftsJson] = await Promise.all([
+      breakdownRes.json(),
+      employeeRes.ok ? employeeRes.json() : Promise.resolve(null),
+      shiftsRes.ok ? shiftsRes.json() : Promise.resolve(null),
+    ]);
+
+    const e = employeeJson?.data || null;
+    const shifts = Array.isArray(shiftsJson?.data) ? shiftsJson.data : [];
+    const shift = shifts.find((s) => Number(s.id) === Number(e?.shift_id));
+
+    return {
+      breakdown: breakdownJson.data,
+      attendanceMeta: {
+        department: e?.department || null,
+        join_date: e?.join_date || null,
+        shift_name: shift?.shift_name || null,
+      },
+    };
+  }
+
+  async function downloadPayslipsPdf(rows) {
+    if (!rows.length) {
+      setToast({ type: 'error', message: 'No payroll records selected' });
+      return;
+    }
+    setExporting(true);
+    setToast(null);
+    try {
+      const chunkSize = 5;
+      const payloadByIndex = new Array(rows.length);
+      for (let start = 0; start < rows.length; start += chunkSize) {
+        const chunk = rows.slice(start, start + chunkSize);
+        const chunkPayloads = await Promise.all(
+          chunk.map((row) => fetchPayslipPayload(row))
+        );
+        chunkPayloads.forEach((payload, idx) => {
+          payloadByIndex[start + idx] = payload;
+        });
+      }
+
+      const doc = createPdf();
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        const payload = payloadByIndex[i];
+        addPayslipPage(doc, {
+          company,
+          row,
+          payrollMode,
+          breakdown: payload.breakdown,
+          attendanceMeta: payload.attendanceMeta,
+          isFirstPage: i === 0,
+        });
+      }
+      const periodSlug =
+        payrollMode === 'monthly'
+          ? month
+            ? `${year}-${String(month).padStart(2, '0')}`
+            : `${year}-all-months`
+          : weekStartDate;
+      savePdf(doc, `payslips-${payrollMode}-${periodSlug}.pdf`);
+      setToast({ type: 'success', message: `Downloaded ${rows.length} payslip${rows.length > 1 ? 's' : ''}` });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to download payslips' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function handleDownloadAllPayslipsPdf() {
+    try {
+      const rows = await fetchAllPayrollRecordsForExport();
+      await downloadPayslipsPdf(rows);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to load payroll records' });
+    }
+  }
+
+  async function handleDownloadSelectedPayslipsPdf() {
+    const rows = Array.from(selectedPayroll.values());
+    await downloadPayslipsPdf(rows);
   }
 
   function printPayrollRows(rows) {
@@ -1182,6 +1423,22 @@ export default function PayrollPage() {
               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
             >
               Download PDF (selected)
+            </button>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => void handleDownloadAllPayslipsPdf()}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+            >
+              {exporting ? 'Loading...' : 'Download Payslips PDF (all)'}
+            </button>
+            <button
+              type="button"
+              disabled={exporting || selectedPayroll.size === 0}
+              onClick={() => void handleDownloadSelectedPayslipsPdf()}
+              className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+            >
+              Download Payslips PDF (selected)
             </button>
             <button
               type="button"

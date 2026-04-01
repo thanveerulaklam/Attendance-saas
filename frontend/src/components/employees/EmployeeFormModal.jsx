@@ -10,6 +10,7 @@ export default function EmployeeFormModal({
   open,
   onClose,
   onCreated,
+  onDeleted,
   employee,
   departmentSuggestions = [],
 }) {
@@ -290,6 +291,47 @@ export default function EmployeeFormModal({
   const handleOverlayClick = (e) => {
     if (e.target === e.currentTarget && !submitting) {
       onClose?.();
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!isEdit || !employee?.id || submitting) return;
+    const confirmed = window.confirm(
+      `Delete "${employee.name || 'this employee'}" permanently? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setSubmitting(true);
+      setToast(null);
+
+      const res = await authFetch(`/api/employees/${employee.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        const message =
+          json?.message || json?.error || 'Something went wrong while deleting employee';
+        setToast({ type: 'error', message });
+        return;
+      }
+
+      if (typeof onDeleted === 'function') {
+        onDeleted(employee);
+      } else if (typeof onClose === 'function') {
+        onClose();
+      }
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Unexpected error while deleting employee',
+      });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -632,13 +674,25 @@ export default function EmployeeFormModal({
         </form>
 
         <footer className="border-t border-slate-200 px-5 py-3 flex items-center justify-between bg-slate-50/60">
-          <button
-            type="button"
-            onClick={() => !submitting && onClose?.()}
-            className="text-xs font-medium text-slate-600 hover:text-slate-800"
-          >
-            Cancel
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => !submitting && onClose?.()}
+              className="text-xs font-medium text-slate-600 hover:text-slate-800"
+            >
+              Cancel
+            </button>
+            {isEdit && (
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={submitting}
+                className="text-xs font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Delete employee
+              </button>
+            )}
+          </div>
           <button
             type="submit"
             formAction={handleSubmit}

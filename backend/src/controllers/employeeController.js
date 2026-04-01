@@ -114,6 +114,20 @@ const deactivateEmployee = asyncHandler(async (req, res) => {
   });
 });
 
+/**
+ * DELETE /api/employees/:id
+ */
+const deleteEmployee = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+
+  await employeeService.deleteEmployee(companyId, id, branchContext(req));
+
+  auditService.log(companyId, req.user?.user_id, 'employee.delete', 'employee', id, {}).catch(() => {});
+
+  return res.status(204).send();
+});
+
 module.exports = {
   createEmployee,
   getEmployees,
@@ -121,5 +135,6 @@ module.exports = {
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
+  deleteEmployee,
 };
 

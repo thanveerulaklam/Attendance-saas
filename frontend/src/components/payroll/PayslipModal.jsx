@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { createPdf, savePdf } from '../../utils/pdfGenerator';
 
 function formatMoney(n) {
@@ -131,6 +131,7 @@ export default function PayslipModal({
   breakdown,
   attendanceDetails,
 }) {
+  const payslipContentRef = useRef(null);
   const dayDetails = Array.isArray(breakdown?.attendance?.dayDetails)
     ? breakdown.attendance.dayDetails
     : [];
@@ -194,141 +195,105 @@ export default function PayslipModal({
     window.print();
   };
 
-  const handleDownloadPdf = () => {
-    const doc = createPdf();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 28;
-    const contentWidth = pageWidth - margin * 2;
-    const rightX = pageWidth - margin;
-    let y = 26;
+  const handleDownloadPdf = async () => {
+    const target = payslipContentRef.current;
+    if (!target) return;
 
-    const drawKvp = (label, value, x, rowY, valueX) => {
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(100, 116, 139);
-      doc.text(String(label), x, rowY);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(15, 23, 42);
-      doc.text(String(value ?? '—'), valueX, rowY, { align: 'right' });
-    };
+    try {
+      const { default: html2canvas } = await import('html2canvas');
+      const deviceScale = Math.max(1, Number(window.devicePixelRatio) || 1);
+      const contentHeight = target.scrollHeight || target.clientHeight || 0;
+      const scale = contentHeight > 2200
+        ? Math.min(2.2, deviceScale * 1.6)
+        : Math.min(3, deviceScale * 2);
 
-    // Header
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(margin, y - 6, contentWidth, 34, 3, 3, 'F');
-    doc.setFontSize(15);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(15, 23, 42);
-    doc.text(String(company?.name || 'Company'), margin + 6, y + 4);
-    doc.setFontSize(9);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(71, 85, 105);
-    const addressLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
-    doc.text(addressLine || '—', margin + 6, y + 14);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(30, 64, 175);
-    doc.text('PAYSLIP', rightX - 6, y + 4, { align: 'right' });
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text(`Period: ${periodLabel}`, rightX - 6, y + 14, { align: 'right' });
-    y += 38;
+      const canvas = await html2canvas(target, {
+        scale,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        windowWidth: document.documentElement.clientWidth,
+      });
 
-    // Employee details
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(margin, y, contentWidth, 46, 3, 3);
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(51, 65, 85);
-    doc.text('EMPLOYEE DETAILS', margin + 6, y + 10);
-    const col1X = margin + 6;
-    const col2X = margin + contentWidth / 2 + 2;
-    const row1 = y + 20;
-    const rowGap = 8;
-    drawKvp('Employee Name', payrollRow.employee_name, col1X, row1, margin + contentWidth / 2 - 8);
-    drawKvp('Employee Code', payrollRow.employee_code, col1X, row1 + rowGap, margin + contentWidth / 2 - 8);
-    drawKvp('Designation', attendanceDetails?.designation || '—', col1X, row1 + rowGap * 2, margin + contentWidth / 2 - 8);
-    drawKvp('Department', attendanceDetails?.department || '—', col2X, row1, rightX - 6);
-    drawKvp('Date of Joining', formatJoinDate(attendanceDetails?.join_date), col2X, row1 + rowGap, rightX - 6);
-    drawKvp('Shift', attendanceDetails?.shift_name || '—', col2X, row1 + rowGap * 2, rightX - 6);
-    y += 54;
+      const doc = createPdf({ orientation: 'p' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 16;
+      const printableWidth = pageWidth - margin * 2;
+      const printableHeight = pageHeight - margin * 2;
 
-    // Attendance summary
-    doc.roundedRect(margin, y, contentWidth, 40, 3, 3);
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(51, 65, 85);
-    doc.text('ATTENDANCE SUMMARY', margin + 6, y + 10);
-    const att = breakdown.attendance;
-    const overtimeHours = formatHours(att?.overtimeHours);
-    const attRow = y + 20;
-    drawKvp('Working Days', att?.workingDays ?? '—', col1X, attRow, margin + contentWidth / 2 - 8);
-    drawKvp('Days Present', att?.presentDays ?? '—', col1X, attRow + rowGap, margin + contentWidth / 2 - 8);
-    drawKvp('Days Absent', att?.absenceDays ?? '—', col1X, attRow + rowGap * 2, margin + contentWidth / 2 - 8);
-    drawKvp('Half Days', attendanceDetails?.halfDayCount ?? '—', col2X, attRow, rightX - 6);
-    drawKvp('Late Arrivals', `${attendanceDetails?.lateCount ?? '—'} times`, col2X, attRow + rowGap, rightX - 6);
-    drawKvp('Overtime', overtimeHours === '—' ? '—' : `${overtimeHours} hrs`, col2X, attRow + rowGap * 2, rightX - 6);
-    y += 48;
+      const pxPerPt = canvas.width / printableWidth;
+      const pageCanvasHeight = Math.max(1, Math.floor(printableHeight * pxPerPt));
+      let sourceY = 0;
+      let pageIndex = 0;
 
-    // Earnings and deductions
-    const sectionWidth = (contentWidth - 8) / 2;
-    doc.roundedRect(margin, y, sectionWidth, 58, 3, 3);
-    doc.roundedRect(margin + sectionWidth + 8, y, sectionWidth, 58, 3, 3);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(51, 65, 85);
-    doc.text('EARNINGS', margin + 6, y + 10);
-    doc.text('DEDUCTIONS', margin + sectionWidth + 14, y + 10);
-    doc.setFontSize(9);
-    const earnings = [
-      ...(isCompletePeriod ? [[ 'Basic Salary', formatMoney(breakdown.employee?.basic_salary) ]] : []),
-      [basicEarnedLabel, formatMoney(b.basicSalary)],
-      ['Travel Allow.', formatMoney(b.travelAllowance)],
-      ['Overtime Pay', formatMoney(b.overtimePay)],
-      ['No Leave Bonus', formatMoney(b.noLeaveIncentive)],
-    ];
-    const deductions = [
-      ['Permission Offset', formatMoney(b.permissionOffsetAmount)],
-      ['Late Deduction', formatMoney(b.lateDeduction)],
-      ['Lunch Deduct.', formatMoney(b.lunchOverDeduction)],
-      ['Advance Repayment', formatMoney(b.salaryAdvance)],
-      ['Pending Advance', formatMoney(b.pendingAdvanceBalance)],
-      ['Absent Deduct.', formatMoney(b.absenceDeduction)],
-      ['ESI Deduction', formatMoney(b.esiDeduction)],
-    ];
-    earnings.forEach(([label, value], idx) => drawKvp(label, `₹${value}`, margin + 6, y + 20 + idx * 7, margin + sectionWidth - 8));
-    deductions.forEach(([label, value], idx) => drawKvp(label, `₹${value}`, margin + sectionWidth + 14, y + 20 + idx * 7, rightX - 6));
-    y += 66;
+      while (sourceY < canvas.height) {
+        const sliceHeight = Math.min(pageCanvasHeight, canvas.height - sourceY);
+        const pageCanvas = document.createElement('canvas');
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeight;
+        const pageCtx = pageCanvas.getContext('2d');
+        if (!pageCtx) throw new Error('Unable to build PDF page canvas');
 
-    // Totals
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(margin, y, contentWidth, 26, 3, 3, 'F');
-    doc.setFontSize(9);
-    drawKvp('Gross Salary', `₹${formatMoney(b.grossSalary)}`, margin + 6, y + 10, margin + contentWidth / 3 - 8);
-    drawKvp('Total Deductions', `₹${formatMoney(b.totalDeductions + b.salaryAdvance)}`, margin + contentWidth / 3 + 6, y + 10, margin + (contentWidth * 2) / 3 - 8);
-    doc.setFontSize(11);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(5, 150, 105);
-    doc.text(`Net Salary: ₹${formatMoney(b.netSalary)}`, rightX - 6, y + 10, { align: 'right' });
-    doc.setFontSize(8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`ESI: ₹${formatMoney(b.esiDeduction)}`, rightX - 6, y + 19, { align: 'right' });
+        pageCtx.drawImage(
+          canvas,
+          0,
+          sourceY,
+          canvas.width,
+          sliceHeight,
+          0,
+          0,
+          canvas.width,
+          sliceHeight
+        );
 
-    const footerY = doc.internal.pageSize.getHeight() - 14;
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text('Generated by PunchPay | punchpay.in', pageWidth / 2, footerY, { align: 'center' });
+        const imageData = pageCanvas.toDataURL('image/png');
+        const imageHeightPt = sliceHeight / pxPerPt;
 
-    const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
-    const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
-    let filename = `PunchPay_${safeName}_${periodLabel.replace(/\s+/g, '').replace(/[—–-]/g, '_')}.pdf`;
-    // Preserve existing monthly filename behavior
-    if (payrollRow.year && payrollRow.month) {
-      const monthStr = d.toLocaleString('default', { month: 'short', year: 'numeric' }).replace(/\s+/g, '');
-      filename = `PunchPay_${safeName}_${monthStr}.pdf`;
+        if (pageIndex > 0) doc.addPage();
+        doc.addImage(
+          imageData,
+          'PNG',
+          margin,
+          margin,
+          printableWidth,
+          imageHeightPt,
+          undefined,
+          'FAST'
+        );
+
+        sourceY += sliceHeight;
+        pageIndex += 1;
+      }
+
+      const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
+      const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
+      let filename = `PunchPay_${safeName}_${periodLabel.replace(/\s+/g, '').replace(/[—–-]/g, '_')}.pdf`;
+      if (payrollRow.year && payrollRow.month) {
+        const monthStr = d
+          .toLocaleString('default', { month: 'short', year: 'numeric' })
+          .replace(/\s+/g, '');
+        filename = `PunchPay_${safeName}_${monthStr}.pdf`;
+      }
+      savePdf(doc, filename);
+    } catch (err) {
+      // Fallback to print flow if image capture fails.
+      window.print();
     }
-    savePdf(doc, filename);
   };
 
   const handleShareWhatsappSummary = () => {
     const att = breakdown.attendance;
     const overtimeHours = formatHours(att?.overtimeHours);
+    const detailedDeductions = [
+      ['Permission Offset', b.permissionOffsetAmount],
+      ['Late Deduction', b.lateDeduction],
+      ['Lunch Deduction', b.lunchOverDeduction],
+      ['Advance Repayment', b.salaryAdvance],
+      ['Absent Deduction', b.absenceDeduction],
+      ['ESI Deduction', b.esiDeduction],
+    ];
     const payslipText = `
 PAYSLIP — ${periodLabel}
 ${company?.name || ''}
@@ -343,8 +308,10 @@ Overtime: ${overtimeHours === '—' ? '—' : `${overtimeHours} hrs`}
 
 SALARY
 Gross: ₹${formatMoney(b.grossSalary)}
-Deductions: ₹${formatMoney(b.totalDeductions + b.salaryAdvance)}
-Net Salary: ₹${formatMoney(b.netSalary)}
+Deductions (Detailed):
+${detailedDeductions.map(([label, amount]) => `- ${label}: ₹${formatMoney(amount)}`).join('\n')}
+Total Deductions: ₹${formatMoney(b.totalDeductions + b.salaryAdvance)}
+*Net Salary: ₹${formatMoney(b.netSalary)}*
 ─────────────────────
 Generated by PunchPay
 punchpay.in
@@ -386,7 +353,7 @@ punchpay.in
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-4 print:px-10 print:py-8">
+        <div ref={payslipContentRef} className="px-6 py-5 space-y-4 print:px-10 print:py-8">
           <header className="border-b border-slate-200 pb-3 text-center">
             <h1 className="text-lg font-semibold tracking-wide text-slate-900">
               {company?.name || 'Company'}

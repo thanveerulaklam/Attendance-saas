@@ -427,6 +427,34 @@ async function deactivateEmployee(companyId, id, branchContext = {}) {
 }
 
 /**
+ * Delete an employee permanently.
+ */
+async function deleteEmployee(companyId, id, branchContext = {}) {
+  await assertEmployeeVisibleToHr(companyId, id, branchContext);
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM employees
+       WHERE company_id = $1 AND id = $2
+       RETURNING id`,
+      [companyId, id]
+    );
+
+    if (result.rowCount === 0) {
+      throw new AppError('Employee not found for this company', 404);
+    }
+  } catch (err) {
+    if (err.code === '23503') {
+      throw new AppError(
+        'Cannot delete employee because related records exist (attendance, payroll, or other history).',
+        409
+      );
+    }
+    throw err;
+  }
+}
+
+/**
  * Returns distinct, previously-used departments for the company (or branch scope for HR).
  */
 async function getEmployeeDepartments(companyId, allowedBranchIds = null) {
@@ -455,6 +483,7 @@ module.exports = {
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
+  deleteEmployee,
   getEmployeeDepartments,
   getEffectiveEmployeeLimit,
   assertEmployeeLimitNotExceeded,

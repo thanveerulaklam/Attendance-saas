@@ -153,6 +153,19 @@ export default function EmployeesPage() {
     setShowModal(true);
   };
 
+  const handleEmployeeDeleted = (employee) => {
+    setShowModal(false);
+    setEditingEmployee(null);
+    setPage(1);
+    fetchEmployees();
+    setToast({
+      type: 'success',
+      message: employee?.name
+        ? `Employee "${employee.name}" deleted successfully`
+        : 'Employee deleted successfully',
+    });
+  };
+
   const handleDeactivate = async (employee) => {
     if (!employee?.id) return;
     const confirmed = window.confirm(
@@ -445,6 +458,7 @@ export default function EmployeesPage() {
             setEditingEmployee(null);
           }}
           onCreated={handleEmployeeCreated}
+          onDeleted={handleEmployeeDeleted}
           departmentSuggestions={departmentSuggestions}
         />
       )}

@@ -6,6 +6,7 @@ const {
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
+  deleteEmployee,
 } = require('../controllers/employeeController');
 const {
   authenticate,
@@ -42,6 +43,9 @@ router.put('/:id', withEmployeeAuth, requireHrBranchForMutation, updateEmployee)
 
 // PATCH /api/employees/:id/deactivate
 router.patch('/:id/deactivate', withEmployeeAuth, requireHrBranchForMutation, deactivateEmployee);
+
+// DELETE /api/employees/:id
+router.delete('/:id', withEmployeeAuth, requireHrBranchForMutation, deleteEmployee);
 
 module.exports = router;
 
