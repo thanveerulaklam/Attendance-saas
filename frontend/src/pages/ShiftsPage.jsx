@@ -20,6 +20,8 @@ const emptyForm = () => ({
   required_hours_per_day: 8,
   half_day_hours: 0,
   monthly_permission_hours: 0,
+  allow_overtime: true,
+  overtime_rate_per_hour: 0,
 });
 
 export default function ShiftsPage() {
@@ -74,6 +76,7 @@ export default function ShiftsPage() {
       'required_hours_per_day',
       'half_day_hours',
       'monthly_permission_hours',
+      'overtime_rate_per_hour',
     ];
     const value = numericFields.includes(field)
       ? Number(event.target.value || 0)
@@ -120,6 +123,8 @@ export default function ShiftsPage() {
       required_hours_per_day: shift.required_hours_per_day ?? 8,
       half_day_hours: shift.half_day_hours ?? 0,
       monthly_permission_hours: shift.monthly_permission_hours ?? 0,
+      allow_overtime: shift.allow_overtime !== false,
+      overtime_rate_per_hour: shift.overtime_rate_per_hour ?? 0,
     });
     setEditingShift(shift);
     setError(null);
@@ -380,6 +385,38 @@ export default function ShiftsPage() {
                   </p>
                 </div>
               )}
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">
+                  Overtime configuration
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.allow_overtime === true}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, allow_overtime: e.target.checked }))
+                    }
+                    disabled={creating}
+                    className="rounded border-slate-300 text-primary-600 focus:ring-primary-300"
+                  />
+                  <span className="text-[11px] text-slate-700">Allow overtime pay</span>
+                </label>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Overtime rate per hour (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={form.overtime_rate_per_hour}
+                    onChange={handleChange('overtime_rate_per_hour')}
+                    disabled={creating || form.allow_overtime !== true}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300 disabled:bg-slate-100"
+                    placeholder="e.g. 100"
+                  />
+                </div>
+              </div>
 
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">
@@ -547,6 +584,15 @@ export default function ShiftsPage() {
                           {(shift.required_hours_per_day ?? 8)}h / day
                         </span>
                       )}
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        shift.allow_overtime === false
+                          ? 'bg-slate-100 text-slate-600'
+                          : 'bg-violet-50 text-violet-700'
+                      }`}>
+                        {shift.allow_overtime === false
+                          ? 'OT disabled'
+                          : `OT ₹${shift.overtime_rate_per_hour ?? 0}/hr`}
+                      </span>
                       {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') &&
                         Number(shift.half_day_hours || 0) > 0 && (
                           <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
@@ -648,6 +694,14 @@ export default function ShiftsPage() {
                           </dd>
                         </div>
                       ) : null}
+                      <div className="flex justify-between">
+                        <dt className="text-slate-500">Overtime</dt>
+                        <dd className="font-medium text-slate-800">
+                          {shift.allow_overtime === false
+                            ? 'Disabled'
+                            : `₹${shift.overtime_rate_per_hour ?? 0}/hr`}
+                        </dd>
+                      </div>
                     </dl>
                   </article>
                 ))}
@@ -748,6 +802,33 @@ export default function ShiftsPage() {
                   />
                 </div>
               )}
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">Overtime configuration</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.allow_overtime === true}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, allow_overtime: e.target.checked }))
+                    }
+                    disabled={savingEdit}
+                    className="rounded border-slate-300 text-primary-600"
+                  />
+                  <span className="text-[11px] text-slate-700">Allow overtime pay</span>
+                </label>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Overtime rate per hour (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={form.overtime_rate_per_hour}
+                    onChange={handleChange('overtime_rate_per_hour')}
+                    disabled={savingEdit || form.allow_overtime !== true}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
+                  />
+                </div>
+              </div>
               {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Half-day threshold hours</label>

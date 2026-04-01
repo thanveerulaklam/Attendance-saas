@@ -277,6 +277,7 @@ export default function PayslipModal({
     writeKv('Absent', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
     writeKv('Late', `${attendanceDetails?.lateCount ?? '—'} times`, [180, 83, 9]);
     writeKv('Overtime', `${formatHours(att.overtimeHours)} hrs`, [5, 150, 105]);
+    writeKv('Unused Paid Leave', `${formatHours(b.unusedPaidLeaveDays)} days`, [22, 101, 52]);
     y += 4;
 
     doc.setFontSize(10);
@@ -285,6 +286,7 @@ export default function PayslipModal({
     writeLeft('SALARY');
     doc.setFontSize(9);
     writeKv('Gross Salary', `INR ${formatMoney(b.grossSalary)}`);
+    writeKv('Paid Leave Encashment', `INR ${formatMoney(b.paidLeaveEncashmentAmount)}`, [5, 150, 105]);
     writeKv('Permission Offset', `INR ${formatMoney(b.permissionOffsetAmount)}`);
     writeKv('Late Deduction', `INR ${formatMoney(b.lateDeduction)}`);
     writeKv('Lunch Deduction', `INR ${formatMoney(b.lunchOverDeduction)}`);
@@ -438,6 +440,10 @@ punchpay.in
                 <span className="font-medium text-slate-600">Overtime Hours</span>
                 <span>{formatHours(breakdown.attendance?.overtimeHours)}</span>
               </div>
+              <div className="flex justify-between">
+                <span className="font-medium text-slate-600">Unused Paid Leave</span>
+                <span>{formatHours(breakdown.breakdown?.unusedPaidLeaveDays)} days</span>
+              </div>
             </div>
           </section>
 
@@ -524,6 +530,12 @@ punchpay.in
                   <span>Overtime Pay</span>
                   <span className="font-medium text-emerald-700">
                     ₹{formatMoney(breakdown.breakdown?.overtimePay)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Paid Leave Encashment</span>
+                  <span className="font-medium text-emerald-700">
+                    ₹{formatMoney(breakdown.breakdown?.paidLeaveEncashmentAmount)}
                   </span>
                 </div>
                 <div className="flex justify-between">

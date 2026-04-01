@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   computeMonthlyBaseAndAbsence,
   computePermissionOffset,
+  computePaidLeaveEncashment,
 } = require('../src/services/payrollMath');
 
 test('monthly complete + day_based: full base salary with explicit absence deduction', () => {
@@ -134,5 +135,44 @@ test('permission offset: full cover capped by available deductions', () => {
 
   assert.equal(result.usedMinutes, 60);
   assert.equal(result.offsetAmount, 100);
+});
+
+test('paid leave encashment: complete month + enabled adds unused paid leaves', () => {
+  const result = computePaidLeaveEncashment({
+    enabled: true,
+    isMonthComplete: true,
+    paidLeaveDaysAllowed: 4,
+    paidLeaveUsed: 3,
+    dailyRate: 100,
+  });
+
+  assert.equal(result.unusedPaidLeaveDays, 1);
+  assert.equal(result.paidLeaveEncashmentAmount, 100);
+});
+
+test('paid leave encashment: disabled yields zero', () => {
+  const result = computePaidLeaveEncashment({
+    enabled: false,
+    isMonthComplete: true,
+    paidLeaveDaysAllowed: 4,
+    paidLeaveUsed: 0,
+    dailyRate: 100,
+  });
+
+  assert.equal(result.unusedPaidLeaveDays, 0);
+  assert.equal(result.paidLeaveEncashmentAmount, 0);
+});
+
+test('paid leave encashment: incomplete month yields zero', () => {
+  const result = computePaidLeaveEncashment({
+    enabled: true,
+    isMonthComplete: false,
+    paidLeaveDaysAllowed: 4,
+    paidLeaveUsed: 1,
+    dailyRate: 100,
+  });
+
+  assert.equal(result.unusedPaidLeaveDays, 0);
+  assert.equal(result.paidLeaveEncashmentAmount, 0);
 });
 

@@ -437,6 +437,7 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   writeKv('Absent', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
   writeKv('Late', `${att.lateDays ?? 0} times`, [180, 83, 9]);
   writeKv('Overtime', `${Number(att.overtimeHours || 0)} hrs`, [5, 150, 105]);
+  writeKv('Unused Paid Leave', `${Number(b.unusedPaidLeaveDays || 0)} days`, [22, 101, 52]);
   y += 4;
 
   doc.setFontSize(10);
@@ -445,6 +446,7 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   writeLeft('SALARY');
   doc.setFontSize(9);
   writeKv('Gross Salary', `INR ${formatMoney(b.grossSalary)}`);
+  writeKv('Paid Leave Encashment', `INR ${formatMoney(b.paidLeaveEncashmentAmount)}`, [5, 150, 105]);
   writeKv('Permission Offset', `INR ${formatMoney(b.permissionOffsetAmount)}`);
   writeKv('Late Deduction', `INR ${formatMoney(b.lateDeduction)}`);
   writeKv('Lunch Deduction', `INR ${formatMoney(b.lunchOverDeduction)}`);
@@ -491,6 +493,7 @@ export default function PayrollPage() {
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
+    encashUnusedPaidLeave: false,
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
@@ -1136,6 +1139,7 @@ export default function PayrollPage() {
             include_overtime: generateForm.includeOvertime !== false,
             treat_holiday_adjacent_absence_as_working:
               generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
+            encash_unused_paid_leave: generateForm.encashUnusedPaidLeave === true,
             no_leave_incentive: Math.max(
               0,
               Number(generateForm.noLeaveIncentive) || 0
@@ -1757,6 +1761,25 @@ export default function PayrollPage() {
                   </label>
                   <p className="text-[10px] text-slate-500">
                     If unchecked, advance repayments remain pending and can be deducted later.
+                  </p>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={generateForm.encashUnusedPaidLeave === true}
+                      onChange={(e) =>
+                        setGenerateForm((f) => ({
+                          ...f,
+                          encashUnusedPaidLeave: e.target.checked,
+                        }))
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      Encash unused paid leave (full month only)
+                    </span>
+                  </label>
+                  <p className="text-[10px] text-slate-500">
+                    Adds unused shift paid leave value to gross salary. Applies only when month is complete.
                   </p>
                   <label className="text-[11px] font-medium text-slate-700">
                     Incentive for no leave (₹)

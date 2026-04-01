@@ -5,7 +5,11 @@ const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceS
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
-const { computeMonthlyBaseAndAbsence, computePermissionOffset } = require('./payrollMath');
+const {
+  computeMonthlyBaseAndAbsence,
+  computePermissionOffset,
+  computePaidLeaveEncashment,
+} = require('./payrollMath');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 
@@ -87,6 +91,8 @@ function rowToShiftConfig(row) {
     requiredHoursPerDay,
     monthlyPermissionHours,
     halfDayHours,
+    allowOvertime: row.allow_overtime !== false,
+    overtimeRatePerHour: Number(row.overtime_rate_per_hour || 0),
   };
 }
 
@@ -108,7 +114,9 @@ async function getDefaultShiftForCompany(client, companyId) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
-       required_hours_per_day
+       required_hours_per_day,
+       allow_overtime,
+       overtime_rate_per_hour
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -145,7 +153,9 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          attendance_mode,
          monthly_permission_hours,
          half_day_hours,
-         required_hours_per_day
+         required_hours_per_day,
+         allow_overtime,
+         overtime_rate_per_hour
        FROM shifts
        WHERE company_id = $1 AND id = $2`,
       [companyId, shiftId]
@@ -975,7 +985,12 @@ async function generateWeeklyPayroll(
       holidayCountAsPresent: true,
     });
 
-    const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
+    const shiftConfig = await getShiftForEmployee(client, companyId, employeeId);
+    const effectiveOvertimeRate = Number(shiftConfig.overtimeRatePerHour || 0);
+    const overtimePay =
+      includeOvertime && shiftConfig.allowOvertime
+        ? summary.overtimeHours * effectiveOvertimeRate
+        : 0;
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * (summary.presentWorkingDays ?? 0);
 
@@ -1332,7 +1347,18 @@ async function getWeeklyPayrollBreakdown(
   const dailyRate = daysInStartMonth > 0 ? basicSalary / daysInStartMonth : 0;
   const hourlyRate = dailyRate / 8;
 
-  const overtimePay = includeOvertime ? (shiftSummary.overtimeHours * hourlyRate) : 0;
+  const shiftClient = await pool.connect();
+  let shiftConfig;
+  try {
+    shiftConfig = await getShiftForEmployee(shiftClient, companyId, employeeId);
+  } finally {
+    shiftClient.release();
+  }
+  const effectiveOvertimeRate = Number(shiftConfig.overtimeRatePerHour || 0);
+  const overtimePay =
+    includeOvertime && shiftConfig.allowOvertime
+      ? shiftSummary.overtimeHours * effectiveOvertimeRate
+      : 0;
   const travelAllowance =
     Number(employee.daily_travel_allowance || 0) * (shiftSummary.presentWorkingDays ?? 0);
 
@@ -1410,6 +1436,8 @@ async function getWeeklyPayrollBreakdown(
       isWeekComplete,
       basicSalary: earnedBasic,
       overtimePay,
+      overtimeRatePerHour: effectiveOvertimeRate,
+      allowOvertime: Boolean(shiftConfig.allowOvertime),
       travelAllowance,
       noLeaveIncentive: 0,
       presentWorkingDays: shiftSummary.presentWorkingDays,
@@ -1445,6 +1473,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     treatHolidayAdjacentAbsenceAsWorking = false,
     apply_advance_repayments: applyAdvanceRepaymentsRaw = true,
     noLeaveIncentive = 0,
+    encashUnusedPaidLeave = false,
     allowedBranchIds = null,
   } = payrollOptions;
   const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
@@ -1500,6 +1529,15 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const travelAllowance = dailyTravelAllowance * presentWorkingDays;
 
     const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
+    const paidLeaveUsed = Number(summary.paidLeaveUsed || 0);
+    const { unusedPaidLeaveDays, paidLeaveEncashmentAmount } =
+      computePaidLeaveEncashment({
+        enabled: encashUnusedPaidLeave,
+        isMonthComplete,
+        paidLeaveDaysAllowed,
+        paidLeaveUsed,
+        dailyRate,
+      });
 
     const { earnedBasic, absenceDeduction } = computeMonthlyBaseAndAbsence({
       isMonthComplete,
@@ -1531,7 +1569,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
     }
 
-    const grossSalary = earnedBasic + overtimePay + travelAllowance;
+    const grossSalary = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentAmount;
     const esiDeduction = Number(employee.esi_amount || 0);
     const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
     const effectivePermissionHours =
@@ -1601,9 +1639,11 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           permission_hours_allocated,
           permission_minutes_used,
           permission_offset_amount,
+          unused_paid_leave_days,
+          paid_leave_encashment_amount,
           net_salary
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
        ON CONFLICT (company_id, employee_id, year, month)
        DO UPDATE SET
           total_days = EXCLUDED.total_days,
@@ -1618,6 +1658,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           permission_hours_allocated = EXCLUDED.permission_hours_allocated,
           permission_minutes_used = EXCLUDED.permission_minutes_used,
           permission_offset_amount = EXCLUDED.permission_offset_amount,
+          unused_paid_leave_days = EXCLUDED.unused_paid_leave_days,
+          paid_leave_encashment_amount = EXCLUDED.paid_leave_encashment_amount,
           net_salary = EXCLUDED.net_salary,
           generated_at = NOW()
        RETURNING *`,
@@ -1638,6 +1680,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         permissionOffset.allocatedHours,
         permissionOffset.usedMinutes,
         permissionOffset.offsetAmount,
+        unusedPaidLeaveDays,
+        paidLeaveEncashmentAmount,
         netSalary,
       ]
     );
@@ -1677,6 +1721,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const {
     includeOvertime = true,
     treatHolidayAdjacentAbsenceAsWorking = false,
+    encashUnusedPaidLeave = false,
     allowedBranchIds = null,
   } = options;
 
@@ -1689,7 +1734,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
        no_leave_incentive,
        permission_hours_allocated,
        permission_minutes_used,
-       permission_offset_amount
+       permission_offset_amount,
+       unused_paid_leave_days,
+       paid_leave_encashment_amount
      FROM payroll_records
      WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
     [companyId, employeeId, year, month]
@@ -1751,6 +1798,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const travelAllowance = dailyTravelAllowance * presentWorkingDays;
 
   const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
+  const paidLeaveUsed = Number(summary.paidLeaveUsed || 0);
+  const { unusedPaidLeaveDays: unusedPaidLeaveDaysComputed, paidLeaveEncashmentAmount: paidLeaveEncashmentComputed } =
+    computePaidLeaveEncashment({
+      enabled: encashUnusedPaidLeave,
+      isMonthComplete,
+      paidLeaveDaysAllowed,
+      paidLeaveUsed,
+      dailyRate,
+    });
 
   const { earnedBasic, absenceDeduction } = computeMonthlyBaseAndAbsence({
     isMonthComplete,
@@ -1782,7 +1838,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
   }
 
-  const grossSalary = earnedBasic + overtimePay + travelAllowance;
+  const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentComputed;
   const esiDeduction = Number(employee.esi_amount || 0);
   const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
   const permissionOffsetComputed = computePermissionOffset({
@@ -1804,6 +1860,18 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     existingPayrollResult.rowCount > 0
       ? Number(existingPayrollResult.rows[0].permission_offset_amount || 0)
       : permissionOffsetComputed.offsetAmount;
+  const unusedPaidLeaveDays =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].unused_paid_leave_days || 0)
+      : unusedPaidLeaveDaysComputed;
+  const paidLeaveEncashmentAmount =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].paid_leave_encashment_amount || 0)
+      : paidLeaveEncashmentComputed;
+  const grossSalary =
+    existingPayrollResult.rowCount > 0
+      ? grossSalaryComputed - paidLeaveEncashmentComputed + paidLeaveEncashmentAmount
+      : grossSalaryComputed;
   const totalDeductions = deductionsBeforePermission - permissionOffsetAmount;
   const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
   const advanceRepaymentsResult = await pool.query(
@@ -1884,6 +1952,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       basicSalary: earnedBasic,
       overtimePay,
       travelAllowance,
+      unusedPaidLeaveDays,
+      paidLeaveEncashmentAmount,
       presentWorkingDays: summary.presentWorkingDays,
       grossSalary,
       absenceDeduction,

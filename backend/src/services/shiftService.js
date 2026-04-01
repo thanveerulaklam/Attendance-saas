@@ -31,6 +31,8 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        monthly_permission_hours,
        half_day_hours,
        required_hours_per_day,
+       allow_overtime,
+       overtime_rate_per_hour,
        created_at
      FROM shifts
      WHERE company_id = $1
@@ -62,6 +64,8 @@ async function createShift(companyId, data) {
     monthlyPermissionHours,
     halfDayHours,
     requiredHoursPerDay,
+    allowOvertime,
+    overtimeRatePerHour,
   } = parsed;
 
   if (!name || !startTime || !endTime) {
@@ -88,9 +92,11 @@ async function createShift(companyId, data) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
-       required_hours_per_day
+       required_hours_per_day,
+       allow_overtime,
+       overtime_rate_per_hour
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
      RETURNING
        id,
        company_id,
@@ -110,6 +116,8 @@ async function createShift(companyId, data) {
        monthly_permission_hours,
        half_day_hours,
        required_hours_per_day,
+       allow_overtime,
+       overtime_rate_per_hour,
        created_at`,
     [
       companyId,
@@ -129,6 +137,8 @@ async function createShift(companyId, data) {
       monthlyPermissionHours,
       halfDayHours,
       requiredHoursPerDay,
+      allowOvertime,
+      overtimeRatePerHour,
     ]
   );
 
@@ -180,6 +190,11 @@ function parseShiftData(data) {
   const monthlyPermissionHours = Number.isFinite(monthlyPermissionHoursRaw)
     ? Math.max(0, monthlyPermissionHoursRaw)
     : 0;
+  const allowOvertime = data.allow_overtime !== false;
+  const overtimeRatePerHourRaw = Number(data.overtime_rate_per_hour);
+  const overtimeRatePerHour = Number.isFinite(overtimeRatePerHourRaw)
+    ? Math.max(0, overtimeRatePerHourRaw)
+    : 0;
   const weeklyOffDays = Array.isArray(data.weekly_off_days)
     ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : [];
@@ -201,6 +216,8 @@ function parseShiftData(data) {
     monthlyPermissionHours,
     halfDayHours,
     requiredHoursPerDay,
+    allowOvertime,
+    overtimeRatePerHour,
   };
 }
 
@@ -253,8 +270,10 @@ async function updateShift(companyId, shiftId, data) {
        attendance_mode = $14,
        required_hours_per_day = $15,
        half_day_hours = $16,
-       monthly_permission_hours = $17
-     WHERE company_id = $1 AND id = $18
+       monthly_permission_hours = $17,
+       allow_overtime = $18,
+       overtime_rate_per_hour = $19
+     WHERE company_id = $1 AND id = $20
      RETURNING
        id,
        company_id,
@@ -274,6 +293,8 @@ async function updateShift(companyId, shiftId, data) {
        monthly_permission_hours,
        half_day_hours,
        required_hours_per_day,
+       allow_overtime,
+       overtime_rate_per_hour,
        created_at`,
     [
       companyId,
@@ -293,6 +314,8 @@ async function updateShift(companyId, shiftId, data) {
       parsed.requiredHoursPerDay,
       parsed.halfDayHours,
       parsed.monthlyPermissionHours,
+      parsed.allowOvertime,
+      parsed.overtimeRatePerHour,
       shiftId,
     ]
   );

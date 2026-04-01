@@ -60,8 +60,31 @@ function computePermissionOffset({
   };
 }
 
+function computePaidLeaveEncashment({
+  enabled,
+  isMonthComplete,
+  paidLeaveDaysAllowed,
+  paidLeaveUsed,
+  dailyRate,
+}) {
+  if (enabled !== true || isMonthComplete !== true) {
+    return { unusedPaidLeaveDays: 0, paidLeaveEncashmentAmount: 0 };
+  }
+
+  const allowed = Math.max(0, Number(paidLeaveDaysAllowed || 0));
+  const used = Math.max(0, Number(paidLeaveUsed || 0));
+  const rate = Math.max(0, Number(dailyRate || 0));
+  const unusedPaidLeaveDays = Math.max(0, allowed - used);
+
+  return {
+    unusedPaidLeaveDays,
+    paidLeaveEncashmentAmount: unusedPaidLeaveDays * rate,
+  };
+}
+
 module.exports = {
   computeMonthlyBaseAndAbsence,
   computePermissionOffset,
+  computePaidLeaveEncashment,
 };
 

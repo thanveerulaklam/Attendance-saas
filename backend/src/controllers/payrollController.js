@@ -59,6 +59,7 @@ async function generate(req, res, next) {
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
+      encash_unused_paid_leave: encashUnusedPaidLeaveRaw,
     } = req.body || {};
 
     const employeeId = Number(employeeIdRaw);
@@ -67,6 +68,7 @@ async function generate(req, res, next) {
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
     const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
+    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw === true;
 
     if (!companyId || !employeeId || !year || !month) {
       return res.status(400).json({
@@ -79,6 +81,7 @@ async function generate(req, res, next) {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
       noLeaveIncentive,
+      encashUnusedPaidLeave,
       allowedBranchIds: req.allowedBranchIds,
     });
 
@@ -108,6 +111,7 @@ async function generateAll(req, res, next) {
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       apply_advance_repayments: applyAdvanceRepaymentsRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
+      encash_unused_paid_leave: encashUnusedPaidLeaveRaw,
     } = req.body || {};
 
     const year = Number(yearRaw);
@@ -116,6 +120,7 @@ async function generateAll(req, res, next) {
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
     const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
     const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
+    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw === true;
 
     if (!companyId || !year || !month || month < 1 || month > 12) {
       return res.status(400).json({
@@ -129,6 +134,7 @@ async function generateAll(req, res, next) {
       treatHolidayAdjacentAbsenceAsWorking,
       apply_advance_repayments: applyAdvanceRepayments,
       noLeaveIncentive,
+      encashUnusedPaidLeave,
       allowedBranchIds: req.allowedBranchIds,
     });
 
