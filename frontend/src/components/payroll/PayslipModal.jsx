@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo } from 'react';
 import { createPdf, savePdf } from '../../utils/pdfGenerator';
 
 function formatMoney(n) {
@@ -131,7 +131,6 @@ export default function PayslipModal({
   breakdown,
   attendanceDetails,
 }) {
-  const payslipContentRef = useRef(null);
   const dayDetails = Array.isArray(breakdown?.attendance?.dayDetails)
     ? breakdown.attendance.dayDetails
     : [];
@@ -196,91 +195,121 @@ export default function PayslipModal({
   };
 
   const handleDownloadPdf = async () => {
-    const target = payslipContentRef.current;
-    if (!target) return;
+    const doc = createPdf({ orientation: 'p' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 30;
+    const rightX = pageWidth - margin;
+    const contentWidth = pageWidth - margin * 2;
+    let y = 34;
+    const lineGap = 11;
+    const sectionGap = 14;
+    const b = breakdown.breakdown || {};
+    const att = breakdown.attendance || {};
 
-    try {
-      const { default: html2canvas } = await import('html2canvas');
-      const deviceScale = Math.max(1, Number(window.devicePixelRatio) || 1);
-      const contentHeight = target.scrollHeight || target.clientHeight || 0;
-      const scale = contentHeight > 2200
-        ? Math.min(2.2, deviceScale * 1.6)
-        : Math.min(3, deviceScale * 2);
+    const writeLeft = (text, options = {}) => {
+      doc.text(String(text), margin, y, options);
+      y += lineGap;
+    };
 
-      const canvas = await html2canvas(target, {
-        scale,
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        scrollX: 0,
-        scrollY: -window.scrollY,
-        windowWidth: document.documentElement.clientWidth,
-      });
+    const writeKv = (label, value, color = [15, 23, 42]) => {
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(71, 85, 105);
+      doc.text(String(label), margin, y);
+      doc.setFont(undefined, 'bold');
+      doc.setTextColor(...color);
+      doc.text(String(value), rightX, y, { align: 'right' });
+      y += lineGap;
+    };
 
-      const doc = createPdf({ orientation: 'p' });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 16;
-      const printableWidth = pageWidth - margin * 2;
-      const printableHeight = pageHeight - margin * 2;
+    doc.setFontSize(15);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text(String(company?.name || 'Company'), margin, y);
+    doc.setFontSize(9);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100, 116, 139);
+    const companyLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
+    const companyLines = doc.splitTextToSize(companyLine || '—', contentWidth);
+    y += 12;
+    doc.text(companyLines, margin, y);
+    y += companyLines.length * 10;
 
-      const pxPerPt = canvas.width / printableWidth;
-      const pageCanvasHeight = Math.max(1, Math.floor(printableHeight * pxPerPt));
-      let sourceY = 0;
-      let pageIndex = 0;
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y, rightX, y);
+    y += 10;
 
-      while (sourceY < canvas.height) {
-        const sliceHeight = Math.min(pageCanvasHeight, canvas.height - sourceY);
-        const pageCanvas = document.createElement('canvas');
-        pageCanvas.width = canvas.width;
-        pageCanvas.height = sliceHeight;
-        const pageCtx = pageCanvas.getContext('2d');
-        if (!pageCtx) throw new Error('Unable to build PDF page canvas');
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(30, 64, 175);
+    doc.text('PAYSLIP', margin, y);
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Period: ${periodLabel}`, rightX, y, { align: 'right' });
+    y += sectionGap;
 
-        pageCtx.drawImage(
-          canvas,
-          0,
-          sourceY,
-          canvas.width,
-          sliceHeight,
-          0,
-          0,
-          canvas.width,
-          sliceHeight
-        );
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(51, 65, 85);
+    writeLeft('EMPLOYEE DETAILS');
+    doc.setFontSize(9);
+    writeKv('Employee Name', payrollRow.employee_name || '—');
+    writeKv('Employee Code', payrollRow.employee_code || '—');
+    writeKv('Department', attendanceDetails?.department || '—');
+    writeKv('Date of Joining', formatJoinDate(attendanceDetails?.join_date));
+    writeKv('Shift', attendanceDetails?.shift_name || '—');
+    y += 4;
 
-        const imageData = pageCanvas.toDataURL('image/png');
-        const imageHeightPt = sliceHeight / pxPerPt;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(51, 65, 85);
+    writeLeft('ATTENDANCE');
+    doc.setFontSize(9);
+    writeKv('Working Days', String(att.workingDays ?? '—'));
+    writeKv('Present', `${att.presentDays ?? '—'} days`);
+    writeKv('Absent', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
+    writeKv('Late', `${attendanceDetails?.lateCount ?? '—'} times`, [180, 83, 9]);
+    writeKv('Overtime', `${formatHours(att.overtimeHours)} hrs`, [5, 150, 105]);
+    y += 4;
 
-        if (pageIndex > 0) doc.addPage();
-        doc.addImage(
-          imageData,
-          'PNG',
-          margin,
-          margin,
-          printableWidth,
-          imageHeightPt,
-          undefined,
-          'FAST'
-        );
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(51, 65, 85);
+    writeLeft('SALARY');
+    doc.setFontSize(9);
+    writeKv('Gross Salary', `₹${formatMoney(b.grossSalary)}`);
+    writeKv('Permission Offset', `₹${formatMoney(b.permissionOffsetAmount)}`);
+    writeKv('Late Deduction', `₹${formatMoney(b.lateDeduction)}`);
+    writeKv('Lunch Deduction', `₹${formatMoney(b.lunchOverDeduction)}`);
+    writeKv('Advance Repayment', `₹${formatMoney(b.salaryAdvance)}`);
+    writeKv('Absent Deduction', `₹${formatMoney(b.absenceDeduction)}`);
+    writeKv('ESI Deduction', `₹${formatMoney(b.esiDeduction)}`);
+    writeKv('Total Deductions', `₹${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`, [180, 83, 9]);
 
-        sourceY += sliceHeight;
-        pageIndex += 1;
-      }
+    y += 2;
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, y, rightX, y);
+    y += 11;
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.setTextColor(5, 150, 105);
+    doc.text(`NET SALARY: ₹${formatMoney(b.netSalary)}`, rightX, y, { align: 'right' });
 
-      const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
-      const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
-      let filename = `PunchPay_${safeName}_${periodLabel.replace(/\s+/g, '').replace(/[—–-]/g, '_')}.pdf`;
-      if (payrollRow.year && payrollRow.month) {
-        const monthStr = d
-          .toLocaleString('default', { month: 'short', year: 'numeric' })
-          .replace(/\s+/g, '');
-        filename = `PunchPay_${safeName}_${monthStr}.pdf`;
-      }
-      savePdf(doc, filename);
-    } catch (err) {
-      // Fallback to print flow if image capture fails.
-      window.print();
+    const footerY = pageHeight - 18;
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(148, 163, 184);
+    doc.text('Generated by PunchPay | punchpay.in', pageWidth / 2, footerY, { align: 'center' });
+
+    const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
+    const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
+    let filename = `PunchPay_${safeName}_${periodLabel.replace(/\s+/g, '').replace(/[—–-]/g, '_')}.pdf`;
+    if (payrollRow.year && payrollRow.month) {
+      const monthStr = d.toLocaleString('default', { month: 'short', year: 'numeric' }).replace(/\s+/g, '');
+      filename = `PunchPay_${safeName}_${monthStr}.pdf`;
     }
+    savePdf(doc, filename);
   };
 
   const handleShareWhatsappSummary = () => {
@@ -353,7 +382,7 @@ punchpay.in
           </button>
         </div>
 
-        <div ref={payslipContentRef} className="px-6 py-5 space-y-4 print:px-10 print:py-8">
+        <div className="px-6 py-5 space-y-4 print:px-10 print:py-8">
           <header className="border-b border-slate-200 pb-3 text-center">
             <h1 className="text-lg font-semibold tracking-wide text-slate-900">
               {company?.name || 'Company'}
