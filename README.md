@@ -13,6 +13,7 @@ SaaS attendance and payroll system — backend (Node.js + Express) and frontend.
    npm install
    npm run migrate         # run migrations
    npm run seed            # optional: demo company + admin (admin@demo-company.com / Admin@123)
+   npm run seed:testdata   # optional: QA test company with 20 employees + 1 month punches
    npm run dev             # runs on http://localhost:3000
    ```
 
@@ -98,3 +99,46 @@ Protected routes: use `authenticate`, then optionally `requireRole(['admin','hr'
 - **DB:** PostgreSQL (`pg`)
 - **Auth:** JWT, bcrypt
 - **Env:** dotenv
+
+## Reusable Test Dataset (20 employees, 1 month punches)
+
+Use this when you want fast repeatable QA/testing without real attendance data entry.
+
+From `backend/`:
+
+```bash
+npm run seed:testdata
+```
+
+Default output:
+
+- Company: `QA Test Company`
+- Branch: `QA Main Branch`
+- Employees: 20 (`TST-001` to `TST-020`)
+- Fixed month: `2026-03`
+- Scenarios covered: regular, late, overtime, halfday, permission, missing punch-out, absent, weekly off, holiday
+
+Custom month/company/size:
+
+```bash
+node ./scripts/generate-test-data.js --year 2026 --month 4 --employees 20 --company "QA Test Company"
+```
+
+Safe reset behavior (company-scoped only):
+
+```bash
+node ./scripts/generate-test-data.js --year 2026 --month 3 --reset-company true
+```
+
+Useful flags:
+
+- `--year <YYYY>`
+- `--month <1-12>`
+- `--employees <count>`
+- `--company "<name>"`
+- `--branch "<name>"`
+- `--reset-company <true|false>` (only affects the selected test company)
+- `--admin-email <email>`
+- `--admin-password <password>`
+
+After run, the script prints scenario counters and verification summary (employees, punch count, late/overtime/missing-out/half-day day counts).

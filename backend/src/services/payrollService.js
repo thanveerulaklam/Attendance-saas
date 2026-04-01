@@ -5,7 +5,7 @@ const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceS
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
-const { computeMonthlyBaseAndAbsence } = require('./payrollMath');
+const { computeMonthlyBaseAndAbsence, computePermissionOffset } = require('./payrollMath');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 
@@ -57,6 +57,7 @@ function rowToShiftConfig(row) {
         ? 'shift_based'
         : 'day_based';
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
+  const monthlyPermissionHours = Number(row.monthly_permission_hours || 0);
   const halfDayHoursRaw = Number(row.half_day_hours);
   const halfDayHours = Number.isFinite(halfDayHoursRaw) ? halfDayHoursRaw : null;
   const weeklyOffDaysRaw = Array.isArray(row.weekly_off_days) ? row.weekly_off_days : [];
@@ -84,6 +85,7 @@ function rowToShiftConfig(row) {
     weeklyOffDays,
     attendanceMode,
     requiredHoursPerDay,
+    monthlyPermissionHours,
     halfDayHours,
   };
 }
@@ -104,6 +106,7 @@ async function getDefaultShiftForCompany(client, companyId) {
        paid_leave_days,
        weekly_off_days,
        attendance_mode,
+       monthly_permission_hours,
        half_day_hours,
        required_hours_per_day
      FROM shifts
@@ -140,6 +143,7 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          paid_leave_days,
          weekly_off_days,
          attendance_mode,
+         monthly_permission_hours,
          half_day_hours,
          required_hours_per_day
        FROM shifts
@@ -1414,6 +1418,9 @@ async function getWeeklyPayrollBreakdown(
       lateDeduction,
       lunchOverDeduction,
       esiDeduction,
+      permissionHoursAllocated,
+      permissionMinutesUsed,
+      permissionOffsetAmount,
       totalDeductions,
       salaryAdvance,
       pendingAdvanceBalance,
@@ -1447,7 +1454,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, payroll_frequency
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, payroll_frequency, permission_hours_override
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1477,6 +1484,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       treatHolidayAdjacentAbsenceAsWorking,
       asOfDate,
     });
+    const shiftConfig = await getShiftForEmployee(client, companyId, employeeId);
 
     const basicSalary = Number(employee.basic_salary || 0);
     const daysInMonth = summary.daysInMonth || 30;
@@ -1525,7 +1533,19 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance;
     const esiDeduction = Number(employee.esi_amount || 0);
-    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+    const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+    const effectivePermissionHours =
+      employee.permission_hours_override != null
+        ? Number(employee.permission_hours_override || 0)
+        : Number(shiftConfig.monthlyPermissionHours || 0);
+    const permissionOffset = computePermissionOffset({
+      allocatedHours: effectivePermissionHours,
+      lateMinutes: summary.lateMinutes,
+      absenceDays: summary.absenceDays,
+      hourlyRate,
+      deductionsBeforeOffset: deductionsBeforePermission,
+    });
+    const deductions = deductionsBeforePermission - permissionOffset.offsetAmount;
     const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
     const repaymentRowsResult = applyAdvanceRepayments
       ? await client.query(
@@ -1578,9 +1598,12 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           salary_advance,
           no_leave_incentive,
           treat_holiday_adjacent_absence_as_working,
+          permission_hours_allocated,
+          permission_minutes_used,
+          permission_offset_amount,
           net_salary
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
        ON CONFLICT (company_id, employee_id, year, month)
        DO UPDATE SET
           total_days = EXCLUDED.total_days,
@@ -1592,6 +1615,9 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           salary_advance = EXCLUDED.salary_advance,
           no_leave_incentive = EXCLUDED.no_leave_incentive,
           treat_holiday_adjacent_absence_as_working = EXCLUDED.treat_holiday_adjacent_absence_as_working,
+          permission_hours_allocated = EXCLUDED.permission_hours_allocated,
+          permission_minutes_used = EXCLUDED.permission_minutes_used,
+          permission_offset_amount = EXCLUDED.permission_offset_amount,
           net_salary = EXCLUDED.net_salary,
           generated_at = NOW()
        RETURNING *`,
@@ -1609,6 +1635,9 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         salaryAdvance,
         noLeaveIncentiveAmount,
         treatHolidayAdjacentAbsenceAsWorking,
+        permissionOffset.allocatedHours,
+        permissionOffset.usedMinutes,
+        permissionOffset.offsetAmount,
         netSalary,
       ]
     );
@@ -1657,7 +1686,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     `SELECT
        treat_holiday_adjacent_absence_as_working,
        salary_advance,
-       no_leave_incentive
+       no_leave_incentive,
+       permission_hours_allocated,
+       permission_minutes_used,
+       permission_offset_amount
      FROM payroll_records
      WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
     [companyId, employeeId, year, month]
@@ -1675,7 +1707,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, shift_id, permission_hours_override
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -1686,6 +1718,20 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   }
 
   const employee = employeeResult.rows[0];
+  const shiftPermissionResult = await pool.query(
+    `SELECT monthly_permission_hours
+     FROM shifts
+     WHERE company_id = $1 AND id = $2`,
+    [companyId, employee.shift_id]
+  );
+  const shiftPermissionHours =
+    shiftPermissionResult.rowCount > 0
+      ? Number(shiftPermissionResult.rows[0].monthly_permission_hours || 0)
+      : 0;
+  const effectivePermissionHours =
+    employee.permission_hours_override != null
+      ? Number(employee.permission_hours_override || 0)
+      : shiftPermissionHours;
   const summary = await getAttendanceSummary(companyId, employeeId, year, month, {
     treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,
     asOfDate,
@@ -1738,7 +1784,27 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   const grossSalary = earnedBasic + overtimePay + travelAllowance;
   const esiDeduction = Number(employee.esi_amount || 0);
-  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+  const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+  const permissionOffsetComputed = computePermissionOffset({
+    allocatedHours: effectivePermissionHours,
+    lateMinutes: summary.lateMinutes,
+    absenceDays: summary.absenceDays,
+    hourlyRate,
+    deductionsBeforeOffset: deductionsBeforePermission,
+  });
+  const permissionHoursAllocated =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].permission_hours_allocated || 0)
+      : permissionOffsetComputed.allocatedHours;
+  const permissionMinutesUsed =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].permission_minutes_used || 0)
+      : permissionOffsetComputed.usedMinutes;
+  const permissionOffsetAmount =
+    existingPayrollResult.rowCount > 0
+      ? Number(existingPayrollResult.rows[0].permission_offset_amount || 0)
+      : permissionOffsetComputed.offsetAmount;
+  const totalDeductions = deductionsBeforePermission - permissionOffsetAmount;
   const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
   const advanceRepaymentsResult = await pool.query(
     `SELECT
@@ -1824,6 +1890,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       lateDeduction,
       lunchOverDeduction,
       esiDeduction,
+      permissionHoursAllocated,
+      permissionMinutesUsed,
+      permissionOffsetAmount,
       totalDeductions,
       salaryAdvance,
       noLeaveIncentive,
@@ -1900,6 +1969,9 @@ async function listPayrollRecords(
         p.total_days,
         p.present_days,
         p.absence_days,
+        p.permission_hours_allocated,
+        p.permission_minutes_used,
+        p.permission_offset_amount,
         p.overtime_hours,
         p.gross_salary,
         p.deductions,

@@ -34,7 +34,34 @@ function computeMonthlyBaseAndAbsence({
   return { earnedBasic, absenceDeduction };
 }
 
+function computePermissionOffset({
+  allocatedHours,
+  lateMinutes,
+  absenceDays,
+  hourlyRate,
+  deductionsBeforeOffset,
+}) {
+  const safeAllocatedHours = Math.max(0, Number(allocatedHours || 0));
+  const safeLateMinutes = Math.max(0, Number(lateMinutes || 0));
+  const safeAbsenceDays = Math.max(0, Number(absenceDays || 0));
+  const safeHourlyRate = Math.max(0, Number(hourlyRate || 0));
+  const safeDeductionsBeforeOffset = Math.max(0, Number(deductionsBeforeOffset || 0));
+
+  const allocatedMinutes = safeAllocatedHours * 60;
+  const eligibleMinutes = safeLateMinutes + safeAbsenceDays * 8 * 60;
+  const usedMinutes = Math.min(allocatedMinutes, eligibleMinutes);
+  const rawOffsetAmount = (usedMinutes / 60) * safeHourlyRate;
+  const offsetAmount = Math.min(rawOffsetAmount, safeDeductionsBeforeOffset);
+
+  return {
+    allocatedHours: safeAllocatedHours,
+    usedMinutes,
+    offsetAmount,
+  };
+}
+
 module.exports = {
   computeMonthlyBaseAndAbsence,
+  computePermissionOffset,
 };
 

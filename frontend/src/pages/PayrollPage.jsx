@@ -26,6 +26,13 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+function formatPermissionUsedHours(minutes) {
+  const m = Number(minutes || 0);
+  if (!Number.isFinite(m) || m <= 0) return '0';
+  const hours = m / 60;
+  return Number.isInteger(hours) ? String(hours) : hours.toFixed(2);
+}
+
 function buildWeeklyOffDateSet(year, month, weeklyOffDays) {
   const y = Number(year);
   const m = Number(month);
@@ -69,6 +76,8 @@ function payrollRowsToCsv(rows, payrollMode) {
           'Overtime (hrs)',
           'Gross',
           'Deductions',
+          'Permission used (hrs)',
+          'Permission offset',
           'Advance',
           'Incentive',
           'Net salary',
@@ -83,6 +92,8 @@ function payrollRowsToCsv(rows, payrollMode) {
           'Overtime (hrs)',
           'Gross',
           'Deductions',
+          'Permission used (hrs)',
+          'Permission offset',
           'Advance',
           'Incentive',
           'Net salary',
@@ -107,6 +118,8 @@ function payrollRowsToCsv(rows, payrollMode) {
         row.overtime_hours,
         row.gross_salary,
         row.deductions,
+        formatPermissionUsedHours(row.permission_minutes_used),
+        row.permission_offset_amount ?? 0,
         row.salary_advance,
         row.no_leave_incentive,
         row.net_salary,
@@ -154,6 +167,8 @@ function buildPayrollPrintDocument(rows, payrollMode, companyName) {
         <td class="num">${row.overtime_hours ?? ''}</td>
         <td class="num">${formatMoney(row.gross_salary)}</td>
         <td class="num">${formatMoney(row.deductions)}</td>
+        <td class="num">${formatPermissionUsedHours(row.permission_minutes_used)}</td>
+        <td class="num">${formatMoney(row.permission_offset_amount)}</td>
         <td class="num">${formatMoney(row.salary_advance)}</td>
         <td class="num">${formatMoney(row.no_leave_incentive)}</td>
         <td class="num"><strong>${formatMoney(row.net_salary)}</strong></td>
@@ -188,6 +203,8 @@ function buildPayrollPrintDocument(rows, payrollMode, companyName) {
         <th>OT (hrs)</th>
         <th>Gross</th>
         <th>Deductions</th>
+        <th>Permission (hrs)</th>
+        <th>Permission offset</th>
         <th>Advance</th>
         <th>Incentive</th>
         <th>Net</th>
@@ -217,6 +234,8 @@ function payrollRowsToPdfData(rows, payrollMode) {
     'OT (hrs)',
     'Gross',
     'Deductions',
+    'Permission (hrs)',
+    'Permission offset',
     'Advance',
     'Incentive',
     'Net salary',
@@ -242,6 +261,8 @@ function payrollRowsToPdfData(rows, payrollMode) {
       String(row.overtime_hours ?? ''),
       formatMoney(row.gross_salary),
       formatMoney(row.deductions),
+      formatPermissionUsedHours(row.permission_minutes_used),
+      formatMoney(row.permission_offset_amount),
       formatMoney(row.salary_advance),
       formatMoney(row.no_leave_incentive),
       formatMoney(row.net_salary),
@@ -1221,6 +1242,8 @@ export default function PayrollPage() {
                     <th className="pb-2 pr-3 font-medium text-right">Overtime (hrs)</th>
                     <th className="pb-2 pr-3 font-medium text-right">Absent days</th>
                     <th className="pb-2 pr-3 font-medium text-right">Deductions</th>
+                    <th className="pb-2 pr-3 font-medium text-right">Permission used</th>
+                    <th className="pb-2 pr-3 font-medium text-right">Permission offset</th>
                     <th className="pb-2 pr-3 font-medium text-right">Advance</th>
                     <th className="pb-2 pr-3 font-medium text-right">Incentive</th>
                     <th className="pb-2 pr-3 font-medium text-right">Net salary</th>
@@ -1279,6 +1302,12 @@ export default function PayrollPage() {
                       </td>
                       <td className="py-3 pr-3 text-right text-amber-700 font-medium">
                         −{formatMoney(row.deductions)}
+                      </td>
+                      <td className="py-3 pr-3 text-right text-slate-700">
+                        {formatPermissionUsedHours(row.permission_minutes_used)}h
+                      </td>
+                      <td className="py-3 pr-3 text-right text-emerald-700 font-medium">
+                        −{formatMoney(row.permission_offset_amount)}
                       </td>
                       <td className="py-3 pr-3 text-right text-amber-700 font-medium">
                         −{formatMoney(row.salary_advance)}

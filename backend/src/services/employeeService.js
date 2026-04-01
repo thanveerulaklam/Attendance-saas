@@ -31,6 +31,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         shift_id,
         daily_travel_allowance,
         esi_amount,
+        permission_hours_override,
         created_at`;
 
 /**
@@ -184,6 +185,8 @@ async function createEmployee(companyId, data, branchContext = {}) {
   const dailyTravelAllowance =
     payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
   const esiAmount = payload.esi_amount != null ? payload.esi_amount : 0;
+  const permissionHoursOverride =
+    payload.permission_hours_override != null ? payload.permission_hours_override : null;
   const department = payload.department != null ? payload.department : null;
   const phoneNumber = payload.phone_number != null ? payload.phone_number : null;
   const aadharNumber = payload.aadhar_number != null ? payload.aadhar_number : null;
@@ -212,9 +215,10 @@ async function createEmployee(companyId, data, branchContext = {}) {
         payroll_frequency,
         shift_id,
         daily_travel_allowance,
-        esi_amount
+        esi_amount,
+        permission_hours_override
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -232,6 +236,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         shiftId,
         dailyTravelAllowance,
         esiAmount,
+        permissionHoursOverride,
       ]
     );
 

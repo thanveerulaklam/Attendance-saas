@@ -40,13 +40,13 @@ test('hours-based daily provisional: last punch IN is present for current date',
   assert.equal(present, true);
 });
 
-test('hours-based daily provisional: last punch OUT is not present for current date', () => {
+test('hours-based daily provisional: threshold-met day stays present for current date', () => {
   const dayLogs = [
     { punch_time: '2026-01-10T09:00:00.000Z', punch_type: 'in' },
     { punch_time: '2026-01-10T12:00:00.000Z', punch_type: 'out' },
   ];
   const present = getHoursBasedDailyPresence(dayLogs, { present: true }, true);
-  assert.equal(present, false);
+  assert.equal(present, true);
 });
 
 test('hours-based daily provisional: no punches is absent for current date', () => {

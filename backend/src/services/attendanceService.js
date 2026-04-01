@@ -440,7 +440,13 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
   let totalMinutesInside = 0;
   let lastIn = null;
   let firstInTime = null;
-  const dayEndMs = bounds.end.getTime();
+  // Backward compatible: older callers/tests may pass a Date for day start.
+  const dayEndMs =
+    bounds && bounds.end instanceof Date
+      ? bounds.end.getTime()
+      : bounds instanceof Date
+        ? bounds.getTime() + 24 * 60 * 60 * 1000 - 1
+        : Date.now();
   const nowMs = Date.now();
   const maxSessionMinutes = 24 * 60;
 

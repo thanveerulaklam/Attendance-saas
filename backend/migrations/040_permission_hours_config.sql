@@ -1,0 +1,11 @@
+ALTER TABLE shifts
+ADD COLUMN IF NOT EXISTS monthly_permission_hours NUMERIC(6,2) NOT NULL DEFAULT 0;
+
+ALTER TABLE employees
+ADD COLUMN IF NOT EXISTS permission_hours_override NUMERIC(6,2);
+
+ALTER TABLE payroll_records
+ADD COLUMN IF NOT EXISTS permission_hours_allocated NUMERIC(6,2) NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS permission_minutes_used NUMERIC(8,2) NOT NULL DEFAULT 0,
+ADD COLUMN IF NOT EXISTS permission_offset_amount NUMERIC(12,2) NOT NULL DEFAULT 0;
+

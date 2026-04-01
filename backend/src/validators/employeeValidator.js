@@ -92,6 +92,15 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
+    const v = payload.permission_hours_override;
+    if (v == null || v === '') {
+      // optional override
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.permission_hours_override = 'Permission hours override must be a non-negative number.';
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'department')) {
     if (payload.department == null || payload.department === '') {
       // optional: store as NULL
@@ -160,6 +169,10 @@ const validateCreateEmployee = (payload = {}) => {
   if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
     const v = payload.esi_amount;
     result.esi_amount = v == null || v === '' ? 0 : Number(v);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
+    const v = payload.permission_hours_override;
+    result.permission_hours_override = v == null || v === '' ? null : Number(v);
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'department')) {
@@ -302,6 +315,17 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.esi_amount = 'ESI amount must be a non-negative number.';
     } else {
       clean.esi_amount = Number(v);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
+    const v = payload.permission_hours_override;
+    if (v == null || v === '') {
+      clean.permission_hours_override = null;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.permission_hours_override = 'Permission hours override must be a non-negative number.';
+    } else {
+      clean.permission_hours_override = Number(v);
     }
   }
 

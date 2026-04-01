@@ -19,6 +19,7 @@ const emptyForm = () => ({
   attendance_mode: 'day_based',
   required_hours_per_day: 8,
   half_day_hours: 0,
+  monthly_permission_hours: 0,
 });
 
 export default function ShiftsPage() {
@@ -72,6 +73,7 @@ export default function ShiftsPage() {
       'paid_leave_days',
       'required_hours_per_day',
       'half_day_hours',
+      'monthly_permission_hours',
     ];
     const value = numericFields.includes(field)
       ? Number(event.target.value || 0)
@@ -117,6 +119,7 @@ export default function ShiftsPage() {
       attendance_mode: shift.attendance_mode || 'day_based',
       required_hours_per_day: shift.required_hours_per_day ?? 8,
       half_day_hours: shift.half_day_hours ?? 0,
+      monthly_permission_hours: shift.monthly_permission_hours ?? 0,
     });
     setEditingShift(shift);
     setError(null);
@@ -304,6 +307,25 @@ export default function ShiftsPage() {
                   </p>
                 </div>
               )}
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-slate-700">
+                  Monthly permission hours (optional)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={form.monthly_permission_hours}
+                  onChange={handleChange('monthly_permission_hours')}
+                  disabled={creating}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                  placeholder="e.g. 5"
+                />
+                <p className="text-[10px] text-slate-500">
+                  Paid permission pool per employee per month for this shift. Set 0 to disable.
+                </p>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
@@ -531,6 +553,11 @@ export default function ShiftsPage() {
                             Half-day &lt; {shift.half_day_hours}h
                           </span>
                         )}
+                      {Number(shift.monthly_permission_hours || 0) > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                          Permission {shift.monthly_permission_hours}h/month
+                        </span>
+                      )}
                     </div>
                   </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
@@ -736,6 +763,18 @@ export default function ShiftsPage() {
                   />
                 </div>
               )}
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-slate-700">Monthly permission hours</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={form.monthly_permission_hours}
+                  onChange={handleChange('monthly_permission_hours')}
+                  disabled={savingEdit}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Grace min</label>

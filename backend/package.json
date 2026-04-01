@@ -8,6 +8,8 @@
     "dev": "node --watch server.js",
     "migrate": "node ./scripts/migrate.js",
     "seed": "node ./scripts/seed.js",
+    "seed:testdata": "node ./scripts/generate-test-data.js",
+    "seed:testdata:fresh": "npm run migrate && npm run seed:testdata",
     "connector": "node ./scripts/biometric-connector.js",
     "connector:once": "node ./scripts/biometric-connector.js --once"
   },

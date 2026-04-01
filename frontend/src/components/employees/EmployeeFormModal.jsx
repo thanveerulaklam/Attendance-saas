@@ -24,6 +24,7 @@ export default function EmployeeFormModal({
   const [esiNumber, setEsiNumber] = useState('');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
+  const [permissionHoursOverride, setPermissionHoursOverride] = useState('');
   const [joinDate, setJoinDate] = useState('');
   const [status, setStatus] = useState('active');
   const [shiftId, setShiftId] = useState('');
@@ -81,6 +82,11 @@ export default function EmployeeFormModal({
         setEsiAmount(
           employee.esi_amount != null ? String(employee.esi_amount) : ''
         );
+        setPermissionHoursOverride(
+          employee.permission_hours_override != null
+            ? String(employee.permission_hours_override)
+            : ''
+        );
         setJoinDate(
           employee.join_date
             ? new Date(employee.join_date).toISOString().slice(0, 10)
@@ -104,6 +110,7 @@ export default function EmployeeFormModal({
         setBasicSalary('');
         setDailyTravelAllowance('');
         setEsiAmount('');
+        setPermissionHoursOverride('');
         setJoinDate('');
         setStatus('active');
         setShiftId('');
@@ -157,6 +164,12 @@ export default function EmployeeFormModal({
 
     if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
       nextErrors.esiAmount = 'ESI amount must be 0 or more';
+    }
+    if (
+      permissionHoursOverride.trim() !== '' &&
+      (Number.isNaN(Number(permissionHoursOverride)) || Number(permissionHoursOverride) < 0)
+    ) {
+      nextErrors.permissionHoursOverride = 'Permission hours override must be 0 or more';
     }
 
     if (phoneNumber.trim() !== '') {
@@ -215,6 +228,8 @@ export default function EmployeeFormModal({
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
         esi_amount: esiAmount.trim() === '' ? 0 : Number(esiAmount),
+        permission_hours_override:
+          permissionHoursOverride.trim() === '' ? null : Number(permissionHoursOverride),
         join_date: joinDate,
         status,
         shift_id: shiftId === '' ? null : Number(shiftId),
@@ -489,6 +504,27 @@ export default function EmployeeFormModal({
             </p>
             {errors.esiAmount && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.esiAmount}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              Permission hours override (monthly)
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={permissionHoursOverride}
+                onChange={(e) => setPermissionHoursOverride(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                placeholder="Leave empty to use shift default"
+              />
+            </label>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Optional. If empty, employee uses assigned shift permission hours.
+            </p>
+            {errors.permissionHoursOverride && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.permissionHoursOverride}</p>
             )}
           </div>
 

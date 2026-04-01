@@ -284,6 +284,7 @@ export default function PayslipModal({
       ['No Leave Bonus', formatMoney(b.noLeaveIncentive)],
     ];
     const deductions = [
+      ['Permission Offset', formatMoney(b.permissionOffsetAmount)],
       ['Late Deduction', formatMoney(b.lateDeduction)],
       ['Lunch Deduct.', formatMoney(b.lunchOverDeduction)],
       ['Advance Repayment', formatMoney(b.salaryAdvance)],
@@ -537,6 +538,12 @@ punchpay.in
               </h3>
               <div className="space-y-1.5">
                 <div className="flex justify-between">
+                  <span>Permission Offset</span>
+                  <span className="font-medium text-emerald-700">
+                    −₹{formatMoney(breakdown.breakdown?.permissionOffsetAmount)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
                   <span>Late Deduction</span>
                   <span className="font-medium text-amber-700">
                     ₹{formatMoney(breakdown.breakdown?.lateDeduction)}
@@ -630,6 +637,13 @@ punchpay.in
                 </p>
               </div>
             </div>
+            {(Number(breakdown.breakdown?.permissionHoursAllocated || 0) > 0 ||
+              Number(breakdown.breakdown?.permissionMinutesUsed || 0) > 0) && (
+              <div className="mt-3 border-t border-slate-200 pt-2 text-[10px] text-slate-600">
+                Permission allocated: {formatHours(breakdown.breakdown?.permissionHoursAllocated)} hrs | Used:{' '}
+                {formatHours(Number(breakdown.breakdown?.permissionMinutesUsed || 0) / 60)} hrs
+              </div>
+            )}
           </section>
 
           <section className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-dashed border-slate-200 pt-3 text-[10px] text-slate-500">
