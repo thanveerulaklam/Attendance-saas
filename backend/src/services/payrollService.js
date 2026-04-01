@@ -278,6 +278,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     let lateDays = 0;
     /** Number of days employee went over allotted lunch (for fixed deduction per day). */
     let lunchOverDays = 0;
+    /** Number of half-days (each contributes 0.5 present / 0.5 absence). */
+    let halfDayDays = 0;
 
     const allottedLunchMs = (shift.lunchMinutesAllotted ?? 60) * 60 * 1000;
 
@@ -351,6 +353,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           presentDays += presentFraction;
           if (!isHoliday) {
             presentWorkingDays += presentFraction;
+            if (presentFraction === 0.5) {
+              halfDayDays += 1;
+            }
           }
         } else if (!isHoliday) {
           rawAbsenceDays += 1;
@@ -408,6 +413,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         lunchOverMinutes: 0,
         lateDays,
         lunchOverDays: 0,
+        halfDayDays,
         lateDeductionMinutes: shift.lateDeductionMinutes,
         lateDeductionAmount: shift.lateDeductionAmount,
         lunchOverDeductionMinutes: 0,
@@ -445,6 +451,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       presentDays += presentFraction;
       if (!isHoliday) {
         presentWorkingDays += presentFraction;
+        if (status.halfDay) {
+          halfDayDays += 1;
+        }
       }
 
       if (status.overtimeHours && status.overtimeHours > 0) {
@@ -514,6 +523,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       lunchOverMinutes,
       lateDays,
       lunchOverDays,
+      halfDayDays,
       lateDeductionMinutes: shift.lateDeductionMinutes,
       lateDeductionAmount: shift.lateDeductionAmount,
       lunchOverDeductionMinutes: shift.lunchOverDeductionMinutes,
@@ -650,6 +660,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     let totalLunchOverMs = 0;
     let lateDays = 0;
     let lunchOverDays = 0;
+    let halfDayDays = 0;
     let totalOvertimeMs = 0;
 
     const presentDayKeys = new Set();
@@ -723,7 +734,12 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         if (presentFraction > 0) {
           presentDayKeys.add(dayKey);
           presentDays += presentFraction;
-          if (!isHoliday) presentWorkingDays += presentFraction;
+          if (!isHoliday) {
+            presentWorkingDays += presentFraction;
+            if (presentFraction === 0.5) {
+              halfDayDays += 1;
+            }
+          }
         } else if (!isHoliday) {
           // full absence => counted in effectiveWorkingDays - presentWorkingDays later
         }
@@ -769,7 +785,12 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         const presentFraction = isHoliday ? 1 : status.halfDay ? 0.5 : 1;
         presentDayKeys.add(dayKey);
         presentDays += presentFraction;
-        if (!isHoliday) presentWorkingDays += presentFraction;
+        if (!isHoliday) {
+          presentWorkingDays += presentFraction;
+          if (status.halfDay) {
+            halfDayDays += 1;
+          }
+        }
 
         if (status.overtimeHours && status.overtimeHours > 0) {
           totalOvertimeMs += status.overtimeHours * 60 * 60 * 1000;
@@ -855,6 +876,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       lunchOverMinutes,
       lateDays,
       lunchOverDays,
+      halfDayDays,
       lateDeductionMinutes: shift.lateDeductionMinutes,
       lateDeductionAmount: shift.lateDeductionAmount,
       lunchOverDeductionMinutes: shift.lunchOverDeductionMinutes,
@@ -1375,6 +1397,7 @@ async function getWeeklyPayrollBreakdown(
       lunchOverMinutes: shiftSummary.lunchOverMinutes,
       lateDays: shiftSummary.lateDays,
       lunchOverDays: shiftSummary.lunchOverDays,
+      halfDayDays: shiftSummary.halfDayDays,
       attendanceMode: shiftSummary.attendanceMode,
       requiredHoursPerDay: shiftSummary.requiredHoursPerDay,
       dayDetails: shiftSummary.dayDetails,
@@ -1784,6 +1807,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       lunchOverMinutes: summary.lunchOverMinutes,
       lateDays: summary.lateDays,
       lunchOverDays: summary.lunchOverDays,
+      halfDayDays: summary.halfDayDays,
       attendanceMode: summary.attendanceMode,
       requiredHoursPerDay: summary.requiredHoursPerDay,
       treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,

@@ -452,15 +452,21 @@ punchpay.in
                 <span className="font-medium">{breakdown.attendance?.presentDays ?? '—'}</span>
               </div>
               <div className="flex justify-between">
-                <span>Days Absent</span>
+                <span>Payroll Absent Days</span>
                 <span className="font-medium text-rose-600">
                   {breakdown.attendance?.absenceDays ?? '—'}
                 </span>
               </div>
               <div className="flex justify-between">
+                <span>Full Absent Days</span>
+                <span className="font-medium text-rose-600">
+                  {(attendanceDetails?.absentDates || []).length}
+                </span>
+              </div>
+              <div className="flex justify-between">
                 <span>Half Days</span>
                 <span className="font-medium text-amber-600">
-                  {attendanceDetails?.halfDayCount ?? '—'}
+                  {breakdown.attendance?.halfDayDays ?? attendanceDetails?.halfDayCount ?? '—'}
                 </span>
               </div>
               <div className="flex justify-between">
