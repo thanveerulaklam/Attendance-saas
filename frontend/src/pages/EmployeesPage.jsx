@@ -158,11 +158,16 @@ export default function EmployeesPage() {
     setEditingEmployee(null);
     setPage(1);
     fetchEmployees();
+    const wasDeactivated = employee?.deletionMode === 'deactivated';
     setToast({
       type: 'success',
-      message: employee?.name
-        ? `Employee "${employee.name}" deleted successfully`
-        : 'Employee deleted successfully',
+      message: wasDeactivated
+        ? employee?.name
+          ? `Employee "${employee.name}" has payroll/attendance history, so it was deactivated.`
+          : 'Employee has linked history and was deactivated.'
+        : employee?.name
+          ? `Employee "${employee.name}" deleted successfully`
+          : 'Employee deleted successfully',
     });
   };
 

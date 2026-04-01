@@ -436,19 +436,33 @@ async function deleteEmployee(companyId, id, branchContext = {}) {
     const result = await pool.query(
       `DELETE FROM employees
        WHERE company_id = $1 AND id = $2
-       RETURNING id`,
+       RETURNING id, name`,
       [companyId, id]
     );
 
     if (result.rowCount === 0) {
       throw new AppError('Employee not found for this company', 404);
     }
+    return {
+      action: 'deleted',
+      employee: { id: result.rows[0].id, name: result.rows[0].name },
+    };
   } catch (err) {
     if (err.code === '23503') {
-      throw new AppError(
-        'Cannot delete employee because related records exist (attendance, payroll, or other history).',
-        409
+      const updated = await pool.query(
+        `UPDATE employees
+         SET status = 'inactive'
+         WHERE company_id = $1 AND id = $2
+         RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
+        [companyId, id]
       );
+      if (updated.rowCount === 0) {
+        throw new AppError('Employee not found for this company', 404);
+      }
+      return {
+        action: 'deactivated',
+        employee: updated.rows[0],
+      };
     }
     throw err;
   }

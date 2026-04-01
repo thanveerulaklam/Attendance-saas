@@ -320,8 +320,10 @@ export default function EmployeeFormModal({
         return;
       }
 
+      const json = res.status === 204 ? null : await res.json().catch(() => ({}));
+      const deletionMode = json?.data?.action || 'deleted';
       if (typeof onDeleted === 'function') {
-        onDeleted(employee);
+        onDeleted({ ...employee, deletionMode });
       } else if (typeof onClose === 'function') {
         onClose();
       }

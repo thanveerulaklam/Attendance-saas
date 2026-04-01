@@ -121,9 +121,18 @@ const deleteEmployee = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
   const id = Number(req.params.id);
 
-  await employeeService.deleteEmployee(companyId, id, branchContext(req));
+  const result = await employeeService.deleteEmployee(companyId, id, branchContext(req));
 
-  auditService.log(companyId, req.user?.user_id, 'employee.delete', 'employee', id, {}).catch(() => {});
+  const action = result?.action === 'deactivated' ? 'employee.deactivate' : 'employee.delete';
+  auditService.log(companyId, req.user?.user_id, action, 'employee', id, { name: result?.employee?.name }).catch(() => {});
+
+  if (result?.action === 'deactivated') {
+    return res.status(200).json({
+      success: true,
+      message: 'Employee has linked history and was deactivated instead of deleted.',
+      data: result,
+    });
+  }
 
   return res.status(204).send();
 });
