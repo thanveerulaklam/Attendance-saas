@@ -352,9 +352,12 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 28;
-  const rightX = pageWidth - margin;
-  const contentWidth = pageWidth - margin * 2;
-  let y = 26;
+  const frameLeft = margin;
+  const frameRight = pageWidth - margin;
+  const labelX = frameLeft + 8;
+  const valueX = frameRight - 10;
+  const contentWidth = frameRight - frameLeft - 16;
+  let y = 32;
   const lineGap = 11;
   const sectionGap = 14;
   const b = breakdown?.breakdown || {};
@@ -362,45 +365,48 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   const periodLabel = formatPayslipPeriodLabel(row, payrollMode);
 
   const writeLeft = (text, options = {}) => {
-    doc.text(String(text), margin, y, options);
+    doc.text(String(text), labelX, y, options);
     y += lineGap;
   };
 
   const writeKv = (label, value, color = [15, 23, 42]) => {
     doc.setFont(undefined, 'normal');
     doc.setTextColor(71, 85, 105);
-    doc.text(String(label), margin, y);
+    doc.text(String(label), labelX, y);
     doc.setFont(undefined, 'bold');
     doc.setTextColor(...color);
-    doc.text(String(value ?? '—'), rightX, y, { align: 'right' });
+    doc.text(String(value ?? '—'), valueX, y, { align: 'right' });
     y += lineGap;
   };
+
+  doc.setDrawColor(226, 232, 240);
+  doc.roundedRect(frameLeft, 20, frameRight - frameLeft, pageHeight - 40, 4, 4);
 
   doc.setFontSize(15);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(String(company?.name || 'Company'), margin, y);
+  doc.text(String(company?.name || 'Company'), labelX, y);
   doc.setFontSize(9);
   doc.setFont(undefined, 'normal');
   doc.setTextColor(100, 116, 139);
   const addressLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
   const companyLines = doc.splitTextToSize(addressLine || '—', contentWidth);
   y += 12;
-  doc.text(companyLines, margin, y);
+  doc.text(companyLines, labelX, y);
   y += companyLines.length * 10;
 
   doc.setDrawColor(226, 232, 240);
-  doc.line(margin, y, rightX, y);
+  doc.line(labelX, y, valueX, y);
   y += 10;
 
   doc.setFontSize(12);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(30, 64, 175);
-  doc.text('PAYSLIP', margin, y);
+  doc.text('PAYSLIP', labelX, y);
   doc.setFontSize(10);
   doc.setFont(undefined, 'normal');
   doc.setTextColor(71, 85, 105);
-  doc.text(`Period: ${periodLabel}`, rightX, y, { align: 'right' });
+  doc.text(`Period: ${periodLabel}`, valueX, y, { align: 'right' });
   y += sectionGap;
 
   doc.setFontSize(10);
@@ -438,27 +444,27 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   doc.setTextColor(51, 65, 85);
   writeLeft('SALARY');
   doc.setFontSize(9);
-  writeKv('Gross Salary', `₹${formatMoney(b.grossSalary)}`);
-  writeKv('Permission Offset', `₹${formatMoney(b.permissionOffsetAmount)}`);
-  writeKv('Late Deduction', `₹${formatMoney(b.lateDeduction)}`);
-  writeKv('Lunch Deduction', `₹${formatMoney(b.lunchOverDeduction)}`);
-  writeKv('Advance Repayment', `₹${formatMoney(b.salaryAdvance)}`);
-  writeKv('Absent Deduction', `₹${formatMoney(b.absenceDeduction)}`);
-  writeKv('ESI Deduction', `₹${formatMoney(b.esiDeduction)}`);
+  writeKv('Gross Salary', `INR ${formatMoney(b.grossSalary)}`);
+  writeKv('Permission Offset', `INR ${formatMoney(b.permissionOffsetAmount)}`);
+  writeKv('Late Deduction', `INR ${formatMoney(b.lateDeduction)}`);
+  writeKv('Lunch Deduction', `INR ${formatMoney(b.lunchOverDeduction)}`);
+  writeKv('Advance Repayment', `INR ${formatMoney(b.salaryAdvance)}`);
+  writeKv('Absent Deduction', `INR ${formatMoney(b.absenceDeduction)}`);
+  writeKv('ESI Deduction', `INR ${formatMoney(b.esiDeduction)}`);
   writeKv(
     'Total Deductions',
-    `₹${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`,
+    `INR ${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`,
     [180, 83, 9]
   );
 
   y += 2;
   doc.setDrawColor(226, 232, 240);
-  doc.line(margin, y, rightX, y);
+  doc.line(labelX, y, valueX, y);
   y += 11;
   doc.setFontSize(12);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(5, 150, 105);
-  doc.text(`NET SALARY: ₹${formatMoney(b.netSalary)}`, rightX, y, { align: 'right' });
+  doc.text(`NET SALARY: INR ${formatMoney(b.netSalary)}`, valueX, y, { align: 'right' });
 
   const footerY = pageHeight - 18;
   doc.setFontSize(8);
