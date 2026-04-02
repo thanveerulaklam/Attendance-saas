@@ -33,6 +33,7 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
+       overtime_rate_mode,
        created_at
      FROM shifts
      WHERE company_id = $1
@@ -66,6 +67,7 @@ async function createShift(companyId, data) {
     requiredHoursPerDay,
     allowOvertime,
     overtimeRatePerHour,
+    overtimeRateMode,
   } = parsed;
 
   if (!name || !startTime || !endTime) {
@@ -94,9 +96,10 @@ async function createShift(companyId, data) {
        half_day_hours,
        required_hours_per_day,
        allow_overtime,
-       overtime_rate_per_hour
+      overtime_rate_per_hour,
+      overtime_rate_mode
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING
        id,
        company_id,
@@ -118,6 +121,7 @@ async function createShift(companyId, data) {
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
+       overtime_rate_mode,
        created_at`,
     [
       companyId,
@@ -139,6 +143,7 @@ async function createShift(companyId, data) {
       requiredHoursPerDay,
       allowOvertime,
       overtimeRatePerHour,
+      overtimeRateMode,
     ]
   );
 
@@ -195,6 +200,9 @@ function parseShiftData(data) {
   const overtimeRatePerHour = Number.isFinite(overtimeRatePerHourRaw)
     ? Math.max(0, overtimeRatePerHourRaw)
     : 0;
+  const overtimeRateModeRaw = String(data.overtime_rate_mode || 'fixed').toLowerCase();
+  const overtimeRateMode =
+    overtimeRateModeRaw === 'auto' ? 'auto' : 'fixed';
   const weeklyOffDays = Array.isArray(data.weekly_off_days)
     ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : [];
@@ -218,6 +226,7 @@ function parseShiftData(data) {
     requiredHoursPerDay,
     allowOvertime,
     overtimeRatePerHour,
+    overtimeRateMode,
   };
 }
 
@@ -272,8 +281,9 @@ async function updateShift(companyId, shiftId, data) {
        half_day_hours = $16,
        monthly_permission_hours = $17,
        allow_overtime = $18,
-       overtime_rate_per_hour = $19
-     WHERE company_id = $1 AND id = $20
+       overtime_rate_per_hour = $19,
+       overtime_rate_mode = $20
+     WHERE company_id = $1 AND id = $21
      RETURNING
        id,
        company_id,
@@ -295,6 +305,7 @@ async function updateShift(companyId, shiftId, data) {
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
+       overtime_rate_mode,
        created_at`,
     [
       companyId,
@@ -316,6 +327,7 @@ async function updateShift(companyId, shiftId, data) {
       parsed.monthlyPermissionHours,
       parsed.allowOvertime,
       parsed.overtimeRatePerHour,
+      parsed.overtimeRateMode,
       shiftId,
     ]
   );

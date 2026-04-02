@@ -93,6 +93,10 @@ function rowToShiftConfig(row) {
     halfDayHours,
     allowOvertime: row.allow_overtime !== false,
     overtimeRatePerHour: Number(row.overtime_rate_per_hour || 0),
+    overtimeRateMode:
+      String(row.overtime_rate_mode || 'fixed').toLowerCase() === 'auto'
+        ? 'auto'
+        : 'fixed',
   };
 }
 
@@ -116,7 +120,8 @@ async function getDefaultShiftForCompany(client, companyId) {
        half_day_hours,
        required_hours_per_day,
        allow_overtime,
-       overtime_rate_per_hour
+       overtime_rate_per_hour,
+       overtime_rate_mode
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -155,7 +160,8 @@ async function getShiftForEmployee(client, companyId, employeeId) {
          half_day_hours,
          required_hours_per_day,
          allow_overtime,
-         overtime_rate_per_hour
+        overtime_rate_per_hour,
+        overtime_rate_mode
        FROM shifts
        WHERE company_id = $1 AND id = $2`,
       [companyId, shiftId]
@@ -992,7 +998,19 @@ async function generateWeeklyPayroll(
     });
 
     const shiftConfig = await getShiftForEmployee(client, companyId, employeeId);
-    const effectiveOvertimeRate = Number(shiftConfig.overtimeRatePerHour || 0);
+
+    const shiftHoursForRate =
+      summary.attendanceMode === 'hours_based'
+        ? Number(summary.requiredHoursPerDay || 8)
+        : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
+
+    const effectiveOvertimeRate =
+      shiftConfig.overtimeRateMode === 'auto'
+        ? shiftHoursForRate > 0
+          ? dailyRate / shiftHoursForRate
+          : 0
+        : Number(shiftConfig.overtimeRatePerHour || 0);
+
     const overtimePay =
       includeOvertime && shiftConfig.allowOvertime
         ? summary.overtimeHours * effectiveOvertimeRate
@@ -1369,7 +1387,18 @@ async function getWeeklyPayrollBreakdown(
   } finally {
     shiftClient.release();
   }
-  const effectiveOvertimeRate = Number(shiftConfig.overtimeRatePerHour || 0);
+  const shiftHoursForRate =
+    shiftSummary.attendanceMode === 'hours_based'
+      ? Number(shiftSummary.requiredHoursPerDay || 8)
+      : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
+
+  const effectiveOvertimeRate =
+    shiftConfig.overtimeRateMode === 'auto'
+      ? shiftHoursForRate > 0
+        ? dailyRate / shiftHoursForRate
+        : 0
+      : Number(shiftConfig.overtimeRatePerHour || 0);
+
   const overtimePay =
     includeOvertime && shiftConfig.allowOvertime
       ? shiftSummary.overtimeHours * effectiveOvertimeRate

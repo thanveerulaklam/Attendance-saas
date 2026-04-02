@@ -22,6 +22,7 @@ const emptyForm = () => ({
   monthly_permission_hours: 0,
   allow_overtime: true,
   overtime_rate_per_hour: 0,
+  overtime_rate_mode: 'fixed',
 });
 
 export default function ShiftsPage() {
@@ -125,6 +126,7 @@ export default function ShiftsPage() {
       monthly_permission_hours: shift.monthly_permission_hours ?? 0,
       allow_overtime: shift.allow_overtime !== false,
       overtime_rate_per_hour: shift.overtime_rate_per_hour ?? 0,
+      overtime_rate_mode: shift.overtime_rate_mode || 'fixed',
     });
     setEditingShift(shift);
     setError(null);
@@ -403,6 +405,23 @@ export default function ShiftsPage() {
                 </label>
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
+                    Overtime rate mode
+                  </label>
+                  <select
+                    value={form.overtime_rate_mode || 'fixed'}
+                    onChange={handleChange('overtime_rate_mode')}
+                    disabled={creating || form.allow_overtime !== true}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-100 disabled:bg-slate-100"
+                  >
+                    <option value="fixed">Fixed (set ₹/hr)</option>
+                    <option value="auto">Auto (daily wage ÷ shift hours)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    If set to Auto, overtime is paid using the employee’s daily wage divided by the shift working hours.
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
                     Overtime rate per hour (₹)
                   </label>
                   <input
@@ -411,7 +430,11 @@ export default function ShiftsPage() {
                     step={0.01}
                     value={form.overtime_rate_per_hour}
                     onChange={handleChange('overtime_rate_per_hour')}
-                    disabled={creating || form.allow_overtime !== true}
+                    disabled={
+                      creating ||
+                      form.allow_overtime !== true ||
+                      (form.overtime_rate_mode || 'fixed') === 'auto'
+                    }
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300 disabled:bg-slate-100"
                     placeholder="e.g. 100"
                   />
@@ -591,7 +614,9 @@ export default function ShiftsPage() {
                       }`}>
                         {shift.allow_overtime === false
                           ? 'OT disabled'
-                          : `OT ₹${shift.overtime_rate_per_hour ?? 0}/hr`}
+                          : shift.overtime_rate_mode === 'auto'
+                            ? 'OT Auto'
+                            : `OT ₹${shift.overtime_rate_per_hour ?? 0}/hr`}
                       </span>
                       {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') &&
                         Number(shift.half_day_hours || 0) > 0 && (
@@ -699,7 +724,9 @@ export default function ShiftsPage() {
                         <dd className="font-medium text-slate-800">
                           {shift.allow_overtime === false
                             ? 'Disabled'
-                            : `₹${shift.overtime_rate_per_hour ?? 0}/hr`}
+                            : shift.overtime_rate_mode === 'auto'
+                              ? 'Auto'
+                              : `₹${shift.overtime_rate_per_hour ?? 0}/hr`}
                         </dd>
                       </div>
                     </dl>
@@ -817,6 +844,23 @@ export default function ShiftsPage() {
                   <span className="text-[11px] text-slate-700">Allow overtime pay</span>
                 </label>
                 <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Overtime rate mode
+                  </label>
+                  <select
+                    value={form.overtime_rate_mode || 'fixed'}
+                    onChange={handleChange('overtime_rate_mode')}
+                    disabled={savingEdit || form.allow_overtime !== true}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-100 disabled:bg-slate-100"
+                  >
+                    <option value="fixed">Fixed (set ₹/hr)</option>
+                    <option value="auto">Auto (daily wage ÷ shift hours)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-500">
+                    If set to Auto, overtime is paid using the employee’s daily wage divided by the shift working hours.
+                  </p>
+                </div>
+                <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Overtime rate per hour (₹)</label>
                   <input
                     type="number"
@@ -824,7 +868,11 @@ export default function ShiftsPage() {
                     step={0.01}
                     value={form.overtime_rate_per_hour}
                     onChange={handleChange('overtime_rate_per_hour')}
-                    disabled={savingEdit || form.allow_overtime !== true}
+                    disabled={
+                      savingEdit ||
+                      form.allow_overtime !== true ||
+                      (form.overtime_rate_mode || 'fixed') === 'auto'
+                    }
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
                   />
                 </div>
