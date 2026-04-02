@@ -761,7 +761,8 @@ export default function PayrollPage() {
     if (payrollMode === 'weekly') {
       const params = new URLSearchParams({
         employee_id: String(row.employee_id),
-        week_start_date: toYmdDateString(row.week_start_date),
+        // Re-snap to Sunday (IST) to avoid any driver/UTC date-shift mismatches.
+        week_start_date: snapToSundayYmd(toYmdDateString(row.week_start_date)),
       });
       const [breakdownRes, employeeRes] = await Promise.all([
         authFetch(`/api/payroll/weekly/breakdown?${params}`, { headers: { 'Content-Type': 'application/json' } }),
@@ -925,7 +926,8 @@ export default function PayrollPage() {
         if (payrollMode === 'weekly') {
           const params = new URLSearchParams({
             employee_id: String(detailRow.employee_id),
-            week_start_date: toYmdDateString(detailRow.week_start_date),
+            // Re-snap to Sunday (IST) to avoid any driver/UTC date-shift mismatches.
+            week_start_date: snapToSundayYmd(toYmdDateString(detailRow.week_start_date)),
           });
 
           const res = await authFetch(`/api/payroll/weekly/breakdown?${params}`, {
