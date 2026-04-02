@@ -147,26 +147,57 @@ async function getShiftForEmployee(client, companyId, employeeId) {
   const shiftId = empResult.rowCount > 0 ? empResult.rows[0].shift_id : null;
 
   if (shiftId) {
-    const result = await client.query(
-      `SELECT
-         id, start_time, end_time, grace_minutes, lunch_minutes,
-         late_deduction_minutes, late_deduction_amount,
-         lunch_over_deduction_minutes, lunch_over_deduction_amount,
-         no_leave_incentive,
-         paid_leave_days,
-         weekly_off_days,
-         attendance_mode,
-         monthly_permission_hours,
-         half_day_hours,
-         required_hours_per_day,
-         allow_overtime,
-        overtime_rate_per_hour,
-        overtime_rate_mode
-       FROM shifts
-       WHERE company_id = $1 AND id = $2`,
-      [companyId, shiftId]
-    );
-    if (result.rowCount > 0) {
+    let result;
+    try {
+      result = await client.query(
+        `SELECT
+           id, start_time, end_time, grace_minutes, lunch_minutes,
+           late_deduction_minutes, late_deduction_amount,
+           lunch_over_deduction_minutes, lunch_over_deduction_amount,
+           no_leave_incentive,
+           paid_leave_days,
+           weekly_off_days,
+           attendance_mode,
+           monthly_permission_hours,
+           half_day_hours,
+           required_hours_per_day,
+           allow_overtime,
+           overtime_rate_per_hour,
+           overtime_rate_mode
+         FROM shifts
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, shiftId]
+      );
+    } catch (err) {
+      // Backward compatibility: older DBs may not have overtime_rate_mode column yet.
+      if (
+        err?.code === '42703' &&
+        String(err?.message || '').toLowerCase().includes('overtime_rate_mode')
+      ) {
+        result = await client.query(
+          `SELECT
+             id, start_time, end_time, grace_minutes, lunch_minutes,
+             late_deduction_minutes, late_deduction_amount,
+             lunch_over_deduction_minutes, lunch_over_deduction_amount,
+             no_leave_incentive,
+             paid_leave_days,
+             weekly_off_days,
+             attendance_mode,
+             monthly_permission_hours,
+             half_day_hours,
+             required_hours_per_day,
+             allow_overtime,
+             overtime_rate_per_hour
+           FROM shifts
+           WHERE company_id = $1 AND id = $2`,
+          [companyId, shiftId]
+        );
+      } else {
+        throw err;
+      }
+    }
+
+    if (result?.rowCount > 0) {
       return rowToShiftConfig(result.rows[0]);
     }
   }

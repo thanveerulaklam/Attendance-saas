@@ -358,7 +358,12 @@ async function breakdownWeekly(req, res, next) {
       data,
     });
   } catch (err) {
-    next(err);
+    // Helpful for debugging weekly payslip issues (e.g. missing DB columns / serialization mismatches).
+    if (res.headersSent) return;
+    return res.status(500).json({
+      success: false,
+      message: err?.message || 'Internal server error',
+    });
   }
 }
 
