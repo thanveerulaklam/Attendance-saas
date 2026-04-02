@@ -1472,6 +1472,14 @@ async function getWeeklyPayrollBreakdown(
 
   const grossSalary = earnedBasic + overtimePay + travelAllowance;
   const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+
+  // Weekly payroll records currently don't store permission allocation/offset fields,
+  // so for payslip breakdown we show permission offset as zero.
+  // (Monthly breakdown uses the permission offset calculation.)
+  const permissionHoursAllocated = 0;
+  const permissionMinutesUsed = 0;
+  const permissionOffsetAmount = 0;
+
   const pendingAdvanceBalanceResult = await pool.query(
     `SELECT COALESCE(SUM(outstanding_balance), 0) AS balance
      FROM employee_advance_loans
