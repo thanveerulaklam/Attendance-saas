@@ -31,6 +31,7 @@ export default function EmployeeFormModal({
   const [shiftId, setShiftId] = useState('');
   const [branchId, setBranchId] = useState('');
   const [payrollFrequency, setPayrollFrequency] = useState('monthly');
+  const [salaryType, setSalaryType] = useState('monthly');
 
   const [shifts, setShifts] = useState([]);
   const [shiftsLoading, setShiftsLoading] = useState(false);
@@ -101,6 +102,7 @@ export default function EmployeeFormModal({
           employee.branch_id != null ? String(employee.branch_id) : ''
         );
         setPayrollFrequency(employee.payroll_frequency || 'monthly');
+        setSalaryType(employee.salary_type || 'monthly');
       } else {
         setName('');
         setEmployeeCode('');
@@ -117,6 +119,7 @@ export default function EmployeeFormModal({
         setShiftId('');
         setBranchId('');
         setPayrollFrequency('monthly');
+        setSalaryType('monthly');
       }
       setErrors({});
       setToast(null);
@@ -235,6 +238,7 @@ export default function EmployeeFormModal({
         status,
         shift_id: shiftId === '' ? null : Number(shiftId),
         payroll_frequency: payrollFrequency,
+        salary_type: salaryType,
       };
 
       const resolvedBranch =
@@ -415,7 +419,7 @@ export default function EmployeeFormModal({
 
             <div>
               <label className="block text-xs font-medium text-slate-700">
-                Basic salary
+                {salaryType === 'per_day' ? 'Daily salary' : 'Basic salary'}
                 <input
                   type="number"
                   min="0"
@@ -423,7 +427,7 @@ export default function EmployeeFormModal({
                   value={basicSalary}
                   onChange={(e) => setBasicSalary(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
-                  placeholder="40000"
+                  placeholder={salaryType === 'per_day' ? '400' : '40000'}
                 />
               </label>
               {errors.basicSalary && (
@@ -658,6 +662,25 @@ export default function EmployeeFormModal({
             {errors.shift_id && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.shift_id}</p>
             )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              Salary type
+              <select
+                value={salaryType}
+                onChange={(e) => setSalaryType(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+              >
+                <option value="monthly">Monthly</option>
+                <option value="per_day">Per-day</option>
+              </select>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                {salaryType === 'per_day'
+                  ? 'Store daily amount in “Daily salary”.'
+                  : 'Store monthly amount in “Basic salary”.'}
+              </p>
+            </label>
           </div>
 
           <div>

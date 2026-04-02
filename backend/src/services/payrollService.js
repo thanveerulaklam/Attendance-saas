@@ -950,7 +950,7 @@ async function generateWeeklyPayroll(
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, daily_travel_allowance, esi_amount
+      `SELECT id, basic_salary, status, daily_travel_allowance, esi_amount, salary_type
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -975,7 +975,13 @@ async function generateWeeklyPayroll(
     const { y: startYear, m: startMonth } = parseYmd(weekStart);
     const basicSalary = Number(employee.basic_salary || 0);
     const daysInStartMonth = getDaysInMonth(startYear, startMonth);
-    const dailyRate = daysInStartMonth > 0 ? basicSalary / daysInStartMonth : 0;
+    const salaryType = String(employee.salary_type || 'monthly').toLowerCase();
+    const dailyRate =
+      salaryType === 'per_day'
+        ? basicSalary
+        : daysInStartMonth > 0
+          ? basicSalary / daysInStartMonth
+          : 0;
     const hourlyRate = dailyRate / 8;
 
     const summary = await getAttendanceSummaryForRange(companyId, employeeId, weekStart, weekEnd, {
@@ -995,10 +1001,13 @@ async function generateWeeklyPayroll(
     const travelAllowance = dailyTravelAllowance * (summary.presentWorkingDays ?? 0);
 
     // Weekly payroll ignores paid leave and incentives.
-    const earnedBasic = dailyRate * (summary.presentDays ?? 0);
+    const earnedBasic =
+      salaryType === 'per_day'
+        ? dailyRate * (summary.presentWorkingDays ?? 0)
+        : dailyRate * (summary.presentDays ?? 0);
 
     let absenceDeduction = 0;
-    if (summary.attendanceMode === 'hours_based') {
+    if (salaryType !== 'per_day' && summary.attendanceMode === 'hours_based') {
       absenceDeduction = dailyRate * (summary.absenceDays || 0);
     }
 
@@ -1325,7 +1334,7 @@ async function getWeeklyPayrollBreakdown(
   const isWeekComplete = !isCurrentWeek || todayStr >= weekEnd;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, salary_type
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -1344,7 +1353,13 @@ async function getWeeklyPayrollBreakdown(
 
   const daysInStartMonth = getDaysInMonth(startYear, startMonth);
   const basicSalary = Number(employee.basic_salary || 0);
-  const dailyRate = daysInStartMonth > 0 ? basicSalary / daysInStartMonth : 0;
+  const salaryType = String(employee.salary_type || 'monthly').toLowerCase();
+  const dailyRate =
+    salaryType === 'per_day'
+      ? basicSalary
+      : daysInStartMonth > 0
+        ? basicSalary / daysInStartMonth
+        : 0;
   const hourlyRate = dailyRate / 8;
 
   const shiftClient = await pool.connect();
@@ -1362,10 +1377,13 @@ async function getWeeklyPayrollBreakdown(
   const travelAllowance =
     Number(employee.daily_travel_allowance || 0) * (shiftSummary.presentWorkingDays ?? 0);
 
-  const earnedBasic = dailyRate * (shiftSummary.presentDays ?? 0);
+  const earnedBasic =
+    salaryType === 'per_day'
+      ? dailyRate * (shiftSummary.presentWorkingDays ?? 0)
+      : dailyRate * (shiftSummary.presentDays ?? 0);
 
   let absenceDeduction = 0;
-  if (shiftSummary.attendanceMode === 'hours_based') {
+  if (salaryType !== 'per_day' && shiftSummary.attendanceMode === 'hours_based') {
     absenceDeduction = dailyRate * (shiftSummary.absenceDays || 0);
   }
 
@@ -1483,7 +1501,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, payroll_frequency, permission_hours_override
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, payroll_frequency, salary_type, permission_hours_override
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1517,8 +1535,23 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     const basicSalary = Number(employee.basic_salary || 0);
     const daysInMonth = summary.daysInMonth || 30;
-    const dailyRate = daysInMonth > 0 ? basicSalary / daysInMonth : 0;
-    const hourlyRate = dailyRate / 8;
+    const salaryType = String(employee.salary_type || 'monthly').toLowerCase();
+    const dailyRate =
+      salaryType === 'per_day'
+        ? basicSalary
+        : daysInMonth > 0
+          ? basicSalary / daysInMonth
+          : 0;
+
+    // Money conversions from "hours" should use the shift's configured duration:
+    // - day_based / shift_based: use configured shift duration (start_time -> end_time)
+    // - hours_based: use required_hours_per_day
+    const shiftHoursForHourlyConversion =
+      summary.attendanceMode === 'hours_based'
+        ? Number(summary.requiredHoursPerDay || 8)
+        : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
+    const hourlyRate =
+      shiftHoursForHourlyConversion > 0 ? dailyRate / shiftHoursForHourlyConversion : dailyRate / 8;
 
     const lastDayOfMonth = new Date(year, month, 0).getDate();
     const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
@@ -1539,15 +1572,30 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         dailyRate,
       });
 
-    const { earnedBasic, absenceDeduction } = computeMonthlyBaseAndAbsence({
-      isMonthComplete,
-      attendanceMode: summary.attendanceMode,
-      basicSalary,
-      dailyRate,
-      presentDays: summary.presentDays,
-      paidLeaveDaysAllowed,
-      absenceDays: summary.absenceDays,
-    });
+    let earnedBasic = 0;
+    let absenceDeduction = 0;
+    if (salaryType === 'per_day') {
+      if (isMonthComplete) {
+        earnedBasic = dailyRate * Number(summary.workingDaysInMonth || summary.workingDays || 0);
+        absenceDeduction = dailyRate * Number(summary.absenceDays || 0);
+      } else {
+        // Pay only for present working days up to `asOfDate`.
+        earnedBasic = dailyRate * Number(summary.presentWorkingDays || 0);
+        absenceDeduction = 0;
+      }
+    } else {
+      const computed = computeMonthlyBaseAndAbsence({
+        isMonthComplete,
+        attendanceMode: summary.attendanceMode,
+        basicSalary,
+        dailyRate,
+        presentDays: summary.presentDays,
+        paidLeaveDaysAllowed,
+        absenceDays: summary.absenceDays,
+      });
+      earnedBasic = computed.earnedBasic;
+      absenceDeduction = computed.absenceDeduction;
+    }
 
     let lateDeduction = 0;
     if (
@@ -1754,7 +1802,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, shift_id, permission_hours_override
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, shift_id, salary_type, permission_hours_override
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -1784,10 +1832,29 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     asOfDate,
   });
 
+  const shiftConfig = await getShiftForEmployee(pool, companyId, employeeId);
+
   const basicSalary = Number(employee.basic_salary || 0);
   const daysInMonth = summary.daysInMonth || 30;
-  const dailyRate = daysInMonth > 0 ? basicSalary / daysInMonth : 0;
-  const hourlyRate = dailyRate / 8;
+  const salaryType = String(employee.salary_type || 'monthly').toLowerCase();
+  const dailyRate =
+    salaryType === 'per_day'
+      ? basicSalary
+      : daysInMonth > 0
+        ? basicSalary / daysInMonth
+        : 0;
+
+  // Money conversions from "hours" should use the shift's configured duration:
+  // - day_based / shift_based: configured shift duration
+  // - hours_based: required_hours_per_day
+  const shiftHoursForHourlyConversion =
+    summary.attendanceMode === 'hours_based'
+      ? Number(summary.requiredHoursPerDay || 8)
+      : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
+  const hourlyRate =
+    shiftHoursForHourlyConversion > 0
+      ? dailyRate / shiftHoursForHourlyConversion
+      : dailyRate / 8;
 
   const lastDayOfMonth = new Date(year, month, 0).getDate();
   const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
@@ -1808,15 +1875,29 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       dailyRate,
     });
 
-  const { earnedBasic, absenceDeduction } = computeMonthlyBaseAndAbsence({
-    isMonthComplete,
-    attendanceMode: summary.attendanceMode,
-    basicSalary,
-    dailyRate,
-    presentDays: summary.presentDays,
-    paidLeaveDaysAllowed,
-    absenceDays: summary.absenceDays,
-  });
+  let earnedBasic = 0;
+  let absenceDeduction = 0;
+  if (salaryType === 'per_day') {
+    if (isMonthComplete) {
+      earnedBasic = dailyRate * Number(summary.workingDaysInMonth || summary.workingDays || 0);
+      absenceDeduction = dailyRate * Number(summary.absenceDays || 0);
+    } else {
+      earnedBasic = dailyRate * Number(summary.presentWorkingDays || 0);
+      absenceDeduction = 0;
+    }
+  } else {
+    const computed = computeMonthlyBaseAndAbsence({
+      isMonthComplete,
+      attendanceMode: summary.attendanceMode,
+      basicSalary,
+      dailyRate,
+      presentDays: summary.presentDays,
+      paidLeaveDaysAllowed,
+      absenceDays: summary.absenceDays,
+    });
+    earnedBasic = computed.earnedBasic;
+    absenceDeduction = computed.absenceDeduction;
+  }
 
   let lateDeduction = 0;
   if (
