@@ -8,14 +8,6 @@ function pad2(n) {
   return String(n).padStart(2, '0');
 }
 
-// Always return YYYY-MM-DD in LOCAL time (avoid toISOString() day shifting).
-function formatDateYMDLocal(d) {
-  const year = d.getFullYear();
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  return `${year}-${pad2(month)}-${pad2(day)}`;
-}
-
 function formatYMDLocalFromParts(year, month1Based, day) {
   return `${year}-${pad2(month1Based)}-${pad2(day)}`;
 }
@@ -321,8 +313,21 @@ export default function AttendancePage() {
     return { rows, dayMap, daysInMonth, totalEmployees, isSingleEmployee: Boolean(employeeId) };
   }, [monthlyData, year, month, employeeId]);
 
-  const goPrev = () => setMonthYear((m) => getMonthYear(-1));
-  const goNext = () => setMonthYear((m) => getMonthYear(1));
+  // Shift relative to the currently displayed month/year (not "today"),
+  // otherwise "March -> Next" can incorrectly jump based on system date.
+  const goPrev = () =>
+    setMonthYear((m) => {
+      const d = new Date(m.year, m.month - 1, 1);
+      d.setMonth(d.getMonth() - 1);
+      return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    });
+
+  const goNext = () =>
+    setMonthYear((m) => {
+      const d = new Date(m.year, m.month - 1, 1);
+      d.setMonth(d.getMonth() + 1);
+      return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    });
 
   const handleSelectDate = (dayNum) => {
     const next = formatYMDLocalFromParts(year, month, dayNum);

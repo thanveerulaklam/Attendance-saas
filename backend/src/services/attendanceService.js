@@ -1031,25 +1031,17 @@ async function addManualFullDay(companyId, { employeeId, date }, allowedBranchId
   if (!empId) {
     throw new AppError('Valid employee_id is required', 400);
   }
-
-  const shiftConfig = await getShiftConfig(companyId);
   const [, y, m, d] = match;
   const year = parseInt(y, 10);
   const month = parseInt(m, 10);
   const dayNum = parseInt(d, 10);
 
-  // Use local time (not UTC) so 9 AM stays 9 AM in display when server is in company timezone
-  const inTime = new Date(year, month - 1, dayNum, shiftConfig.startHour, shiftConfig.startMinute, 0);
-  const lunchMs = (shiftConfig.lunchMinutesAllotted || 60) * 60 * 1000;
-  const workBeforeLunchMs = Math.max(0, shiftConfig.shiftMs - lunchMs) / 2;
-  const outLunchTime = new Date(inTime.getTime() + workBeforeLunchMs);
-  const inLunchTime = new Date(outLunchTime.getTime() + lunchMs);
-  const outTime = new Date(inTime.getTime() + shiftConfig.shiftMs);
-
   const client = await pool.connect();
   try {
     const empCheck = await client.query(
-      `SELECT id, branch_id FROM employees WHERE company_id = $1 AND id = $2 AND status = 'active'`,
+      `SELECT id, branch_id, shift_id
+       FROM employees
+       WHERE company_id = $1 AND id = $2 AND status = 'active'`,
       [companyId, empId]
     );
     if (empCheck.rowCount === 0) {
@@ -1057,6 +1049,17 @@ async function addManualFullDay(companyId, { employeeId, date }, allowedBranchId
     }
     await assertEmployeeInAttendanceScope(client, companyId, empId, allowedBranchIds);
     const branchId = Number(empCheck.rows[0].branch_id);
+    const employeeShiftId = empCheck.rows[0].shift_id;
+    // Use employee's assigned shift timings; fallback to company default shift.
+    const shiftConfig = (await getShiftConfigById(employeeShiftId)) || (await getShiftConfig(companyId));
+
+    // Use local time (not UTC) so 9 AM stays 9 AM in display when server is in company timezone.
+    const inTime = new Date(year, month - 1, dayNum, shiftConfig.startHour, shiftConfig.startMinute, 0);
+    const lunchMs = (shiftConfig.lunchMinutesAllotted || 60) * 60 * 1000;
+    const workBeforeLunchMs = Math.max(0, shiftConfig.shiftMs - lunchMs) / 2;
+    const outLunchTime = new Date(inTime.getTime() + workBeforeLunchMs);
+    const inLunchTime = new Date(outLunchTime.getTime() + lunchMs);
+    const outTime = new Date(inTime.getTime() + shiftConfig.shiftMs);
 
     let inserted = 0;
     const punches = [];
