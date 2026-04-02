@@ -336,6 +336,15 @@ function formatWeekLabel(weekStartDate, weekEndDate) {
   return `${sLabel} — ${eLabel} ${sYear}`;
 }
 
+function toYmdDateString(value) {
+  if (!value) return '';
+  const s = String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
 function formatPayslipPeriodLabel(row, payrollMode) {
   if (payrollMode === 'weekly') {
     return formatWeekLabel(row.week_start_date, row.week_end_date);
@@ -751,7 +760,7 @@ export default function PayrollPage() {
     if (payrollMode === 'weekly') {
       const params = new URLSearchParams({
         employee_id: String(row.employee_id),
-        week_start_date: String(row.week_start_date),
+        week_start_date: toYmdDateString(row.week_start_date),
       });
       const [breakdownRes, employeeRes] = await Promise.all([
         authFetch(`/api/payroll/weekly/breakdown?${params}`, { headers: { 'Content-Type': 'application/json' } }),
@@ -915,7 +924,7 @@ export default function PayrollPage() {
         if (payrollMode === 'weekly') {
           const params = new URLSearchParams({
             employee_id: String(detailRow.employee_id),
-            week_start_date: String(detailRow.week_start_date),
+            week_start_date: toYmdDateString(detailRow.week_start_date),
           });
 
           const res = await authFetch(`/api/payroll/weekly/breakdown?${params}`, {
