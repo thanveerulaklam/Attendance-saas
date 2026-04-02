@@ -5,12 +5,13 @@ const {
   validateUpdateEmployee,
 } = require('../validators/employeeValidator');
 
-// Employee limits per plan. Null means "no limit" for that plan.
+// Employee limits per plan (aligned with landing-page pricing). Null = no default cap.
 const PLAN_EMPLOYEE_LIMITS = {
-  starter: 50,
-  growth: 100,
-  business: 250,
-  enterprise: 500,
+  starter: 25, // Basic
+  growth: 50, // Growth
+  business: 100, // Business
+  professional: 200, // Professional
+  enterprise: null, // Enterprise 200+
   custom: null,
 };
 

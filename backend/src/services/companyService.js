@@ -1,8 +1,46 @@
 const { pool } = require('../config/database');
 
+/**
+ * Next AMC due date:
+ * - After an AMC payment: 1 year from last AMC (annual renewal).
+ * - Before any AMC: 1 year from one-time fee payment (first year covered by one-time; AMC starts after).
+ * - Fallback: 1 year from access start if one-time date not recorded.
+ */
+function addOneYearIso(dateLike) {
+  if (!dateLike) return null;
+  const d = new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  d.setFullYear(d.getFullYear() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function computeNextAmcDueDate(company) {
+  if (!company) return null;
+  if (company.last_amc_payment_date) {
+    return addOneYearIso(company.last_amc_payment_date);
+  }
+  if (company.last_onetime_payment_date) {
+    return addOneYearIso(company.last_onetime_payment_date);
+  }
+  if (company.subscription_start_date) {
+    return addOneYearIso(company.subscription_start_date);
+  }
+  return null;
+}
+
+function branchesAllowedTotal(company) {
+  if (!company || company.branch_limit_override == null) return null;
+  return 1 + Math.max(0, Number(company.branch_limit_override || 0));
+}
+
 const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at,
   subscription_start_date, subscription_end_date, is_active, plan_code, billing_cycle,
-  next_billing_date, last_payment_date, payment_status, billing_notes, created_at`;
+  next_billing_date, last_payment_date, payment_status, billing_notes,
+  employee_limit_override, branch_limit_override,
+  onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
+  onetime_payment_status, amc_payment_status, last_onetime_payment_date,
+  created_at`;
 
 async function getCompanyById(companyId) {
   const result = await pool.query(
@@ -133,7 +171,14 @@ async function updateBillingMetadata(companyId, data) {
     'next_billing_date',
     'last_payment_date',
     'payment_status',
+    'onetime_payment_status',
+    'amc_payment_status',
     'billing_notes',
+    'onetime_fee_paid',
+    'onetime_fee_amount',
+    'amc_amount',
+    'last_amc_payment_date',
+    'last_onetime_payment_date',
     // convenience: allow subscription fields to be adjusted from the same admin form
     'subscription_start_date',
     'subscription_end_date',
@@ -148,6 +193,8 @@ async function updateBillingMetadata(companyId, data) {
     'last_payment_date',
     'subscription_start_date',
     'subscription_end_date',
+    'last_amc_payment_date',
+    'last_onetime_payment_date',
   ]);
 
   const entries = rawEntries
@@ -191,5 +238,7 @@ module.exports = {
   updateCompany,
   updateSubscription,
   updateBillingMetadata,
+  computeNextAmcDueDate,
+  branchesAllowedTotal,
 };
 

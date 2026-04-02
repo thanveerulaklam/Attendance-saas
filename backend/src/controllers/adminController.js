@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { getEffectiveEmployeeLimit, PLAN_EMPLOYEE_LIMITS } = require('../services/employeeService');
+const { computeNextAmcDueDate } = require('../services/companyService');
 const auditService = require('../services/auditService');
 const authService = require('../services/authService');
 
@@ -76,7 +77,15 @@ async function getAdminOverview(req, res, next) {
          c.last_payment_date,
          c.payment_status,
          c.billing_notes,
+         c.employee_limit_override,
          c.branch_limit_override,
+         c.onetime_fee_paid,
+         c.onetime_fee_amount,
+         c.amc_amount,
+         c.last_amc_payment_date,
+         c.onetime_payment_status,
+         c.amc_payment_status,
+         c.last_onetime_payment_date,
          (
            SELECT MAX(d.last_seen_at)
            FROM devices d
@@ -136,7 +145,16 @@ async function getAdminOverview(req, res, next) {
           last_payment_date: row.last_payment_date,
           payment_status: row.payment_status,
           billing_notes: row.billing_notes,
+          employee_limit_override: row.employee_limit_override,
           branch_limit_override: row.branch_limit_override,
+          onetime_fee_paid: row.onetime_fee_paid,
+          onetime_fee_amount: row.onetime_fee_amount,
+          amc_amount: row.amc_amount,
+          last_amc_payment_date: row.last_amc_payment_date,
+          onetime_payment_status: row.onetime_payment_status,
+          amc_payment_status: row.amc_payment_status,
+          last_onetime_payment_date: row.last_onetime_payment_date,
+          next_amc_due_date: computeNextAmcDueDate(row),
           last_device_sync_at: row.last_device_sync_at,
           last_payroll_generated_at: row.last_payroll_generated_at,
           last_login_at: row.last_login_at,
@@ -234,10 +252,17 @@ async function updateCompanyBilling(req, res, next) {
       next_billing_date: _ignoredNextBillingDate,
       last_payment_date,
       payment_status,
+      onetime_payment_status,
+      amc_payment_status,
       billing_notes,
       subscription_start_date,
       subscription_end_date,
       is_active,
+      onetime_fee_paid,
+      onetime_fee_amount,
+      amc_amount,
+      last_amc_payment_date,
+      last_onetime_payment_date,
     } = req.body || {};
 
     const today = new Date();
@@ -267,10 +292,17 @@ async function updateCompanyBilling(req, res, next) {
       next_billing_date: normalizedEnd,
       last_payment_date,
       payment_status,
+      onetime_payment_status,
+      amc_payment_status,
       billing_notes,
       subscription_start_date: normalizedStart,
       subscription_end_date: normalizedEnd,
       is_active,
+      onetime_fee_paid,
+      onetime_fee_amount,
+      amc_amount,
+      last_amc_payment_date,
+      last_onetime_payment_date,
     });
 
     if (!updated) {
@@ -308,15 +340,177 @@ async function approveCompany(req, res, next) {
         message: 'company_id (number) is required',
       });
     }
+
+    const allowedPlanCodes = ['starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
+    const allowedPaymentStatuses = ['trial', 'paid', 'pending', 'overdue', 'unpaid'];
+
+    const plan_code =
+      typeof req.body?.plan_code === 'string' ? req.body.plan_code.trim().toLowerCase() : '';
+    const payment_status =
+      typeof req.body?.payment_status === 'string'
+        ? req.body.payment_status.trim().toLowerCase()
+        : '';
+    const subscription_start_date = req.body?.subscription_start_date;
+    const subscription_end_date = req.body?.subscription_end_date;
+    const last_payment_date = req.body?.last_payment_date;
+
+    const rawBranchesAllowed = req.body?.branches_allowed;
+    const rawStaffAllowed = req.body?.staffs_allowed;
+
+    if (!allowedPlanCodes.includes(plan_code)) {
+      return res.status(400).json({
+        success: false,
+        message: `plan_code must be one of: ${allowedPlanCodes.join(', ')}`,
+      });
+    }
+    if (!allowedPaymentStatuses.includes(payment_status)) {
+      return res.status(400).json({
+        success: false,
+        message: `payment_status must be one of: ${allowedPaymentStatuses.join(', ')}`,
+      });
+    }
+    if (!subscription_start_date) {
+      return res.status(400).json({
+        success: false,
+        message: 'subscription_start_date is required (YYYY-MM-DD)',
+      });
+    }
+
+    let branchesAllowed = null;
+    if (rawBranchesAllowed == null || rawBranchesAllowed === '') {
+      return res.status(400).json({ success: false, message: 'branches_allowed is required' });
+    } else {
+      const n = Number(rawBranchesAllowed);
+      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+        return res.status(400).json({
+          success: false,
+          message: 'branches_allowed must be a positive integer (total branches including Main)',
+        });
+      }
+      branchesAllowed = n;
+    }
+
+    let staffsAllowed = null;
+    if (rawStaffAllowed == null || rawStaffAllowed === '') {
+      return res.status(400).json({ success: false, message: 'staffs_allowed is required' });
+    } else {
+      const n = Number(rawStaffAllowed);
+      if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
+        return res.status(400).json({
+          success: false,
+          message: 'staffs_allowed must be a positive integer',
+        });
+      }
+      staffsAllowed = n;
+    }
+
+    const startDate = new Date(subscription_start_date);
+    if (Number.isNaN(startDate.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid subscription_start_date' });
+    }
+    startDate.setHours(0, 0, 0, 0);
+
+    let endDate = null;
+    if (subscription_end_date) {
+      const d = new Date(subscription_end_date);
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid subscription_end_date' });
+      }
+      d.setHours(0, 0, 0, 0);
+      endDate = d;
+    } else {
+      endDate = new Date(startDate);
+      endDate.setFullYear(endDate.getFullYear() + 1);
+    }
+
+    let normalizedLastPaymentDate = null;
+    if (last_payment_date) {
+      const d = new Date(last_payment_date);
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid last_payment_date' });
+      }
+      d.setHours(0, 0, 0, 0);
+      normalizedLastPaymentDate = d;
+    } else if (payment_status === 'paid') {
+      normalizedLastPaymentDate = startDate;
+    }
+
+    const branch_limit_override = Math.max(0, branchesAllowed - 1);
+    const employee_limit_override = staffsAllowed;
+
+    const onetime_fee_paid = req.body.onetime_fee_paid === true;
+    let onetime_fee_amount = null;
+    if (req.body.onetime_fee_amount != null && req.body.onetime_fee_amount !== '') {
+      const n = Number(req.body.onetime_fee_amount);
+      if (Number.isFinite(n) && n >= 0) onetime_fee_amount = n;
+    }
+    let amc_amount = null;
+    if (req.body.amc_amount != null && req.body.amc_amount !== '') {
+      const n = Number(req.body.amc_amount);
+      if (Number.isFinite(n) && n >= 0) amc_amount = n;
+    }
+    let last_amc_payment_date = null;
+    if (req.body.last_amc_payment_date) {
+      const d = new Date(req.body.last_amc_payment_date);
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ success: false, message: 'Invalid last_amc_payment_date' });
+      }
+      d.setHours(0, 0, 0, 0);
+      last_amc_payment_date = d;
+    }
+
+    const onetimePayStatus = onetime_fee_paid ? 'paid' : 'unpaid';
+    const amcPayStatus = last_amc_payment_date ? 'paid' : 'unpaid';
+    const lastOnetimePayDate =
+      onetime_fee_paid && normalizedLastPaymentDate
+        ? normalizedLastPaymentDate
+        : onetime_fee_paid
+          ? startDate
+          : null;
+
     const result = await pool.query(
       `UPDATE companies
        SET status = 'active',
-           is_active = COALESCE(is_active, TRUE),
-           subscription_start_date = COALESCE(subscription_start_date, NOW()::date),
-           subscription_end_date = COALESCE(subscription_end_date, (NOW()::date + INTERVAL '1 year')::date)
+           is_active = TRUE,
+           plan_code = $2,
+           billing_cycle = 'annual',
+           next_billing_date = $3::date,
+           payment_status = $4,
+           last_payment_date = $5::date,
+           subscription_start_date = $6::date,
+           subscription_end_date = $3::date,
+           branch_limit_override = $7,
+           employee_limit_override = $8,
+           onetime_fee_paid = $9,
+           onetime_fee_amount = $10,
+           amc_amount = $11,
+           last_amc_payment_date = $12::date,
+           onetime_payment_status = $13,
+           amc_payment_status = $14,
+           last_onetime_payment_date = $15::date
        WHERE id = $1 AND status = 'pending'
-       RETURNING id, name, status, subscription_start_date, subscription_end_date`,
-      [companyId]
+       RETURNING id, name, status, plan_code, payment_status, last_payment_date,
+                 subscription_start_date, subscription_end_date,
+                 branch_limit_override, employee_limit_override,
+                 onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
+                 onetime_payment_status, amc_payment_status, last_onetime_payment_date`,
+      [
+        companyId,
+        plan_code,
+        endDate,
+        payment_status,
+        normalizedLastPaymentDate,
+        startDate,
+        branch_limit_override,
+        employee_limit_override,
+        onetime_fee_paid,
+        onetime_fee_amount,
+        amc_amount,
+        last_amc_payment_date,
+        onetimePayStatus,
+        amcPayStatus,
+        lastOnetimePayDate,
+      ]
     );
     if (result.rowCount === 0) {
       return res.status(404).json({
@@ -329,7 +523,14 @@ async function approveCompany(req, res, next) {
       data: result.rows[0],
       message: `Company "${result.rows[0].name}" is now active. They can log in.`,
     });
-    await logSuperadminAction(companyId, 'admin.company.approve', 'company', companyId, {});
+    await logSuperadminAction(companyId, 'admin.company.approve', 'company', companyId, {
+      plan_code,
+      payment_status,
+      subscription_start_date: startDate,
+      subscription_end_date: endDate,
+      branches_allowed: branchesAllowed,
+      staffs_allowed: staffsAllowed,
+    });
   } catch (err) {
     next(err);
   }
@@ -461,7 +662,9 @@ async function getCompanyDetails(req, res, next) {
          plan_code, billing_cycle, next_billing_date, last_payment_date,
          payment_status, billing_notes,
          employee_limit_override,
-         branch_limit_override
+         branch_limit_override,
+         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
+         onetime_payment_status, amc_payment_status, last_onetime_payment_date
        FROM companies WHERE id = $1`,
       [companyId]
     );
@@ -469,6 +672,7 @@ async function getCompanyDetails(req, res, next) {
       return res.status(404).json({ success: false, message: 'Company not found' });
     }
     const company = companyResult.rows[0];
+    const next_amc_due_date = computeNextAmcDueDate(company);
 
     const effectiveLimit = await getEffectiveEmployeeLimit(companyId);
     const planCode = (company.plan_code || 'starter').toLowerCase();
@@ -562,6 +766,14 @@ async function getCompanyDetails(req, res, next) {
           billing_notes: company.billing_notes,
           employee_limit_override: company.employee_limit_override,
           branch_limit_override: company.branch_limit_override,
+          onetime_fee_paid: company.onetime_fee_paid,
+          onetime_fee_amount: company.onetime_fee_amount,
+          amc_amount: company.amc_amount,
+          last_amc_payment_date: company.last_amc_payment_date,
+          last_onetime_payment_date: company.last_onetime_payment_date,
+          onetime_payment_status: company.onetime_payment_status,
+          amc_payment_status: company.amc_payment_status,
+          next_amc_due_date,
         },
         effective_employee_limit: effectiveLimit,
         plan_derived_employee_limit: planDerivedLimit,
@@ -816,6 +1028,7 @@ async function getCollectionsQueue(req, res, next) {
          c.id, c.name, c.email, c.phone, c.status,
          c.subscription_end_date, c.payment_status, c.plan_code, c.billing_cycle,
          c.last_payment_date, c.next_billing_date,
+         c.onetime_payment_status, c.amc_payment_status,
          COUNT(e.id) FILTER (WHERE e.status = 'active')::int AS active_staff
        FROM companies c
        LEFT JOIN employees e ON e.company_id = c.id
@@ -825,8 +1038,9 @@ async function getCollectionsQueue(req, res, next) {
          c.subscription_end_date IS NOT NULL
          AND c.subscription_end_date <= (NOW()::date + $1 * INTERVAL '1 day')
        )
-       OR c.payment_status IN ('overdue', 'pending')
-       ORDER BY c.subscription_end_date ASC NULLS LAST, c.payment_status DESC, c.id ASC`,
+       OR c.onetime_payment_status IN ('overdue', 'pending', 'unpaid')
+       OR c.amc_payment_status IN ('overdue', 'pending', 'unpaid')
+       ORDER BY c.subscription_end_date ASC NULLS LAST, c.id ASC`,
       [days]
     );
     res.status(200).json({
@@ -918,6 +1132,36 @@ async function renewCompanySubscription(req, res, next) {
 }
 
 /**
+ * GET /api/admin/recent-superadmin-audit?limit=40
+ * Latest super-admin actions across all tenants (action_type starts with admin.).
+ */
+async function getRecentSuperadminAudit(req, res, next) {
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query?.limit) || 40));
+    const result = await pool.query(
+      `SELECT
+         a.id,
+         a.company_id,
+         a.action_type,
+         a.created_at,
+         c.name AS company_name
+       FROM audit_logs a
+       LEFT JOIN companies c ON c.id = a.company_id
+       WHERE a.action_type LIKE 'admin.%'
+       ORDER BY a.created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.status(200).json({
+      success: true,
+      data: result.rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/admin/company-audit?company_id=1&page=1&limit=20
  */
 async function getCompanyAudit(req, res, next) {
@@ -960,6 +1204,38 @@ async function getCompanyAudit(req, res, next) {
  * Body: { company_id, admin_user_id?, admin_email?, new_password }
  * Requires X-Approval-Secret or Authorization: Bearer <ADMIN_APPROVAL_SECRET>.
  */
+/**
+ * POST /api/admin/create-company
+ * SuperAdmin creates an active tenant + admin user (credentials to share with client).
+ * Body: { company: { name, email?, phone?, address? }, admin: { name, email, password },
+ *   plan_code?, subscription_start_date?, subscription_end_date?, branches_allowed, staffs_allowed,
+ *   onetime_fee_amount?, amc_amount?, onetime_fee_paid?, payment_status?, last_amc_payment_date? }
+ */
+async function createCompanyProvisioned(req, res, next) {
+  try {
+    const result = await authService.createCompanyProvisionedBySuperadmin(req.body || {});
+    res.status(201).json({
+      success: true,
+      data: {
+        company: result.company,
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          name: result.user.name,
+          role: result.user.role,
+        },
+        admin_password_plaintext_once: result.admin_password_plaintext_once,
+      },
+      message: `Company "${result.company.name}" is active. Share admin credentials securely with the client.`,
+    });
+    await logSuperadminAction(result.company.id, 'admin.company.create', 'company', result.company.id, {
+      plan_code: result.company.plan_code,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function resetCompanyAdminPassword(req, res, next) {
   try {
     const companyId = req.body?.company_id != null ? Number(req.body.company_id) : null;
@@ -1021,6 +1297,7 @@ module.exports = {
   getAdminOverview,
   listDemoEnquiries,
   updateCompanyBilling,
+  createCompanyProvisioned,
   approveCompany,
   declineCompany,
   lockCompany,
@@ -1031,6 +1308,7 @@ module.exports = {
   setCompanyBranchLimit,
   getCollectionsQueue,
   renewCompanySubscription,
+  getRecentSuperadminAudit,
   getCompanyAudit,
   resetCompanyAdminPassword,
 };

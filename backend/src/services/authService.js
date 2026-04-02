@@ -23,8 +23,8 @@ async function registerCompany(company, admin) {
     await client.query('BEGIN');
 
     const companyResult = await client.query(
-      `INSERT INTO companies (name, email, phone, address, status)
-       VALUES ($1, $2, $3, $4, 'pending')
+      `INSERT INTO companies (name, email, phone, address, status, payment_status)
+       VALUES ($1, $2, $3, $4, 'pending', 'unpaid')
        RETURNING id, name, email, phone, address, status, created_at`,
       [companyName, companyEmail || null, phone || null, address || null]
     );
@@ -61,6 +61,171 @@ async function registerCompany(company, admin) {
       },
       token: null,
       pending: true,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err.code === '23505') {
+      throw new AppError('Company email or admin email already in use', 409);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * SuperAdmin: create an active company + admin login (no pending approval).
+ * @param {Object} payload
+ */
+async function createCompanyProvisionedBySuperadmin(payload) {
+  const companyIn = payload?.company || {};
+  const adminIn = payload?.admin || {};
+  const companyName = companyIn.name;
+  const companyEmail = companyIn.email;
+  const phone = companyIn.phone;
+  const address = companyIn.address;
+  const adminName = adminIn.name;
+  const adminEmail = adminIn.email;
+  const password = adminIn.password;
+
+  if (!companyName || !adminName || !adminEmail || !password) {
+    throw new AppError('Company name, admin name, email and password are required', 400);
+  }
+  if (String(password).length < 8) {
+    throw new AppError('Password must be at least 8 characters', 400);
+  }
+
+  const plan_code = typeof payload.plan_code === 'string' ? payload.plan_code.trim().toLowerCase() : 'starter';
+  const allowedPlans = ['starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
+  if (!allowedPlans.includes(plan_code)) {
+    throw new AppError(`plan_code must be one of: ${allowedPlans.join(', ')}`, 400);
+  }
+
+  const branchesAllowed = Number(payload.branches_allowed);
+  const staffsAllowed = Number(payload.staffs_allowed);
+  if (!Number.isInteger(branchesAllowed) || branchesAllowed < 1) {
+    throw new AppError('branches_allowed must be a positive integer (total branches including Main)', 400);
+  }
+  if (!Number.isInteger(staffsAllowed) || staffsAllowed < 1) {
+    throw new AppError('staffs_allowed must be a positive integer', 400);
+  }
+
+  const subscriptionStartRaw = payload.subscription_start_date;
+  if (!subscriptionStartRaw) {
+    throw new AppError('subscription_start_date is required (YYYY-MM-DD)', 400);
+  }
+  const startDate = new Date(subscriptionStartRaw);
+  if (Number.isNaN(startDate.getTime())) {
+    throw new AppError('Invalid subscription_start_date', 400);
+  }
+  startDate.setHours(0, 0, 0, 0);
+
+  let endDate;
+  if (payload.subscription_end_date) {
+    endDate = new Date(payload.subscription_end_date);
+    if (Number.isNaN(endDate.getTime())) {
+      throw new AppError('Invalid subscription_end_date', 400);
+    }
+    endDate.setHours(0, 0, 0, 0);
+  } else {
+    endDate = new Date(startDate);
+    endDate.setFullYear(endDate.getFullYear() + 1);
+  }
+
+  let lastAmc = null;
+  if (payload.last_amc_payment_date) {
+    const d = new Date(payload.last_amc_payment_date);
+    if (Number.isNaN(d.getTime())) {
+      throw new AppError('Invalid last_amc_payment_date', 400);
+    }
+    d.setHours(0, 0, 0, 0);
+    lastAmc = d;
+  }
+
+  const paymentStatus =
+    typeof payload.payment_status === 'string' ? payload.payment_status.trim().toLowerCase() : 'unpaid';
+  const allowedPay = ['trial', 'paid', 'pending', 'overdue', 'unpaid'];
+  if (!allowedPay.includes(paymentStatus)) {
+    throw new AppError(`payment_status must be one of: ${allowedPay.join(', ')}`, 400);
+  }
+
+  const onetimeFeePaid = payload.onetime_fee_paid === true;
+  const onetimeAmt =
+    payload.onetime_fee_amount != null && payload.onetime_fee_amount !== ''
+      ? Number(payload.onetime_fee_amount)
+      : null;
+  const amcAmt =
+    payload.amc_amount != null && payload.amc_amount !== '' ? Number(payload.amc_amount) : null;
+  if (onetimeAmt != null && (!Number.isFinite(onetimeAmt) || onetimeAmt < 0)) {
+    throw new AppError('onetime_fee_amount must be a non-negative number', 400);
+  }
+  if (amcAmt != null && (!Number.isFinite(amcAmt) || amcAmt < 0)) {
+    throw new AppError('amc_amount must be a non-negative number', 400);
+  }
+
+  const branch_limit_override = Math.max(0, branchesAllowed - 1);
+  const employee_limit_override = staffsAllowed;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const companyResult = await client.query(
+      `INSERT INTO companies (
+         name, email, phone, address, status,
+         plan_code, billing_cycle, payment_status,
+         subscription_start_date, subscription_end_date, next_billing_date,
+         is_active,
+         employee_limit_override, branch_limit_override,
+         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date
+       )
+       VALUES (
+         $1, $2, $3, $4, 'active',
+         $5, 'annual', $6,
+         $7::date, $8::date, $8::date,
+         TRUE,
+         $9, $10,
+         $11, $12, $13, $14::date
+       )
+       RETURNING id, name, email, phone, address, status, created_at,
+         plan_code, subscription_start_date, subscription_end_date, payment_status,
+         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date`,
+      [
+        companyName,
+        companyEmail || null,
+        phone || null,
+        address || null,
+        plan_code,
+        paymentStatus,
+        startDate,
+        endDate,
+        employee_limit_override,
+        branch_limit_override,
+        onetimeFeePaid,
+        onetimeAmt,
+        amcAmt,
+        lastAmc,
+      ]
+    );
+    const companyRow = companyResult.rows[0];
+    const companyId = companyRow.id;
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const userResult = await client.query(
+      `INSERT INTO users (company_id, name, email, password, role)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, company_id, name, email, role, created_at`,
+      [companyId, adminName, adminEmail, passwordHash, 'admin']
+    );
+
+    await client.query(`INSERT INTO branches (company_id, name) VALUES ($1, 'Main')`, [companyId]);
+
+    await client.query('COMMIT');
+
+    return {
+      company: companyRow,
+      user: userResult.rows[0],
+      admin_password_plaintext_once: password,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -245,6 +410,7 @@ async function superadminResetAdminPassword(companyId, selector, newPassword) {
 
 module.exports = {
   registerCompany,
+  createCompanyProvisionedBySuperadmin,
   login,
   changeAdminPassword,
   superadminResetAdminPassword,

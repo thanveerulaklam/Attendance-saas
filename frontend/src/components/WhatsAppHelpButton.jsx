@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { API_BASE } from '../utils/apiBase';
+import { PLAN_DISPLAY_NAME } from '../constants/pricingPlans';
 
 // Default WhatsApp support number (E.164 without +)
 const DEFAULT_NUMBER = '919600844041';
@@ -42,8 +43,8 @@ export default function WhatsAppHelpButton() {
   );
 
   const companyId = user?.company_id ?? company?.id;
-  const planCode = (company?.plan_code || 'starter').toString();
-  const planName = planCode.charAt(0).toUpperCase() + planCode.slice(1);
+  const planCode = (company?.plan_code || 'starter').toString().toLowerCase();
+  const planName = PLAN_DISPLAY_NAME[planCode] || planCode.charAt(0).toUpperCase() + planCode.slice(1);
   const activeStaff = company?.active_staff_count ?? null;
 
   const lines = ['Hi, I need support.'];

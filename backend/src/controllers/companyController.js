@@ -1,4 +1,12 @@
-const { getCompanyById, updateCompany, updateSubscription } = require('../services/companyService');
+const { pool } = require('../config/database');
+const {
+  getCompanyById,
+  updateCompany,
+  updateSubscription,
+  computeNextAmcDueDate,
+  branchesAllowedTotal,
+} = require('../services/companyService');
+const { getEffectiveEmployeeLimit } = require('../services/employeeService');
 const branchService = require('../services/branchService');
 
 /**
@@ -25,9 +33,28 @@ async function getCurrentCompany(req, res, next) {
       });
     }
 
+    const [effective_employee_limit, branchCountRes] = await Promise.all([
+      getEffectiveEmployeeLimit(companyId),
+      pool.query(`SELECT COUNT(*)::int AS n FROM branches WHERE company_id = $1`, [companyId]),
+    ]);
+
+    const branch_count = Number(branchCountRes.rows[0]?.n || 0);
+    const next_amc_due_date = computeNextAmcDueDate(company);
+    const branches_allowed_total = branchesAllowedTotal(company);
+
+    const companyRest = { ...company };
+    delete companyRest.billing_notes;
+
     return res.json({
       success: true,
-      data: company,
+      data: {
+        ...companyRest,
+        next_amc_due_date,
+        access_valid_until: company.subscription_end_date,
+        effective_employee_limit,
+        branches_allowed_total,
+        branch_count,
+      },
     });
   } catch (err) {
     next(err);

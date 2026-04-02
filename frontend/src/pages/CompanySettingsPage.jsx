@@ -1,11 +1,19 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import { PLAN_DISPLAY_NAME, planDefaultLimits } from '../constants/pricingPlans';
 
 function toDateInputValue(d) {
   if (!d) return '';
   const date = new Date(d);
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+}
+
+function formatDateLabel(iso) {
+  if (!iso) return '—';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 export default function CompanySettingsPage() {
@@ -33,6 +41,9 @@ export default function CompanySettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useState(false);
+
+  /** Enriched from GET /api/company (plan, AMC, caps). */
+  const [planSnapshot, setPlanSnapshot] = useState(null);
 
   const [branches, setBranches] = useState([]);
   const [newBranchName, setNewBranchName] = useState('');
@@ -84,6 +95,21 @@ export default function CompanySettingsPage() {
           subscription_start_date: toDateInputValue(data.subscription_start_date),
           subscription_end_date: toDateInputValue(data.subscription_end_date),
           is_active: data.is_active !== false,
+        });
+        setPlanSnapshot({
+          plan_code: data.plan_code || 'starter',
+          next_amc_due_date: data.next_amc_due_date,
+          access_valid_until: data.access_valid_until ?? data.subscription_end_date,
+          effective_employee_limit: data.effective_employee_limit,
+          branches_allowed_total: data.branches_allowed_total,
+          branch_count: data.branch_count,
+          active_staff_count: data.active_staff_count,
+          onetime_payment_status: data.onetime_payment_status,
+          amc_payment_status: data.amc_payment_status,
+          last_onetime_payment_date: data.last_onetime_payment_date,
+          last_amc_payment_date: data.last_amc_payment_date,
+          amc_amount: data.amc_amount,
+          onetime_fee_amount: data.onetime_fee_amount,
         });
       } catch (err) {
         if (!isMounted) return;
@@ -214,6 +240,8 @@ export default function CompanySettingsPage() {
       setBranchSaving(false);
     }
   };
+
+  const planDefaults = planSnapshot ? planDefaultLimits(planSnapshot.plan_code) : null;
 
   return (
     <div className="space-y-4">
@@ -417,22 +445,20 @@ export default function CompanySettingsPage() {
       )}
 
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
-        <h2 className="text-sm font-semibold text-slate-900">Subscription</h2>
+        <h2 className="text-sm font-semibold text-slate-900">Plan &amp; access</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
-          Your current subscription. Dates and status are managed by the service provider—contact support to make changes.
+          Your one-time fee covers the first year of software access. Annual AMC renews access for each following year; the
+          first AMC is due one year after your one-time payment. Dates and limits are managed by the service provider—contact
+          support to make changes.
         </p>
         <div className="mt-4 space-y-3 rounded-lg bg-slate-50 px-4 py-3">
-          <div className="flex flex-wrap gap-4 text-sm">
+          <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <div>
-              <span className="text-slate-500">Start date</span>
+              <span className="text-slate-500">Plan</span>
               <span className="ml-2 font-medium text-slate-900">
-                {subscriptionForm.subscription_start_date || '—'}
-              </span>
-            </div>
-            <div>
-              <span className="text-slate-500">End date</span>
-              <span className="ml-2 font-medium text-slate-900">
-                {subscriptionForm.subscription_end_date || '—'}
+                {planSnapshot
+                  ? PLAN_DISPLAY_NAME[planSnapshot.plan_code] || planSnapshot.plan_code
+                  : '—'}
               </span>
             </div>
             <div>
@@ -442,8 +468,82 @@ export default function CompanySettingsPage() {
               </span>
             </div>
           </div>
+          <div className="grid gap-3 border-t border-slate-200/80 pt-3 sm:grid-cols-2">
+            <div className="text-sm">
+              <span className="text-slate-500">Access start</span>
+              <div className="font-medium text-slate-900">{formatDateLabel(subscriptionForm.subscription_start_date)}</div>
+            </div>
+            <div className="text-sm">
+              <span className="text-slate-500">Access valid until</span>
+              <div className="font-medium text-slate-900">{formatDateLabel(subscriptionForm.subscription_end_date)}</div>
+            </div>
+            <div className="text-sm">
+              <span className="text-slate-500">Next AMC due</span>
+              <div className="font-medium text-slate-900">{formatDateLabel(planSnapshot?.next_amc_due_date)}</div>
+            </div>
+            {planSnapshot &&
+              planSnapshot.onetime_fee_amount != null &&
+              planSnapshot.onetime_fee_amount !== '' && (
+                <div className="text-sm">
+                  <span className="text-slate-500">One-time fee (excl. GST)</span>
+                  <div className="font-medium text-slate-900">
+                    ₹{Number(planSnapshot.onetime_fee_amount).toLocaleString('en-IN')}
+                  </div>
+                </div>
+              )}
+            {planSnapshot && planSnapshot.amc_amount != null && planSnapshot.amc_amount !== '' && (
+              <div className="text-sm">
+                <span className="text-slate-500">AMC per year (excl. GST)</span>
+                <div className="font-medium text-slate-900">
+                  ₹{Number(planSnapshot.amc_amount).toLocaleString('en-IN')}
+                </div>
+              </div>
+            )}
+            <div className="text-sm">
+              <span className="text-slate-500">Active staff</span>
+              <div className="font-medium text-slate-900">
+                {planSnapshot == null
+                  ? '—'
+                  : planSnapshot.effective_employee_limit == null
+                    ? `${planSnapshot.active_staff_count ?? 0} (no default cap)`
+                    : `${planSnapshot.active_staff_count ?? 0} / ${planSnapshot.effective_employee_limit}`}
+              </div>
+            </div>
+            <div className="text-sm sm:col-span-2">
+              <span className="text-slate-500">Locations (branches)</span>
+              <div className="font-medium text-slate-900">
+                {planSnapshot == null
+                  ? '—'
+                  : planSnapshot.branches_allowed_total == null
+                    ? `${planSnapshot.branch_count ?? 0} in use (no cap set)`
+                    : `${planSnapshot.branch_count ?? 0} / ${planSnapshot.branches_allowed_total}`}
+              </div>
+              {planSnapshot && planSnapshot.branches_allowed_total == null && planDefaults?.branchTotal != null && (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Default for your plan tier: up to {planDefaults.branchTotal} location
+                  {planDefaults.branchTotal === 1 ? '' : 's'} (unless your agreement specifies otherwise).
+                </p>
+              )}
+            </div>
+          </div>
+          {(planSnapshot?.last_onetime_payment_date || planSnapshot?.last_amc_payment_date) && (
+            <div className="border-t border-slate-200/80 pt-3 text-[11px] text-slate-500">
+              {planSnapshot.last_onetime_payment_date && (
+                <p>
+                  Last one-time payment recorded: {formatDateLabel(planSnapshot.last_onetime_payment_date)}
+                  {planSnapshot.onetime_payment_status ? ` (${planSnapshot.onetime_payment_status})` : ''}
+                </p>
+              )}
+              {planSnapshot.last_amc_payment_date && (
+                <p className="mt-0.5">
+                  Last AMC payment: {formatDateLabel(planSnapshot.last_amc_payment_date)}
+                  {planSnapshot.amc_payment_status ? ` (${planSnapshot.amc_payment_status})` : ''}
+                </p>
+              )}
+            </div>
+          )}
           <p className="text-[11px] text-slate-500">
-            After the end date, a 7-day grace period applies before payroll and device sync are blocked.
+            After the access end date, a 7-day grace period applies before payroll and device sync are blocked.
           </p>
         </div>
       </section>

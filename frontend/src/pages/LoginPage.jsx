@@ -896,6 +896,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE } from '../utils/apiBase';
+import { PRICING_PLANS } from '../constants/pricingPlans';
 
 const WHATSAPP_NUMBER = '919600844041';
 const WHATSAPP_LINK =
@@ -1219,14 +1220,8 @@ export default function LoginPage() {
     label:    { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--pp-white-dim)', marginBottom: 6, letterSpacing: '0.5px', textTransform: 'uppercase' },
   };
 
-  /* ── pricing data ── */
-  const plans = [
-    { name: 'Basic',        emp: 'Up to 25',  price: '20,000',   amc: '5,000',   popular: false, features: ['Attendance Tracking','Auto Payroll','WhatsApp Payslips','PDF Reports'], dimFeatures: ['Multi-Branch','Priority Support'] },
-    { name: 'Growth',       emp: 'Up to 50',  price: '35,000',   amc: '8,000',   popular: true,  features: ['Attendance Tracking','Auto Payroll','WhatsApp Payslips','PDF Reports','Multi-Branch Support'], dimFeatures: ['Priority Support'] },
-    { name: 'Business',     emp: 'Up to 100', price: '60,000',   amc: '15,000',  popular: false, features: ['Attendance Tracking','Auto Payroll','WhatsApp Payslips','PDF Reports','Multi-Branch Support','Priority Support'], dimFeatures: [] },
-    { name: 'Professional', emp: 'Up to 200', price: '1,00,000', amc: '25,000',  popular: false, features: ['Attendance Tracking','Auto Payroll','WhatsApp Payslips','PDF Reports','Multi-Branch Support','Priority Support'], dimFeatures: [] },
-    { name: 'Enterprise',   emp: '200+',      price: 'Custom',   amc: 'Custom',  popular: false, features: ['Everything in Professional','Custom Integrations','Dedicated Support','On-site Onboarding','Custom Reports','Negotiable Pricing'], dimFeatures: [] },
-  ];
+  /* ── pricing data (shared with SuperAdmin plan codes) ── */
+  const plans = PRICING_PLANS;
 
   /* ── comparison data ── */
   const cmpRows = [
@@ -1433,7 +1428,7 @@ export default function LoginPage() {
             {/* plan cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 32 }}>
               {plans.map((p) => (
-                <div key={p.name} style={{
+                <div key={p.code} style={{
                   background: p.popular ? 'linear-gradient(160deg,#1c1600,#111)' : 'var(--pp-card)',
                   border: p.popular ? '1px solid rgba(212,168,67,0.4)' : '1px solid rgba(255,255,255,0.06)',
                   borderRadius: 14, padding: '14px 12px', display: 'flex', flexDirection: 'column',
