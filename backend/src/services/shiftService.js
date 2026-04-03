@@ -30,6 +30,7 @@ async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
+       full_day_hours,
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
@@ -64,6 +65,7 @@ async function createShift(companyId, data) {
     attendanceMode,
     monthlyPermissionHours,
     halfDayHours,
+    fullDayHours,
     requiredHoursPerDay,
     allowOvertime,
     overtimeRatePerHour,
@@ -94,12 +96,13 @@ async function createShift(companyId, data) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
+       full_day_hours,
        required_hours_per_day,
        allow_overtime,
       overtime_rate_per_hour,
       overtime_rate_mode
      )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
      RETURNING
        id,
        company_id,
@@ -118,6 +121,7 @@ async function createShift(companyId, data) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
+       full_day_hours,
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
@@ -140,6 +144,7 @@ async function createShift(companyId, data) {
       attendanceMode,
       monthlyPermissionHours,
       halfDayHours,
+      fullDayHours,
       requiredHoursPerDay,
       allowOvertime,
       overtimeRatePerHour,
@@ -191,6 +196,14 @@ function parseShiftData(data) {
   const halfDayHours = Number.isFinite(halfDayHoursRaw)
     ? Math.min(24, Math.max(0, halfDayHoursRaw))
     : null;
+  const rawFullDay = data.full_day_hours;
+  let fullDayHours = null;
+  if (rawFullDay !== null && rawFullDay !== undefined && rawFullDay !== '') {
+    const n = Number(rawFullDay);
+    if (Number.isFinite(n)) {
+      fullDayHours = Math.min(24, Math.max(0, n));
+    }
+  }
   const monthlyPermissionHoursRaw = Number(data.monthly_permission_hours);
   const monthlyPermissionHours = Number.isFinite(monthlyPermissionHoursRaw)
     ? Math.max(0, monthlyPermissionHoursRaw)
@@ -223,6 +236,7 @@ function parseShiftData(data) {
     attendanceMode,
     monthlyPermissionHours,
     halfDayHours,
+    fullDayHours,
     requiredHoursPerDay,
     allowOvertime,
     overtimeRatePerHour,
@@ -279,11 +293,12 @@ async function updateShift(companyId, shiftId, data) {
        attendance_mode = $14,
        required_hours_per_day = $15,
        half_day_hours = $16,
-       monthly_permission_hours = $17,
-       allow_overtime = $18,
-       overtime_rate_per_hour = $19,
-       overtime_rate_mode = $20
-     WHERE company_id = $1 AND id = $21
+       full_day_hours = $17,
+       monthly_permission_hours = $18,
+       allow_overtime = $19,
+       overtime_rate_per_hour = $20,
+       overtime_rate_mode = $21
+     WHERE company_id = $1 AND id = $22
      RETURNING
        id,
        company_id,
@@ -302,6 +317,7 @@ async function updateShift(companyId, shiftId, data) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
+       full_day_hours,
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
@@ -324,6 +340,7 @@ async function updateShift(companyId, shiftId, data) {
       parsed.attendanceMode,
       parsed.requiredHoursPerDay,
       parsed.halfDayHours,
+      parsed.fullDayHours,
       parsed.monthlyPermissionHours,
       parsed.allowOvertime,
       parsed.overtimeRatePerHour,

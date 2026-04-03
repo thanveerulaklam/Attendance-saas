@@ -3,6 +3,17 @@ import { authFetch } from '../utils/api';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+function sanitizeShiftBody(form) {
+  const body = { ...form };
+  if (body.full_day_hours === '' || body.full_day_hours === undefined || body.full_day_hours === null) {
+    body.full_day_hours = null;
+  } else {
+    const n = Number(body.full_day_hours);
+    body.full_day_hours = Number.isFinite(n) ? n : null;
+  }
+  return body;
+}
+
 const emptyForm = () => ({
   shift_name: '',
   start_time: '09:00',
@@ -19,6 +30,7 @@ const emptyForm = () => ({
   attendance_mode: 'day_based',
   required_hours_per_day: 8,
   half_day_hours: 0,
+  full_day_hours: null,
   monthly_permission_hours: 0,
   allow_overtime: true,
   overtime_rate_per_hour: 0,
@@ -64,6 +76,16 @@ export default function ShiftsPage() {
     setForm((prev) => ({ ...prev, weekly_off_days: next }));
   };
 
+  const handleFullDayHoursChange = (event) => {
+    const v = event.target.value;
+    if (v === '') {
+      setForm((prev) => ({ ...prev, full_day_hours: null }));
+      return;
+    }
+    const n = Number(v);
+    setForm((prev) => ({ ...prev, full_day_hours: Number.isFinite(n) ? n : prev.full_day_hours }));
+  };
+
   const handleChange = (field) => (event) => {
     const numericFields = [
       'grace_minutes',
@@ -94,7 +116,7 @@ export default function ShiftsPage() {
       const res = await authFetch('/api/shifts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(sanitizeShiftBody(form)),
       });
       if (!res.ok) throw new Error('Failed to create shift');
       setForm(emptyForm());
@@ -123,6 +145,10 @@ export default function ShiftsPage() {
       attendance_mode: shift.attendance_mode || 'day_based',
       required_hours_per_day: shift.required_hours_per_day ?? 8,
       half_day_hours: shift.half_day_hours ?? 0,
+      full_day_hours:
+        shift.full_day_hours != null && shift.full_day_hours !== ''
+          ? Number(shift.full_day_hours)
+          : null,
       monthly_permission_hours: shift.monthly_permission_hours ?? 0,
       allow_overtime: shift.allow_overtime !== false,
       overtime_rate_per_hour: shift.overtime_rate_per_hour ?? 0,
@@ -146,7 +172,7 @@ export default function ShiftsPage() {
       const res = await authFetch(`/api/shifts/${editingShift.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify(sanitizeShiftBody(form)),
       });
       if (!res.ok) throw new Error('Failed to update shift');
       setEditingShift(null);
@@ -311,6 +337,30 @@ export default function ShiftsPage() {
                   <p className="text-[10px] text-slate-500">
                     If set above 0, days with worked hours below this value are treated as half-day.
                     Leave 0 to use default midpoint logic.
+                  </p>
+                </div>
+              )}
+
+              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Full-day minimum worked hours (optional)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.25}
+                    value={form.full_day_hours == null ? '' : form.full_day_hours}
+                    onChange={handleFullDayHoursChange}
+                    disabled={creating}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="Auto (shift span − lunch)"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    For a paid full day, staff need four punches (IN–OUT–IN–OUT) and at least this many
+                    hours worked. Leave empty to use (end − start) minus allotted lunch. Set 0 to ignore
+                    worked time (punch pattern only).
                   </p>
                 </div>
               )}
@@ -676,6 +726,16 @@ export default function ShiftsPage() {
                           {shift.lunch_minutes != null ? shift.lunch_minutes : 60} min
                         </dd>
                       </div>
+                      {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') && (
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-slate-500">Full-day worked min</dt>
+                          <dd className="font-medium text-slate-800 text-right">
+                            {shift.full_day_hours != null && shift.full_day_hours !== ''
+                              ? `${shift.full_day_hours} h (fixed)`
+                              : 'Auto (shift − lunch)'}
+                          </dd>
+                        </div>
+                      )}
                       {Array.isArray(shift.weekly_off_days) && shift.weekly_off_days.length > 0 ? (
                         <div className="flex justify-between gap-2">
                           <dt className="text-slate-500">Weekly off</dt>
@@ -890,6 +950,28 @@ export default function ShiftsPage() {
                     disabled={savingEdit}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
                   />
+                </div>
+              )}
+              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">
+                    Full-day minimum worked hours
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.25}
+                    value={form.full_day_hours == null ? '' : form.full_day_hours}
+                    onChange={handleFullDayHoursChange}
+                    disabled={savingEdit}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                    placeholder="Auto (shift span − lunch)"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Empty = (end − start) minus lunch. 0 = punch pattern only. Otherwise need this many
+                    worked hours for a full paid day after four punches.
+                  </p>
                 </div>
               )}
               <div className="space-y-1">

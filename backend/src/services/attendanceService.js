@@ -96,6 +96,13 @@ function rowToShiftConfig(row) {
   const requiredHoursPerDay = Number(row.required_hours_per_day || 8);
   const halfDayHoursRaw = Number(row.half_day_hours);
   const halfDayHours = Number.isFinite(halfDayHoursRaw) ? halfDayHoursRaw : null;
+  const fullDayHoursRaw = row.full_day_hours;
+  const fullDayHours =
+    fullDayHoursRaw === null || fullDayHoursRaw === undefined || fullDayHoursRaw === ''
+      ? null
+      : Number(fullDayHoursRaw);
+  const fullDayHoursResolved =
+    Number.isFinite(fullDayHours) && fullDayHours >= 0 ? fullDayHours : null;
   const overtimeAllowed = row.allow_overtime === true || row.allow_overtime === 'true';
   return {
     startHour,
@@ -109,8 +116,27 @@ function rowToShiftConfig(row) {
     attendanceMode,
     requiredHoursPerDay,
     halfDayHours,
+    /** null = derive from shift span − allotted lunch; else minimum worked hours for full day (0 = punch pattern only). */
+    fullDayHours: fullDayHoursResolved,
     overtimeAllowed,
   };
+}
+
+/**
+ * Minimum worked time (ms) for a paid full day when IN–OUT–IN–OUT is complete.
+ * fullDayHours null → (shift wall hours) − (allotted lunch hours), floored at 0.
+ */
+function getFullDayMinimumWorkMs(shiftConfig) {
+  const explicit = shiftConfig.fullDayHours;
+  if (explicit !== null && explicit !== undefined && Number.isFinite(explicit) && explicit >= 0) {
+    return explicit * 60 * 60 * 1000;
+  }
+  const shiftMs = Number(shiftConfig.shiftMs || 0);
+  const lunchMin = Number(shiftConfig.lunchMinutesAllotted ?? 60);
+  const shiftHours = shiftMs / (60 * 60 * 1000);
+  const lunchHours = Math.max(0, lunchMin) / 60;
+  const derivedHours = Math.max(0, shiftHours - lunchHours);
+  return derivedHours * 60 * 60 * 1000;
 }
 
 /**
@@ -140,7 +166,7 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
  */
 async function getShiftConfig(companyId) {
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, allow_overtime
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -161,7 +187,7 @@ async function getShiftConfig(companyId) {
 async function getShiftConfigById(shiftId) {
   if (!shiftId) return null;
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, allow_overtime
+    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime
      FROM shifts WHERE id = $1`,
     [shiftId]
   );
@@ -180,7 +206,7 @@ async function getShiftConfigMap(companyId, shiftIds) {
   const uniqueIds = [...new Set((shiftIds || []).filter(Boolean))];
   if (uniqueIds.length === 0) return map;
   const result = await pool.query(
-    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours
      FROM shifts WHERE id = ANY($1::bigint[])`,
     [uniqueIds]
   );
@@ -280,7 +306,7 @@ function computeWorkedMsFromShiftStartToNow(
 /**
  * Compute present, late, overtime, full-day, left-during-lunch, and lunch duration for one day's logs.
  * Expects 4-punch pattern: 1=IN, 2=OUT (lunch start), 3=IN (lunch end), 4=OUT (end of day).
- * shiftConfig: { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted }
+ * shiftConfig: { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted, halfDayHours, fullDayHours }
  * calendarDateStr: YYYY-MM-DD attendance day in IST
  */
 function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
@@ -337,8 +363,9 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
   const present = workedMs > 0 || firstInTime != null;
   const punchCount = sorted.length;
 
-  // Full day = 4 punches (IN, OUT, IN, OUT) — completed both sessions and came back from lunch
-  const fullDay = punchCount >= 4 && sorted[punchCount - 1].punch_type?.toLowerCase() === 'out';
+  // Completed 4-punch pattern (IN, OUT, IN, OUT); payroll "full day" also requires minimum worked time below.
+  const punchPatternComplete =
+    punchCount >= 4 && sorted[punchCount - 1].punch_type?.toLowerCase() === 'out';
 
   // Left during lunch = exactly 2 punches (IN, OUT) — went out for lunch and never punched back IN
   const leftDuringLunch = punchCount === 2 &&
@@ -376,12 +403,21 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
   const overtimeHours = overtimeMs / (60 * 60 * 1000);
   const midpointMs = shiftStartMs + (shiftConfig.shiftMs || 0) / 2;
 
+  const fullDayMinWorkMs = getFullDayMinimumWorkMs(shiftConfig);
+  const fullDay =
+    punchPatternComplete && workedMs + 0.001 >= fullDayMinWorkMs;
+
+  const workedHours = workedMs / (60 * 60 * 1000);
   let halfDay = false;
   const configuredHalfDayHours = Number(shiftConfig.halfDayHours);
-  if (Number.isFinite(configuredHalfDayHours) && configuredHalfDayHours > 0) {
-    const workedHours = workedMs / (60 * 60 * 1000);
+  if (fullDay) {
+    halfDay = false;
+  } else if (punchPatternComplete && workedMs + 0.001 < fullDayMinWorkMs) {
+    // Four punches but not enough worked time for full-day pay → half-day credit.
+    halfDay = true;
+  } else if (Number.isFinite(configuredHalfDayHours) && configuredHalfDayHours > 0) {
     halfDay = present && workedHours < configuredHalfDayHours;
-  } else if (present && !fullDay && !leftDuringLunch && midpointMs) {
+  } else if (present && !leftDuringLunch && midpointMs) {
     if (lastOutTime && lastOutTime.getTime() < midpointMs) {
       halfDay = true;
     } else if (firstInTime && firstInTime.getTime() > midpointMs) {

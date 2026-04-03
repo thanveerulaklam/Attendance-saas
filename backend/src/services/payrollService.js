@@ -64,6 +64,13 @@ function rowToShiftConfig(row) {
   const monthlyPermissionHours = Number(row.monthly_permission_hours || 0);
   const halfDayHoursRaw = Number(row.half_day_hours);
   const halfDayHours = Number.isFinite(halfDayHoursRaw) ? halfDayHoursRaw : null;
+  const fullDayHoursRaw = row.full_day_hours;
+  const fullDayHoursNum =
+    fullDayHoursRaw === null || fullDayHoursRaw === undefined || fullDayHoursRaw === ''
+      ? null
+      : Number(fullDayHoursRaw);
+  const fullDayHours =
+    Number.isFinite(fullDayHoursNum) && fullDayHoursNum >= 0 ? fullDayHoursNum : null;
   const weeklyOffDaysRaw = Array.isArray(row.weekly_off_days) ? row.weekly_off_days : [];
   const weeklyOffDays = [...new Set(
     weeklyOffDaysRaw
@@ -91,6 +98,7 @@ function rowToShiftConfig(row) {
     requiredHoursPerDay,
     monthlyPermissionHours,
     halfDayHours,
+    fullDayHours,
     allowOvertime: row.allow_overtime !== false,
     overtimeRatePerHour: Number(row.overtime_rate_per_hour || 0),
     overtimeRateMode:
@@ -118,6 +126,7 @@ async function getDefaultShiftForCompany(client, companyId) {
        attendance_mode,
        monthly_permission_hours,
        half_day_hours,
+       full_day_hours,
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
@@ -160,6 +169,7 @@ async function getShiftForEmployee(client, companyId, employeeId) {
            attendance_mode,
            monthly_permission_hours,
            half_day_hours,
+           full_day_hours,
            required_hours_per_day,
            allow_overtime,
            overtime_rate_per_hour,
@@ -185,6 +195,7 @@ async function getShiftForEmployee(client, companyId, employeeId) {
              attendance_mode,
              monthly_permission_hours,
              half_day_hours,
+             full_day_hours,
              required_hours_per_day,
              allow_overtime,
              overtime_rate_per_hour
