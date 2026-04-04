@@ -337,14 +337,27 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       let rawAbsenceDays = 0;
       let overtimeHours = 0;
 
-      for (const [dayKey, dayLogs] of logsByDay.entries()) {
+      // Iterate every calendar day up to lastDateToConsider so working days with no punches
+      // are counted absent (logsByDay only had keys where at least one punch existed).
+      for (let d = 1; d <= daysInMonth; d += 1) {
+        const dayKey = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         if (dayKey > lastDateToConsider) {
-          continue;
+          break;
         }
         const isHoliday = holidaySet.has(dayKey);
+        const dayLogs = logsByDay.get(dayKey) || [];
+
         if (!dayLogs.length) {
           if (!isHoliday) {
             rawAbsenceDays += 1;
+            dayDetails.push({
+              date: dayKey,
+              firstInTime: null,
+              totalHoursInside: 0,
+              late: false,
+              minutesLate: 0,
+              status: 'absent',
+            });
           }
           continue;
         }
@@ -375,11 +388,11 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         let isLate = false;
         let minutesLate = 0;
         if (firstInTime && !isHoliday) {
-          const [y, mo, d] = dayKey.split('-').map(Number);
+          const [y, mo, dNum] = dayKey.split('-').map(Number);
           const shiftStartMs = getShiftStartMsForDate(
             y,
             mo,
-            d,
+            dNum,
             shift.startHour,
             shift.startMinute
           );
@@ -1665,6 +1678,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         dailyRate,
         presentDays: summary.presentDays,
         paidLeaveDaysAllowed,
+        paidLeaveUsed: Number(summary.paidLeaveUsed || 0),
         absenceDays: summary.absenceDays,
       });
       earnedBasic = computed.earnedBasic;
@@ -1970,6 +1984,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       dailyRate,
       presentDays: summary.presentDays,
       paidLeaveDaysAllowed,
+      paidLeaveUsed: Number(summary.paidLeaveUsed || 0),
       absenceDays: summary.absenceDays,
     });
     earnedBasic = computed.earnedBasic;

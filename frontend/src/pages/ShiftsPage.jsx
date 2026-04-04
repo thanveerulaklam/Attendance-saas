@@ -986,6 +986,43 @@ export default function ShiftsPage() {
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
                 />
               </div>
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">No-leave incentive (optional)</p>
+                <p className="text-[10px] text-slate-500">
+                  Fixed incentive for staff with zero absences on this shift for the month.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Incentive amount</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.no_leave_incentive}
+                    onChange={handleChange('no_leave_incentive')}
+                    disabled={savingEdit}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="e.g. 500"
+                  />
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                <p className="text-[11px] font-medium text-slate-700">Paid leave allowance (optional)</p>
+                <p className="text-[10px] text-slate-500">
+                  Days per month that can count as paid (with salary) when the employee would otherwise be absent.
+                  Use 0 if you do not offer shift-level paid leave.
+                </p>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-slate-700">Paid leave days per month</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={form.paid_leave_days}
+                    onChange={handleChange('paid_leave_days')}
+                    disabled={savingEdit}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    placeholder="e.g. 4"
+                  />
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Grace min</label>

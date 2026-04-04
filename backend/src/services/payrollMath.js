@@ -5,12 +5,14 @@ function computeMonthlyBaseAndAbsence({
   dailyRate,
   presentDays,
   paidLeaveDaysAllowed,
+  /** Days absent but paid via shift paid-leave pool (hours_based earned only). */
+  paidLeaveUsed = 0,
   absenceDays,
 }) {
   const mode = String(attendanceMode || 'day_based').toLowerCase();
   const isHoursBased = mode === 'hours_based';
   const safePresentDays = Number(presentDays || 0);
-  const safePaidLeaveDaysAllowed = Number(paidLeaveDaysAllowed || 0);
+  const safePaidLeaveUsed = Math.max(0, Number(paidLeaveUsed || 0));
   const safeAbsenceDays = Number(absenceDays || 0);
 
   let earnedBasic = 0;
@@ -18,17 +20,20 @@ function computeMonthlyBaseAndAbsence({
 
   if (isMonthComplete) {
     if (isHoursBased) {
-      earnedBasic = dailyRate * (safePresentDays + safePaidLeaveDaysAllowed);
-      absenceDeduction = dailyRate * safeAbsenceDays;
+      // presentDays already excludes absent days and applies half-days as 0.5.
+      // Do not also charge absenceDeduction — that double-counts vs pro-rated earned.
+      // Add only paid-leave-covered absent days (not the monthly allowance cap).
+      earnedBasic = dailyRate * (safePresentDays + safePaidLeaveUsed);
+      absenceDeduction = 0;
     } else {
       earnedBasic = Number(basicSalary || 0);
       absenceDeduction = dailyRate * safeAbsenceDays;
     }
+  } else if (isHoursBased) {
+    earnedBasic = dailyRate * (safePresentDays + safePaidLeaveUsed);
+    absenceDeduction = 0;
   } else {
     earnedBasic = dailyRate * safePresentDays;
-    if (isHoursBased) {
-      absenceDeduction = dailyRate * safeAbsenceDays;
-    }
   }
 
   return { earnedBasic, absenceDeduction };

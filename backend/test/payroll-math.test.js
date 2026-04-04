@@ -43,7 +43,7 @@ test('monthly complete + shift_based: full base salary with explicit absence ded
   assert.equal(result.absenceDeduction, dailyRate * 2);
 });
 
-test('monthly complete + hours_based: earned basic uses present + paid leave and separate absence deduction', () => {
+test('monthly complete + hours_based: pro-rated earned from present + paidLeaveUsed; no absence deduction', () => {
   const basicSalary = 12000;
   const dailyRate = basicSalary / 30;
 
@@ -53,12 +53,13 @@ test('monthly complete + hours_based: earned basic uses present + paid leave and
     basicSalary,
     dailyRate,
     presentDays: 20.5,
-    paidLeaveDaysAllowed: 2,
+    paidLeaveDaysAllowed: 3,
+    paidLeaveUsed: 2,
     absenceDays: 3,
   });
 
   assert.equal(result.earnedBasic, dailyRate * (20.5 + 2));
-  assert.equal(result.absenceDeduction, dailyRate * 3);
+  assert.equal(result.absenceDeduction, 0);
 });
 
 test('monthly partial + day_based: MTD earned basic only, no explicit absence deduction', () => {
@@ -79,7 +80,7 @@ test('monthly partial + day_based: MTD earned basic only, no explicit absence de
   assert.equal(result.absenceDeduction, 0);
 });
 
-test('monthly partial + hours_based: MTD earned basic and explicit absence deduction', () => {
+test('monthly partial + hours_based: MTD earned from present + paidLeaveUsed; no absence deduction', () => {
   const basicSalary = 10000;
   const dailyRate = basicSalary / 30;
 
@@ -89,12 +90,13 @@ test('monthly partial + hours_based: MTD earned basic and explicit absence deduc
     basicSalary,
     dailyRate,
     presentDays: 8.5,
-    paidLeaveDaysAllowed: 1,
+    paidLeaveDaysAllowed: 2,
+    paidLeaveUsed: 1,
     absenceDays: 1.5,
   });
 
-  assert.equal(result.earnedBasic, dailyRate * 8.5);
-  assert.equal(result.absenceDeduction, dailyRate * 1.5);
+  assert.equal(result.earnedBasic, dailyRate * (8.5 + 1));
+  assert.equal(result.absenceDeduction, 0);
 });
 
 test('permission offset: zero allocation keeps deductions unchanged', () => {
