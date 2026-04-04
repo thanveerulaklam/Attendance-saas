@@ -3,10 +3,11 @@ const assert = require('node:assert/strict');
 
 const {
   computeHoursBasedDayStatus,
+  computeHoursInsideForHoursBasedPayroll,
   getHoursBasedDailyPresence,
 } = require('../src/services/attendanceService');
 
-test('hours-based: open IN session counts until day end for past date', () => {
+test('hours-based: unpaired IN on past date counts no inside time', () => {
   const dayStart = new Date('2026-01-10T00:00:00.000Z');
   const dayLogs = [
     {
@@ -21,13 +22,19 @@ test('hours-based: open IN session counts until day end for past date', () => {
     requiredHoursPerDay: 10,
   };
 
-  const status = computeHoursBasedDayStatus(dayLogs, shiftConfig, dayStart);
+  const status = computeHoursBasedDayStatus(
+    dayLogs,
+    shiftConfig,
+    '2026-01-10',
+    false,
+    Date.now()
+  );
 
-  assert.equal(status.present, true);
+  assert.equal(status.present, false);
   assert.equal(status.halfDay, false);
-  assert.equal(status.fullDay, true);
-  assert.ok(status.totalHoursInside >= 14.9 && status.totalHoursInside <= 15.1);
-  assert.ok(status.overtimeHours >= 4.9 && status.overtimeHours <= 5.1);
+  assert.equal(status.fullDay, false);
+  assert.equal(status.totalHoursInside, 0);
+  assert.equal(status.overtimeHours, 0);
 });
 
 test('hours-based daily provisional: last punch IN is present for current date', () => {
@@ -54,9 +61,31 @@ test('hours-based daily provisional: no punches is absent for current date', () 
   assert.equal(present, false);
 });
 
-test('hours-based daily non-current date: uses computed threshold status', () => {
+test('hours-based payroll: inside hours clip at shift start (completed pair only)', () => {
+  const sorted = [
+    { punchTime: new Date('2026-01-10T08:00:00+05:30'), punchType: 'in' },
+    { punchTime: new Date('2026-01-10T10:00:00+05:30'), punchType: 'out' },
+  ];
+  const shift = { startHour: 9, startMinute: 0 };
+  const h = computeHoursInsideForHoursBasedPayroll(sorted, shift, '2026-01-10', Date.now());
+  assert.ok(h >= 0.99 && h <= 1.01);
+});
+
+test('hours-based daily non-current date: unpaired IN only is absent', () => {
   const dayLogs = [{ punch_time: '2026-01-10T09:00:00.000Z', punch_type: 'in' }];
-  const present = getHoursBasedDailyPresence(dayLogs, { present: true }, false);
-  assert.equal(present, true);
+  const computed = computeHoursBasedDayStatus(
+    dayLogs,
+    {
+      startHour: 9,
+      startMinute: 0,
+      graceMs: 0,
+      requiredHoursPerDay: 10,
+    },
+    '2026-01-10',
+    false,
+    Date.now()
+  );
+  const present = getHoursBasedDailyPresence(dayLogs, computed, false);
+  assert.equal(present, false);
 });
 

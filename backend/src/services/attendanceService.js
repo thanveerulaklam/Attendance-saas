@@ -3,7 +3,6 @@ const { AppError } = require('../utils/AppError');
 const {
   istYmdFromDate,
   istYmdParts,
-  istDayBounds,
   todayIstYmd,
   addDaysIst,
   istMinutesFromMidnight,
@@ -235,11 +234,8 @@ function normalizePunchTypesByOrder(dayLogs) {
 }
 
 /**
- * Compute total worked milliseconds from shift start to:
- * - `now` for the currently selected attendance date
- * - full day logs for historical dates
- *
- * Uses normalized punch_type ordering (in/out) so lunch breaks (out->in) are excluded.
+ * Milliseconds worked from completed IN→OUT pairs, counting only time on or after shift start.
+ * For the current calendar date, each pair’s end is capped at `now`. Unpaired IN contributes nothing.
  */
 function computeWorkedMsFromShiftStartToNow(
   dayLogs,
@@ -259,7 +255,6 @@ function computeWorkedMsFromShiftStartToNow(
     shiftConfig.startMinute
   );
 
-  // If still working on the selected date, end at "now". Otherwise, use log-pair endpoints.
   const endMs = isCurrentDate ? nowMs : Number.POSITIVE_INFINITY;
   const maxSessionMinutes = 24 * 60; // safety against bad punches
   const maxSessionMs = maxSessionMinutes * 60 * 1000;
@@ -291,16 +286,38 @@ function computeWorkedMsFromShiftStartToNow(
     }
   }
 
-  // Unpaired IN: only count it for the currently selected date.
-  if (currentInMs != null && isCurrentDate) {
-    const startMs = Math.max(currentInMs, shiftStartMs);
-    const diffMs = nowMs - startMs;
-    if (diffMs > 0 && diffMs <= maxSessionMs) {
-      workedMs += diffMs;
-    }
-  }
-
   return workedMs;
+}
+
+/**
+ * Hours inside for hours-based payroll / attendance (same rules as daily “Total hours” column).
+ * `sortedDayLogs`: `{ punchTime: Date, punchType: 'in'|'out' }[]` sorted ascending.
+ */
+function computeHoursInsideForHoursBasedPayroll(
+  sortedDayLogs,
+  shiftConfig,
+  calendarDateStr,
+  nowMs = Date.now()
+) {
+  if (!sortedDayLogs || sortedDayLogs.length === 0) return 0;
+  const ymd = String(calendarDateStr).slice(0, 10);
+  const logsForMs = sortedDayLogs.map((l) => {
+    const pt = l.punchTime ?? l.punch_time;
+    const ts = pt instanceof Date ? pt.toISOString() : String(pt);
+    return {
+      punch_time: ts,
+      punch_type: String(l.punchType || l.punch_type || 'in').toLowerCase(),
+    };
+  });
+  const isCurrentDate = todayIstYmd() === ymd;
+  const workedMs = computeWorkedMsFromShiftStartToNow(
+    logsForMs,
+    shiftConfig,
+    ymd,
+    isCurrentDate,
+    nowMs
+  );
+  return workedMs / (60 * 60 * 1000);
 }
 
 /**
@@ -451,7 +468,13 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
   };
 }
 
-function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
+function computeHoursBasedDayStatus(
+  dayLogs,
+  shiftConfig,
+  calendarDateStr,
+  isCurrentDate,
+  nowMs
+) {
   const empty = {
     present: false,
     late: false,
@@ -473,45 +496,23 @@ function computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds) {
     (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
   );
 
-  let totalMinutesInside = 0;
-  let lastIn = null;
+  const workedMs = computeWorkedMsFromShiftStartToNow(
+    dayLogs,
+    shiftConfig,
+    calendarDateStr,
+    isCurrentDate,
+    nowMs
+  );
+  const totalHoursInside = workedMs / (60 * 60 * 1000);
+
   let firstInTime = null;
-  // Backward compatible: older callers/tests may pass a Date for day start.
-  const dayEndMs =
-    bounds && bounds.end instanceof Date
-      ? bounds.end.getTime()
-      : bounds instanceof Date
-        ? bounds.getTime() + 24 * 60 * 60 * 1000 - 1
-        : Date.now();
-  const nowMs = Date.now();
-  const maxSessionMinutes = 24 * 60;
-
   for (const log of sorted) {
-    const t = new Date(log.punch_time);
-    const type = (log.punch_type || '').toLowerCase();
-    if (type === 'in') {
-      if (!firstInTime) firstInTime = t;
-      lastIn = t;
-    } else if (type === 'out' && lastIn) {
-      const diffMinutes = (t - lastIn) / (60 * 1000);
-      if (diffMinutes >= 0 && diffMinutes <= maxSessionMinutes) {
-        totalMinutesInside += diffMinutes;
-      }
-      lastIn = null;
+    if (String(log.punch_type || '').toLowerCase() === 'in') {
+      firstInTime = new Date(log.punch_time);
+      break;
     }
   }
 
-  // If employee is still inside (IN without matching OUT), count ongoing time
-  // up to now for today's date, otherwise up to day-end for historical dates.
-  if (lastIn) {
-    const activeSessionEndMs = Math.min(dayEndMs, nowMs);
-    const diffMinutes = (activeSessionEndMs - lastIn.getTime()) / (60 * 1000);
-    if (diffMinutes >= 0 && diffMinutes <= maxSessionMinutes) {
-      totalMinutesInside += diffMinutes;
-    }
-  }
-
-  const totalHoursInside = totalMinutesInside / 60;
   const required = Number(shiftConfig.requiredHoursPerDay || 8);
 
   let present = false;
@@ -612,7 +613,6 @@ async function getDailyAttendance(
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
   }
 
-  const bounds = istDayBounds(dateStr);
   const isCurrentDate = todayIstYmd() === dateStr;
   const nowMs = Date.now();
 
@@ -717,7 +717,7 @@ async function getDailyAttendance(
       const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
       const status =
         shiftConfig.attendanceMode === 'hours_based'
-          ? computeHoursBasedDayStatus(dayLogs, shiftConfig, bounds)
+          ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dateStr, isCurrentDate, nowMs)
           : computeDayStatus(dayLogs, shiftConfig, dateStr);
       const isProvisionalHoursBased =
         shiftConfig.attendanceMode === 'hours_based' && isCurrentDate;
@@ -905,12 +905,11 @@ async function getMonthlyAttendance(
         const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const rawDayLogs = byDay.get(key) || [];
         const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
-        const dayBounds = istDayBounds(key);
+        const isCurrentDate = key === todayStr;
         const status =
           shiftConfig.attendanceMode === 'hours_based'
-            ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dayBounds)
+            ? computeHoursBasedDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs)
             : computeDayStatus(dayLogs, shiftConfig, key);
-        const isCurrentDate = key === todayStr;
         const workedMsFromShiftStart = computeWorkedMsFromShiftStartToNow(
           dayLogs,
           shiftConfig,
@@ -918,10 +917,9 @@ async function getMonthlyAttendance(
           isCurrentDate,
           nowMs
         );
-        const total_hours_from_shift_start =
-          shiftConfig.attendanceMode !== 'hours_based'
-            ? Math.round((workedMsFromShiftStart / (60 * 60 * 1000)) * 100) / 100
-            : null;
+        const total_hours_from_shift_start = Math.round(
+          (workedMsFromShiftStart / (60 * 60 * 1000)) * 100
+        ) / 100;
         days.push({
           date: key,
           day: d,
@@ -1288,6 +1286,7 @@ module.exports = {
   deletePunch,
   computeDayStatus,
   computeHoursBasedDayStatus,
+  computeHoursInsideForHoursBasedPayroll,
   getHoursBasedDailyPresence,
   attributedShiftStartDateStr,
 };

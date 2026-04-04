@@ -1,7 +1,11 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { istYmdFromDate, todayIstYmd, SQL_PUNCH_IST_DATE, addDaysIst } = require('../utils/istDate');
-const { computeDayStatus, attributedShiftStartDateStr } = require('./attendanceService');
+const {
+  computeDayStatus,
+  attributedShiftStartDateStr,
+  computeHoursInsideForHoursBasedPayroll,
+} = require('./attendanceService');
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
@@ -240,27 +244,6 @@ function getLastDateToConsider(year, month, asOfDate) {
   return asOfStr < lastDayStr ? asOfStr : lastDayStr;
 }
 
-function computeHoursInsideForDay(dayLogs) {
-  if (!dayLogs || dayLogs.length === 0) return 0;
-  const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
-  let totalMinutes = 0;
-  let lastIn = null;
-  const maxSessionMinutes = 24 * 60;
-
-  for (const log of sorted) {
-    if (log.punchType === 'in') {
-      lastIn = log.punchTime;
-    } else if (log.punchType === 'out' && lastIn) {
-      const diffMin = (log.punchTime - lastIn) / (60 * 1000);
-      if (diffMin >= 0 && diffMin <= maxSessionMinutes) {
-        totalMinutes += diffMin;
-      }
-      lastIn = null;
-    }
-  }
-  return totalMinutes / 60;
-}
-
 async function getAttendanceSummary(companyId, employeeId, year, month, options = {}) {
   const { treatHolidayAdjacentAbsenceAsWorking = false, asOfDate = null } = options;
   const client = await pool.connect();
@@ -367,7 +350,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         }
 
         const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
-        const hoursInside = computeHoursInsideForDay(sorted);
+        const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
 
         let presentFraction = 0;
         let statusLabel = 'absent';
@@ -757,7 +740,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         }
 
         const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
-        const hoursInside = computeHoursInsideForDay(sorted);
+        const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
 
         let presentFraction = 0;
         let statusLabel = 'absent';
@@ -1130,6 +1113,10 @@ async function generateWeeklyPayroll(
     const grossSalary = earnedBasic + overtimePay + travelAllowance;
     const netSalary = grossSalary - deductions - salaryAdvance;
 
+    const weeklyOvertimeHoursBillable = shiftConfig.allowOvertime
+      ? Number(summary.overtimeHours || 0)
+      : 0;
+
     const insertResult = await client.query(
       `INSERT INTO weekly_payroll_records (
          company_id,
@@ -1169,7 +1156,7 @@ async function generateWeeklyPayroll(
         summary.daysInRange,
         summary.presentDays,
         summary.absenceDays,
-        summary.overtimeHours,
+        weeklyOvertimeHoursBillable,
         grossSalary,
         deductions,
         salaryAdvance,
@@ -1445,6 +1432,9 @@ async function getWeeklyPayrollBreakdown(
     includeOvertime && shiftConfig.allowOvertime
       ? shiftSummary.overtimeHours * effectiveOvertimeRate
       : 0;
+  const weeklyOvertimeHoursBillable = shiftConfig.allowOvertime
+    ? Number(shiftSummary.overtimeHours || 0)
+    : 0;
   const travelAllowance =
     Number(employee.daily_travel_allowance || 0) * (shiftSummary.presentWorkingDays ?? 0);
 
@@ -1519,7 +1509,9 @@ async function getWeeklyPayrollBreakdown(
       presentDays: shiftSummary.presentDays,
       presentWorkingDays: shiftSummary.presentWorkingDays,
       absenceDays: shiftSummary.absenceDays,
-      overtimeHours: shiftSummary.overtimeHours,
+      overtimeHours: weeklyOvertimeHoursBillable,
+      overtimeHoursRaw: Number(shiftSummary.overtimeHours || 0),
+      allowOvertime: Boolean(shiftConfig.allowOvertime),
       lateMinutes: shiftSummary.lateMinutes,
       lunchOverMinutes: shiftSummary.lunchOverMinutes,
       lateDays: shiftSummary.lateDays,
@@ -1635,7 +1627,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const lastDayOfMonth = new Date(year, month, 0).getDate();
     const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
 
-    const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
+    const allowOvertime = Boolean(shiftConfig.allowOvertime);
+    const overtimeHoursBillable = allowOvertime ? Number(summary.overtimeHours || 0) : 0;
+    const overtimePay =
+      includeOvertime && allowOvertime ? Number(summary.overtimeHours || 0) * hourlyRate : 0;
     const presentWorkingDays = summary.presentWorkingDays ?? 0;
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * presentWorkingDays;
@@ -1798,7 +1793,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         summary.daysInMonth,
         summary.presentDays,
         summary.absenceDays,
-        summary.overtimeHours,
+        overtimeHoursBillable,
         grossSalary,
         deductions,
         salaryAdvance,
@@ -1938,7 +1933,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const lastDayOfMonth = new Date(year, month, 0).getDate();
   const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
 
-  const overtimePay = includeOvertime ? summary.overtimeHours * hourlyRate : 0;
+  const allowOvertime = Boolean(shiftConfig.allowOvertime);
+  const overtimeHoursBillable = allowOvertime ? Number(summary.overtimeHours || 0) : 0;
+  const overtimePay =
+    includeOvertime && allowOvertime ? Number(summary.overtimeHours || 0) * hourlyRate : 0;
   const presentWorkingDays = summary.presentWorkingDays ?? 0;
   const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
   const travelAllowance = dailyTravelAllowance * presentWorkingDays;
@@ -2096,7 +2094,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       presentDays: summary.presentDays,
       presentWorkingDays: summary.presentWorkingDays,
       absenceDays: summary.absenceDays,
-      overtimeHours: summary.overtimeHours,
+      overtimeHours: overtimeHoursBillable,
+      overtimeHoursRaw: Number(summary.overtimeHours || 0),
+      allowOvertime,
       lateMinutes: summary.lateMinutes,
       lunchOverMinutes: summary.lunchOverMinutes,
       lateDays: summary.lateDays,
@@ -2111,6 +2111,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       isMonthComplete,
       basicSalary: earnedBasic,
       overtimePay,
+      allowOvertime,
       travelAllowance,
       unusedPaidLeaveDays,
       paidLeaveEncashmentAmount,
