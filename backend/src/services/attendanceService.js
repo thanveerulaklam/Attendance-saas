@@ -139,12 +139,16 @@ function getFullDayMinimumWorkMs(shiftConfig) {
 }
 
 /**
- * For overnight shift_based shifts, attribute a punch to the shift start date (IST):
+ * For overnight shifts (hours_based or legacy shift_based), attribute a punch to shift start date (IST):
  * e.g. 06:00 on day 2 belongs to the shift that started 22:00 on day 1.
  */
 function attributedShiftStartDateStr(punchTime, shiftConfig) {
   const istYmd = istYmdFromDate(punchTime);
-  if (shiftConfig.attendanceMode !== 'shift_based' || !shiftConfig.isOvernightClock) {
+  const mode = String(shiftConfig.attendanceMode || '').toLowerCase();
+  if (
+    !shiftConfig.isOvernightClock ||
+    (mode !== 'shift_based' && mode !== 'hours_based')
+  ) {
     return istYmd;
   }
   const mins = istMinutesFromMidnight(punchTime);
@@ -665,7 +669,10 @@ async function getDailyAttendance(
     const ids = employees.map((e) => e.id);
 
     const needOvernightNextDay = Array.from(shiftConfigMap.values()).some(
-      (c) => c && c.attendanceMode === 'shift_based' && c.isOvernightClock
+      (c) =>
+        c &&
+        c.isOvernightClock &&
+        (c.attendanceMode === 'shift_based' || c.attendanceMode === 'hours_based')
     );
     const nextDayStr = addDaysIst(dateStr, 1);
 
@@ -704,7 +711,10 @@ async function getDailyAttendance(
       const shiftConfig =
         shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       let rawDayLogs = logsByEmployee.get(emp.id) || [];
-      if (shiftConfig.attendanceMode === 'shift_based' && shiftConfig.isOvernightClock) {
+      if (
+        shiftConfig.isOvernightClock &&
+        (shiftConfig.attendanceMode === 'shift_based' || shiftConfig.attendanceMode === 'hours_based')
+      ) {
         const [sy, smo, sdd] = dateStr.split('-').map(Number);
         const shiftStartMs = getShiftStartMsForDate(
           sy,
@@ -853,7 +863,10 @@ async function getMonthlyAttendance(
     const ids = employees.map((e) => e.id);
 
     const needOvernightExtension = Array.from(shiftConfigMap.values()).some(
-      (c) => c && c.attendanceMode === 'shift_based' && c.isOvernightClock
+      (c) =>
+        c &&
+        c.isOvernightClock &&
+        (c.attendanceMode === 'shift_based' || c.attendanceMode === 'hours_based')
     );
     const rangeStart = needOvernightExtension
       ? addDaysIst(monthFirstStr, -1)
@@ -886,7 +899,8 @@ async function getMonthlyAttendance(
       const punchTime = new Date(row.punch_time);
       const shiftCfg = empShiftById.get(eid);
       const key =
-        shiftCfg.attendanceMode === 'shift_based' && shiftCfg.isOvernightClock
+        shiftCfg.isOvernightClock &&
+        (shiftCfg.attendanceMode === 'shift_based' || shiftCfg.attendanceMode === 'hours_based')
           ? attributedShiftStartDateStr(punchTime, shiftCfg)
           : istYmdFromDate(punchTime);
       if (key < monthFirstStr || key > monthLastStr) continue;

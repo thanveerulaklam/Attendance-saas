@@ -5,6 +5,7 @@ const {
   computeHoursBasedDayStatus,
   computeHoursInsideForHoursBasedPayroll,
   getHoursBasedDailyPresence,
+  attributedShiftStartDateStr,
 } = require('../src/services/attendanceService');
 
 test('hours-based: unpaired IN on past date counts no inside time', () => {
@@ -87,5 +88,29 @@ test('hours-based daily non-current date: unpaired IN only is absent', () => {
   );
   const present = getHoursBasedDailyPresence(dayLogs, computed, false);
   assert.equal(present, false);
+});
+
+test('hours-based overnight: punch after midnight is attributed to shift start date', () => {
+  const shiftConfig = {
+    attendanceMode: 'hours_based',
+    isOvernightClock: true,
+    startHour: 21,
+    startMinute: 0,
+    endHour: 9,
+    endMinute: 0,
+  };
+  const punchAt0130 = new Date('2026-01-11T01:30:00+05:30');
+  const dayKey = attributedShiftStartDateStr(punchAt0130, shiftConfig);
+  assert.equal(dayKey, '2026-01-10');
+});
+
+test('hours-based overnight: completed cross-midnight pair counts inside hours', () => {
+  const sorted = [
+    { punchTime: new Date('2026-01-10T22:00:00+05:30'), punchType: 'in' },
+    { punchTime: new Date('2026-01-11T06:00:00+05:30'), punchType: 'out' },
+  ];
+  const shift = { startHour: 21, startMinute: 0 };
+  const h = computeHoursInsideForHoursBasedPayroll(sorted, shift, '2026-01-10', Date.now());
+  assert.ok(h >= 7.99 && h <= 8.01);
 });
 

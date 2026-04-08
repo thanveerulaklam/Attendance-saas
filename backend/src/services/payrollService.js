@@ -46,6 +46,31 @@ function getMonthBounds(year, month) {
   return { start, end, daysInMonth };
 }
 
+/** For compact hours-based shops, map after-midnight close punches to previous attendance day. */
+const LATE_CLOSE_CUTOFF_MINUTES = 6 * 60; // 06:00 IST
+
+function getIstMinutesFromMidnight(date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: COMPANY_TZ,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(date);
+  const hh = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+  const mm = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+  return hh * 60 + mm;
+}
+
+function attributedCompactHoursBasedDateStr(punchTime, shiftConfig) {
+  const ymd = istYmdFromDate(punchTime);
+  const startMin = Number(shiftConfig.startHour || 0) * 60 + Number(shiftConfig.startMinute || 0);
+  const mins = getIstMinutesFromMidnight(punchTime);
+  if (mins < LATE_CLOSE_CUTOFF_MINUTES && mins < startMin) {
+    return addDaysIst(ymd, -1);
+  }
+  return ymd;
+}
+
 /** Company policy: zero shift PL allowance when rawAbsenceDays exceeds threshold. */
 function effectivePaidLeaveDaysAllowed(shiftPaidLeaveDays, rawAbsenceDays, forfeitIfAbsenceGt) {
   let allowed = Number(shiftPaidLeaveDays || 0);
@@ -271,7 +296,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     const plForfeitIfAbsenceGt = companyPlResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
 
     const needOvernightRange =
-      shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
+      shift.isOvernightClock &&
+      (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based');
     const rangeStart = needOvernightRange
       ? addDays(monthFirstStr, -1)
       : monthFirstStr;
@@ -311,9 +337,15 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     for (const row of logsResult.rows) {
       const punchTime = new Date(row.punch_time);
       let key;
-      if (shift.attendanceMode === 'hours_based') {
-        key = istYmdFromDate(punchTime);
-      } else if (shift.attendanceMode === 'shift_based' && shift.isOvernightClock) {
+      if (
+        shiftsCompactUi &&
+        shift.attendanceMode === 'hours_based'
+      ) {
+        key = attributedCompactHoursBasedDateStr(punchTime, shift);
+      } else if (
+        shift.isOvernightClock &&
+        (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based')
+      ) {
         key = attributedShiftStartDateStr(punchTime, shift);
       } else {
         key = istYmdFromDate(punchTime);
@@ -747,7 +779,8 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     const plForfeitIfAbsenceGtRange = companyPlRangeResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
 
     const needOvernightRange =
-      shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
+      shift.isOvernightClock &&
+      (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based');
     const rangeStart = needOvernightRange ? addDays(startStr, -1) : startStr;
     const rangeEnd = needOvernightRange ? addDays(endStr, 1) : endStr;
 
@@ -770,9 +803,10 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     for (const row of logsResult.rows) {
       const punchTime = new Date(row.punch_time);
       let key;
-      if (shift.attendanceMode === 'hours_based') {
-        key = istYmdFromDate(punchTime);
-      } else if (shift.attendanceMode === 'shift_based' && shift.isOvernightClock) {
+      if (
+        shift.isOvernightClock &&
+        (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based')
+      ) {
         key = attributedShiftStartDateStr(punchTime, shift);
       } else {
         key = istYmdFromDate(punchTime);
