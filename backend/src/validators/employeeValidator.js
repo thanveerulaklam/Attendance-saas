@@ -102,6 +102,14 @@ const validateCreateEmployee = (payload = {}) => {
       errors.esi_amount = 'ESI amount must be a non-negative number.';
     }
   }
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_amount')) {
+    const v = payload.pf_amount;
+    if (v == null || v === '') {
+      // optional: treat as 0
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.pf_amount = 'PF amount must be a non-negative number.';
+    }
+  }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
     const v = payload.permission_hours_override;
@@ -181,6 +189,11 @@ const validateCreateEmployee = (payload = {}) => {
   if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
     const v = payload.esi_amount;
     result.esi_amount = v == null || v === '' ? 0 : Number(v);
+  }
+  result.pf_amount = 0;
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_amount')) {
+    const v = payload.pf_amount;
+    result.pf_amount = v == null || v === '' ? 0 : Number(v);
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
     const v = payload.permission_hours_override;
@@ -337,6 +350,16 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.esi_amount = 'ESI amount must be a non-negative number.';
     } else {
       clean.esi_amount = Number(v);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_amount')) {
+    const v = payload.pf_amount;
+    if (v == null || v === '') {
+      clean.pf_amount = 0;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.pf_amount = 'PF amount must be a non-negative number.';
+    } else {
+      clean.pf_amount = Number(v);
     }
   }
 

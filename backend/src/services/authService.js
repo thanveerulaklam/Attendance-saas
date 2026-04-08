@@ -318,12 +318,12 @@ async function changeAdminPassword(userId, companyId, currentPassword, newPasswo
   const userResult = await pool.query(
     `SELECT id, company_id, name, email, password, role
      FROM users
-     WHERE id = $1 AND company_id = $2 AND role = 'admin'
+     WHERE id = $1 AND company_id = $2 AND role IN ('admin', 'hr')
      LIMIT 1`,
     [userId, companyId]
   );
   if (userResult.rowCount === 0) {
-    throw new AppError('Admin user not found', 404);
+    throw new AppError('User not found or cannot change password for this role', 404);
   }
 
   const user = userResult.rows[0];
@@ -341,7 +341,7 @@ async function changeAdminPassword(userId, companyId, currentPassword, newPasswo
   await pool.query(
     `UPDATE users
      SET password = $1
-     WHERE id = $2 AND company_id = $3 AND role = 'admin'`,
+     WHERE id = $2 AND company_id = $3 AND role IN ('admin', 'hr')`,
     [passwordHash, user.id, user.company_id]
   );
 

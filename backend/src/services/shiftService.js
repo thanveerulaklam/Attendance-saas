@@ -1,5 +1,29 @@
 const { pool } = require('../config/database');
 
+async function fetchCompanyShiftPolicy(companyId) {
+  const r = await pool.query(
+    `SELECT hours_based_shifts_only, shifts_compact_ui FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  return r.rows[0] || { hours_based_shifts_only: false, shifts_compact_ui: false };
+}
+
+/** Tharagai-style: do not persist manual deduction / incentive columns; payroll uses worked hours. */
+function applyNeutralLegacyFieldsForCompact(parsed) {
+  return {
+    ...parsed,
+    uniqueWeeklyOff: [],
+    lateDeductionMinutes: 0,
+    lateDeductionAmount: 0,
+    lunchOverDeductionMinutes: 0,
+    lunchOverDeductionAmount: 0,
+    noLeaveIncentive: 0,
+    allowOvertime: false,
+    overtimeRatePerHour: 0,
+    overtimeRateMode: 'fixed',
+  };
+}
+
 async function listShifts(companyId, { page = 1, limit = 50 } = {}) {
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.min(100, Math.max(1, Number(limit) || 50));
@@ -55,12 +79,6 @@ async function createShift(companyId, data) {
     endTime,
     graceMinutes,
     lunchMinutes,
-    uniqueWeeklyOff,
-    lateDeductionMinutes,
-    lateDeductionAmount,
-    lunchOverDeductionMinutes,
-    lunchOverDeductionAmount,
-    noLeaveIncentive,
     paidLeaveDays,
     attendanceMode,
     monthlyPermissionHours,
@@ -77,6 +95,17 @@ async function createShift(companyId, data) {
     error.statusCode = 400;
     throw error;
   }
+
+  const policy = await fetchCompanyShiftPolicy(companyId);
+  if (policy.hours_based_shifts_only === true && attendanceMode !== 'hours_based') {
+    const err = new Error(
+      'This company only allows hours-based shifts. Change attendance mode to Hours based or contact support.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+  const parsedForDb =
+    policy.shifts_compact_ui === true ? applyNeutralLegacyFieldsForCompact(parsed) : parsed;
 
   const result = await pool.query(
     `INSERT INTO shifts (
@@ -134,12 +163,12 @@ async function createShift(companyId, data) {
       endTime,
       graceMinutes,
       lunchMinutes,
-      uniqueWeeklyOff,
-      lateDeductionMinutes,
-      lateDeductionAmount,
-      lunchOverDeductionMinutes,
-      lunchOverDeductionAmount,
-      noLeaveIncentive,
+      parsedForDb.uniqueWeeklyOff,
+      parsedForDb.lateDeductionMinutes,
+      parsedForDb.lateDeductionAmount,
+      parsedForDb.lunchOverDeductionMinutes,
+      parsedForDb.lunchOverDeductionAmount,
+      parsedForDb.noLeaveIncentive,
       paidLeaveDays,
       attendanceMode,
       monthlyPermissionHours,
@@ -276,6 +305,17 @@ async function updateShift(companyId, shiftId, data) {
     throw error;
   }
 
+  const policy = await fetchCompanyShiftPolicy(companyId);
+  if (policy.hours_based_shifts_only === true && parsed.attendanceMode !== 'hours_based') {
+    const err = new Error(
+      'This company only allows hours-based shifts. Change attendance mode to Hours based or contact support.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+  const parsedForDb =
+    policy.shifts_compact_ui === true ? applyNeutralLegacyFieldsForCompact(parsed) : parsed;
+
   const result = await pool.query(
     `UPDATE shifts SET
        shift_name = $2,
@@ -325,26 +365,26 @@ async function updateShift(companyId, shiftId, data) {
        created_at`,
     [
       companyId,
-      parsed.name,
-      parsed.startTime,
-      parsed.endTime,
-      parsed.graceMinutes,
-      parsed.lunchMinutes,
-      parsed.uniqueWeeklyOff,
-      parsed.lateDeductionMinutes,
-      parsed.lateDeductionAmount,
-      parsed.lunchOverDeductionMinutes,
-      parsed.lunchOverDeductionAmount,
-      parsed.noLeaveIncentive,
-      parsed.paidLeaveDays,
-      parsed.attendanceMode,
-      parsed.requiredHoursPerDay,
-      parsed.halfDayHours,
-      parsed.fullDayHours,
-      parsed.monthlyPermissionHours,
-      parsed.allowOvertime,
-      parsed.overtimeRatePerHour,
-      parsed.overtimeRateMode,
+      parsedForDb.name,
+      parsedForDb.startTime,
+      parsedForDb.endTime,
+      parsedForDb.graceMinutes,
+      parsedForDb.lunchMinutes,
+      parsedForDb.uniqueWeeklyOff,
+      parsedForDb.lateDeductionMinutes,
+      parsedForDb.lateDeductionAmount,
+      parsedForDb.lunchOverDeductionMinutes,
+      parsedForDb.lunchOverDeductionAmount,
+      parsedForDb.noLeaveIncentive,
+      parsedForDb.paidLeaveDays,
+      parsedForDb.attendanceMode,
+      parsedForDb.requiredHoursPerDay,
+      parsedForDb.halfDayHours,
+      parsedForDb.fullDayHours,
+      parsedForDb.monthlyPermissionHours,
+      parsedForDb.allowOvertime,
+      parsedForDb.overtimeRatePerHour,
+      parsedForDb.overtimeRateMode,
       shiftId,
     ]
   );

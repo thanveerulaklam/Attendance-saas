@@ -117,13 +117,37 @@ test('permission offset: partial cover uses all allocated minutes', () => {
   const result = computePermissionOffset({
     allocatedHours: 2, // 120 min
     lateMinutes: 30,
-    absenceDays: 0.5, // 240 min
+    absenceDays: 0.5, // 240 min at default 8h/day
     hourlyRate: 100,
     deductionsBeforeOffset: 2000,
   });
 
   assert.equal(result.usedMinutes, 120);
   assert.equal(result.offsetAmount, 200); // 2h * 100
+});
+
+test('permission offset: absence-day hours follow workDayHoursForPermission (hours_based shift length)', () => {
+  const allocatedMinutes = 5 * 60; // 5h pool
+  const withEight = computePermissionOffset({
+    allocatedHours: 5,
+    lateMinutes: 0,
+    absenceDays: 0.5,
+    hourlyRate: 100,
+    deductionsBeforeOffset: 5000,
+    workDayHoursForPermission: 8,
+  });
+  assert.equal(withEight.usedMinutes, 0.5 * 8 * 60);
+
+  const withTen = computePermissionOffset({
+    allocatedHours: 5,
+    lateMinutes: 0,
+    absenceDays: 0.5,
+    hourlyRate: 100,
+    deductionsBeforeOffset: 5000,
+    workDayHoursForPermission: 10,
+  });
+  assert.equal(withTen.usedMinutes, allocatedMinutes); // eligible 300 min, pool 300 min
+  assert.equal(withTen.offsetAmount, 500);
 });
 
 test('permission offset: full cover capped by available deductions', () => {

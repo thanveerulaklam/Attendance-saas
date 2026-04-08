@@ -46,6 +46,16 @@ function getMonthBounds(year, month) {
   return { start, end, daysInMonth };
 }
 
+/** Company policy: zero shift PL allowance when rawAbsenceDays exceeds threshold. */
+function effectivePaidLeaveDaysAllowed(shiftPaidLeaveDays, rawAbsenceDays, forfeitIfAbsenceGt) {
+  let allowed = Number(shiftPaidLeaveDays || 0);
+  const th = forfeitIfAbsenceGt;
+  if (th != null && th !== '' && Number.isFinite(Number(th)) && Number(rawAbsenceDays) > Number(th)) {
+    allowed = 0;
+  }
+  return allowed;
+}
+
 function rowToShiftConfig(row) {
   const [startHour, startMinute] = row.start_time.split(':').map(Number);
   const [endHour, endMinute] = row.end_time.split(':').map(Number);
@@ -254,6 +264,13 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
 
+    const companyPlResult = await client.query(
+      `SELECT paid_leave_forfeit_if_absence_gt, shifts_compact_ui FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    const plForfeitIfAbsenceGt = companyPlResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
+    const shiftsCompactUi = companyPlResult.rows[0]?.shifts_compact_ui === true;
+
     const needOvernightRange =
       shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
     const rangeStart = needOvernightRange
@@ -335,6 +352,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const dayDetails = [];
 
       let rawAbsenceDays = 0;
+      let rawAbsenceHours = 0;
       let overtimeHours = 0;
 
       // Iterate every calendar day up to lastDateToConsider so working days with no punches
@@ -350,6 +368,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         if (!dayLogs.length) {
           if (!isHoliday) {
             rawAbsenceDays += 1;
+            if (shiftsCompactUi) rawAbsenceHours += required;
             dayDetails.push({
               date: dayKey,
               firstInTime: null,
@@ -364,14 +383,22 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
         const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
         const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
+        const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
         let presentFraction = 0;
         let statusLabel = 'absent';
 
         if (hoursInside >= required) {
+          overtimeHours += hoursInside - required;
+        }
+        if (shiftsCompactUi) {
+          // Compact mode (Tharagai): attendance + leave are hour-ratio based.
+          presentFraction = required > 0 ? workedHoursCapped / required : 0;
+          if (presentFraction >= 1) statusLabel = 'present';
+          else if (presentFraction > 0) statusLabel = 'partial_day';
+        } else if (hoursInside >= required) {
           presentFraction = 1;
           statusLabel = 'present';
-          overtimeHours += hoursInside - required;
         } else if (hoursInside >= required * 0.5) {
           presentFraction = 0.5;
           statusLabel = 'half_day';
@@ -411,12 +438,15 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           presentDays += presentFraction;
           if (!isHoliday) {
             presentWorkingDays += presentFraction;
-            if (presentFraction === 0.5) {
+            if (!shiftsCompactUi && presentFraction === 0.5) {
               halfDayDays += 1;
             }
           }
         } else if (!isHoliday) {
           rawAbsenceDays += 1;
+        }
+        if (!isHoliday && shiftsCompactUi) {
+          rawAbsenceHours += Math.max(0, required - workedHoursCapped);
         }
 
         dayDetails.push({
@@ -451,10 +481,35 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
       }
 
-      // For hours_based, rawAbsenceDays is already tracked per working day (non-holiday).
-      const paidLeaveDaysAllowed = Number(shift.paidLeaveDays || 0);
-      const paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
-      const absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+      let paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+        shift.paidLeaveDays,
+        rawAbsenceDays,
+        plForfeitIfAbsenceGt
+      );
+      let paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
+      let absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+      if (shiftsCompactUi) {
+        // Compact mode: apply shift paid leave as hours against total shortfall hours.
+        const rawAbsenceDaysByHours = required > 0 ? rawAbsenceHours / required : 0;
+        paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+          shift.paidLeaveDays,
+          rawAbsenceDaysByHours,
+          plForfeitIfAbsenceGt
+        );
+        const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * required);
+        const paidLeaveHoursUsed = Math.min(paidLeaveHoursAllowed, rawAbsenceHours);
+        paidLeaveUsed = required > 0 ? paidLeaveHoursUsed / required : 0;
+        absenceDays = required > 0 ? Math.max(0, rawAbsenceHours - paidLeaveHoursUsed) / required : 0;
+        rawAbsenceDays = rawAbsenceDaysByHours;
+      }
+      const unusedPaidLeaveDaysRaw = Math.max(
+        0,
+        Number(paidLeaveDaysAllowed || 0) - Number(paidLeaveUsed || 0)
+      );
+      const unusedPaidLeaveHoursRaw = Math.max(0, unusedPaidLeaveDaysRaw * required);
+      const unusedPaidLeaveDays = Number(unusedPaidLeaveDaysRaw.toFixed(2));
+      const unusedPaidLeaveHours = Number(unusedPaidLeaveHoursRaw.toFixed(2));
+      const unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
 
       const overtimeHoursFinal = overtimeHours;
       const lateMinutes = totalLateMs / (60 * 1000);
@@ -479,6 +534,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         noLeaveIncentiveFromShift: shift.noLeaveIncentive,
         paidLeaveDaysAllowed,
         paidLeaveUsed,
+        unusedPaidLeaveDays,
+        unusedPaidLeaveHours,
+        unusedPaidLeaveMinutes,
         rawAbsenceDays,
         absenceDays,
         attendanceMode: 'hours_based',
@@ -561,9 +619,27 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     // Apply per-shift paid leave allowance: some companies allow a fixed number of paid leave
     // days per month (no salary loss). Treat up to paidLeaveDays as non-absence for payroll.
-    const paidLeaveDaysAllowed = Number(shift.paidLeaveDays || 0);
+    const paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+      shift.paidLeaveDays,
+      rawAbsenceDays,
+      plForfeitIfAbsenceGt
+    );
     const paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
     const absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+    const unusedPaidLeaveDaysRaw = Math.max(
+      0,
+      Number(paidLeaveDaysAllowed || 0) - Number(paidLeaveUsed || 0)
+    );
+    const unusedPaidLeaveHoursRaw = Math.max(
+      0,
+      unusedPaidLeaveDaysRaw *
+        (shift.attendanceMode === 'hours_based'
+          ? Number(shift.requiredHoursPerDay || 8)
+          : 24)
+    );
+    const unusedPaidLeaveDays = Number(unusedPaidLeaveDaysRaw.toFixed(2));
+    const unusedPaidLeaveHours = Number(unusedPaidLeaveHoursRaw.toFixed(2));
+    const unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
 
     const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
     const lateMinutes = totalLateMs / (60 * 1000);
@@ -589,6 +665,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       noLeaveIncentiveFromShift: shift.noLeaveIncentive,
       paidLeaveDaysAllowed,
       paidLeaveUsed,
+      unusedPaidLeaveDays,
+      unusedPaidLeaveHours,
+      unusedPaidLeaveMinutes,
       rawAbsenceDays,
       absenceDays,
       attendanceMode: shift.attendanceMode || 'day_based',
@@ -671,6 +750,13 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
 
+    const companyPlRangeResult = await client.query(
+      `SELECT paid_leave_forfeit_if_absence_gt, shifts_compact_ui FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    const plForfeitIfAbsenceGtRange = companyPlRangeResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
+    const shiftsCompactUi = companyPlRangeResult.rows[0]?.shifts_compact_ui === true;
+
     const needOvernightRange =
       shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
     const rangeStart = needOvernightRange ? addDays(startStr, -1) : startStr;
@@ -720,6 +806,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     let lunchOverDays = 0;
     let halfDayDays = 0;
     let totalOvertimeMs = 0;
+    let rawAbsenceHours = 0;
 
     const presentDayKeys = new Set();
     const dayDetails = [];
@@ -754,13 +841,20 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
         const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
+        const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
         let presentFraction = 0;
         let statusLabel = 'absent';
         if (hoursInside >= required) {
+          totalOvertimeMs += (hoursInside - required) * 60 * 60 * 1000;
+        }
+        if (shiftsCompactUi) {
+          presentFraction = required > 0 ? workedHoursCapped / required : 0;
+          if (presentFraction >= 1) statusLabel = 'present';
+          else if (presentFraction > 0) statusLabel = 'partial_day';
+        } else if (hoursInside >= required) {
           presentFraction = 1;
           statusLabel = 'present';
-          totalOvertimeMs += (hoursInside - required) * 60 * 60 * 1000;
         } else if (hoursInside >= required * 0.5) {
           presentFraction = 0.5;
           statusLabel = 'half_day';
@@ -794,7 +888,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           presentDays += presentFraction;
           if (!isHoliday) {
             presentWorkingDays += presentFraction;
-            if (presentFraction === 0.5) {
+            if (!shiftsCompactUi && presentFraction === 0.5) {
               halfDayDays += 1;
             }
           }
@@ -804,6 +898,9 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         // Track workingDays for absence math (non-holidays only)
         if (!isHoliday) workingDays += 1;
+        if (!isHoliday && shiftsCompactUi) {
+          rawAbsenceHours += Math.max(0, required - workedHoursCapped);
+        }
 
         dayDetails.push({
           date: dayKey,
@@ -907,10 +1004,40 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
     }
 
-    const rawAbsenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
-    const paidLeaveDaysAllowed = disablePaidLeave ? 0 : Number(shift.paidLeaveDays || 0);
-    const paidLeaveUsed = disablePaidLeave ? 0 : Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
-    const absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+    let rawAbsenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
+    let paidLeaveDaysAllowed = disablePaidLeave
+      ? 0
+      : effectivePaidLeaveDaysAllowed(shift.paidLeaveDays, rawAbsenceDays, plForfeitIfAbsenceGtRange);
+    let paidLeaveUsed = disablePaidLeave ? 0 : Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
+    let absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+    if (shiftsCompactUi && shift.attendanceMode === 'hours_based' && disablePaidLeave !== true) {
+      const required = Number(shift.requiredHoursPerDay || 8);
+      const rawAbsenceDaysByHours = required > 0 ? rawAbsenceHours / required : 0;
+      paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+        shift.paidLeaveDays,
+        rawAbsenceDaysByHours,
+        plForfeitIfAbsenceGtRange
+      );
+      const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * required);
+      const paidLeaveHoursUsed = Math.min(paidLeaveHoursAllowed, rawAbsenceHours);
+      paidLeaveUsed = required > 0 ? paidLeaveHoursUsed / required : 0;
+      absenceDays = required > 0 ? Math.max(0, rawAbsenceHours - paidLeaveHoursUsed) / required : 0;
+      rawAbsenceDays = rawAbsenceDaysByHours;
+    }
+    const unusedPaidLeaveDaysRaw = Math.max(
+      0,
+      Number(paidLeaveDaysAllowed || 0) - Number(paidLeaveUsed || 0)
+    );
+    const unusedPaidLeaveHoursRaw = Math.max(
+      0,
+      unusedPaidLeaveDaysRaw *
+        (shift.attendanceMode === 'hours_based'
+          ? Number(shift.requiredHoursPerDay || 8)
+          : 24)
+    );
+    const unusedPaidLeaveDays = Number(unusedPaidLeaveDaysRaw.toFixed(2));
+    const unusedPaidLeaveHours = Number(unusedPaidLeaveHoursRaw.toFixed(2));
+    const unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
 
     const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
     const lateMinutes = totalLateMs / (60 * 1000);
@@ -942,6 +1069,9 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       noLeaveIncentiveFromShift: disablePaidLeave ? 0 : shift.noLeaveIncentive,
       paidLeaveDaysAllowed,
       paidLeaveUsed,
+      unusedPaidLeaveDays,
+      unusedPaidLeaveHours,
+      unusedPaidLeaveMinutes,
       rawAbsenceDays,
       absenceDays,
       attendanceMode: shift.attendanceMode || 'day_based',
@@ -994,7 +1124,7 @@ async function generateWeeklyPayroll(
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, daily_travel_allowance, esi_amount, salary_type
+      `SELECT id, basic_salary, status, daily_travel_allowance, esi_amount, pf_amount, salary_type
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1086,7 +1216,8 @@ async function generateWeeklyPayroll(
     }
 
     const esiDeduction = shouldDeductEsi ? Number(employee.esi_amount || 0) : 0;
-    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+    const pfDeduction = shouldDeductEsi ? Number(employee.pf_amount || 0) : 0;
+    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
 
     const salaryAdvanceBase = applySalaryAdvances
       ? await getAdvanceForEmployeeMonth(companyId, employeeId, endYear, endMonth)
@@ -1394,7 +1525,7 @@ async function getWeeklyPayrollBreakdown(
   const isWeekComplete = !isCurrentWeek || todayStr >= weekEnd;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, salary_type
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, pf_amount, salary_type
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -1483,9 +1614,10 @@ async function getWeeklyPayrollBreakdown(
   const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
   const shouldDeductEsi = weekEnd === monthLastDayStr;
   const esiDeduction = shouldDeductEsi ? Number(employee.esi_amount || 0) : 0;
+  const pfDeduction = shouldDeductEsi ? Number(employee.pf_amount || 0) : 0;
 
   const grossSalary = earnedBasic + overtimePay + travelAllowance;
-  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
 
   // Weekly payroll records currently don't store permission allocation/offset fields,
   // so for payslip breakdown we show permission offset as zero.
@@ -1548,6 +1680,7 @@ async function getWeeklyPayrollBreakdown(
       lateDeduction,
       lunchOverDeduction,
       esiDeduction,
+      pfDeduction,
       permissionHoursAllocated,
       permissionMinutesUsed,
       permissionOffsetAmount,
@@ -1585,7 +1718,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, payroll_frequency, salary_type, permission_hours_override
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, pf_amount, payroll_frequency, salary_type, permission_hours_override
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1636,6 +1769,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
     const hourlyRate =
       shiftHoursForHourlyConversion > 0 ? dailyRate / shiftHoursForHourlyConversion : dailyRate / 8;
+    const workDayHoursForPermission =
+      shiftHoursForHourlyConversion > 0 ? shiftHoursForHourlyConversion : 8;
 
     const lastDayOfMonth = new Date(year, month, 0).getDate();
     const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
@@ -1707,7 +1842,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentAmount;
     const esiDeduction = Number(employee.esi_amount || 0);
-    const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+    const pfDeduction = Number(employee.pf_amount || 0);
+    const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
     const effectivePermissionHours =
       employee.permission_hours_override != null
         ? Number(employee.permission_hours_override || 0)
@@ -1718,6 +1854,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       absenceDays: summary.absenceDays,
       hourlyRate,
       deductionsBeforeOffset: deductionsBeforePermission,
+      workDayHoursForPermission,
     });
     const deductions = deductionsBeforePermission - permissionOffset.offsetAmount;
     const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
@@ -1890,7 +2027,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, shift_id, salary_type, permission_hours_override
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, pf_amount, shift_id, salary_type, permission_hours_override
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -1943,6 +2080,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     shiftHoursForHourlyConversion > 0
       ? dailyRate / shiftHoursForHourlyConversion
       : dailyRate / 8;
+  const workDayHoursForPermission =
+    shiftHoursForHourlyConversion > 0 ? shiftHoursForHourlyConversion : 8;
 
   const lastDayOfMonth = new Date(year, month, 0).getDate();
   const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
@@ -2013,13 +2152,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentComputed;
   const esiDeduction = Number(employee.esi_amount || 0);
-  const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction;
+  const pfDeduction = Number(employee.pf_amount || 0);
+  const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
   const permissionOffsetComputed = computePermissionOffset({
     allocatedHours: effectivePermissionHours,
     lateMinutes: summary.lateMinutes,
     absenceDays: summary.absenceDays,
     hourlyRate,
     deductionsBeforeOffset: deductionsBeforePermission,
+    workDayHoursForPermission,
   });
   const permissionHoursAllocated =
     existingPayrollResult.rowCount > 0
@@ -2136,6 +2277,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       lateDeduction,
       lunchOverDeduction,
       esiDeduction,
+      pfDeduction,
       permissionHoursAllocated,
       permissionMinutesUsed,
       permissionOffsetAmount,

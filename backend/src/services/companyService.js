@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { AppError } = require('../utils/AppError');
 
 /**
  * Next AMC due date:
@@ -40,6 +41,7 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   employee_limit_override, branch_limit_override,
   onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
   onetime_payment_status, amc_payment_status, last_onetime_payment_date,
+  hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
   created_at`;
 
 async function getCompanyById(companyId) {
@@ -103,8 +105,23 @@ function isSubscriptionAllowed(company) {
 }
 
 async function updateCompany(companyId, data) {
-  const allowedFields = ['name', 'phone', 'address'];
-  const entries = Object.entries(data || {}).filter(
+  const allowedFields = ['name', 'phone', 'address', 'paid_leave_forfeit_if_absence_gt'];
+  const raw = data || {};
+  const normalized = { ...raw };
+  if (Object.prototype.hasOwnProperty.call(normalized, 'paid_leave_forfeit_if_absence_gt')) {
+    const v = normalized.paid_leave_forfeit_if_absence_gt;
+    if (v === '' || v === null || typeof v === 'undefined') {
+      normalized.paid_leave_forfeit_if_absence_gt = null;
+    } else {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0 || n > 31) {
+        throw new AppError('paid_leave_forfeit_if_absence_gt must be between 0 and 31, or empty', 400);
+      }
+      normalized.paid_leave_forfeit_if_absence_gt = Math.round(n);
+    }
+  }
+
+  const entries = Object.entries(normalized).filter(
     ([key, value]) => allowedFields.includes(key) && typeof value !== 'undefined'
   );
 

@@ -25,6 +25,7 @@ export default function EmployeeFormModal({
   const [esiNumber, setEsiNumber] = useState('');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
+  const [pfAmount, setPfAmount] = useState('');
   const [permissionHoursOverride, setPermissionHoursOverride] = useState('');
   const [joinDate, setJoinDate] = useState('');
   const [status, setStatus] = useState('active');
@@ -84,6 +85,9 @@ export default function EmployeeFormModal({
         setEsiAmount(
           employee.esi_amount != null ? String(employee.esi_amount) : ''
         );
+        setPfAmount(
+          employee.pf_amount != null ? String(employee.pf_amount) : ''
+        );
         setPermissionHoursOverride(
           employee.permission_hours_override != null
             ? String(employee.permission_hours_override)
@@ -113,6 +117,7 @@ export default function EmployeeFormModal({
         setBasicSalary('');
         setDailyTravelAllowance('');
         setEsiAmount('');
+        setPfAmount('');
         setPermissionHoursOverride('');
         setJoinDate('');
         setStatus('active');
@@ -168,6 +173,9 @@ export default function EmployeeFormModal({
 
     if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
       nextErrors.esiAmount = 'ESI amount must be 0 or more';
+    }
+    if (pfAmount.trim() !== '' && (Number.isNaN(Number(pfAmount)) || Number(pfAmount) < 0)) {
+      nextErrors.pfAmount = 'PF amount must be 0 or more';
     }
     if (
       permissionHoursOverride.trim() !== '' &&
@@ -232,6 +240,7 @@ export default function EmployeeFormModal({
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
         esi_amount: esiAmount.trim() === '' ? 0 : Number(esiAmount),
+        pf_amount: pfAmount.trim() === '' ? 0 : Number(pfAmount),
         permission_hours_override:
           permissionHoursOverride.trim() === '' ? null : Number(permissionHoursOverride),
         join_date: joinDate,
@@ -552,6 +561,27 @@ export default function EmployeeFormModal({
             </p>
             {errors.esiAmount && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.esiAmount}</p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              PF (optional) (monthly deduction) (₹)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={pfAmount}
+                onChange={(e) => setPfAmount(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                placeholder="0 — deducted every month from salary"
+              />
+            </label>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Optional PF deduction for this employee, applied every month in payroll.
+            </p>
+            {errors.pfAmount && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.pfAmount}</p>
             )}
           </div>
 

@@ -80,6 +80,7 @@ async function updateCurrentCompany(req, res, next) {
       name: req.body.name,
       phone: req.body.phone,
       address: req.body.address,
+      paid_leave_forfeit_if_absence_gt: req.body.paid_leave_forfeit_if_absence_gt,
     });
 
     if (!updated) {

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { authFetch } from '../utils/api';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-function sanitizeShiftBody(form) {
+/** @param {boolean} shiftPayloadCompact — Tharagai Readymades (`companies.shifts_compact_ui`): omit manual deduction fields from payload. */
+function sanitizeShiftBody(form, shiftPayloadCompact) {
   const body = { ...form };
   if (body.full_day_hours === '' || body.full_day_hours === undefined || body.full_day_hours === null) {
     body.full_day_hours = null;
@@ -11,31 +12,45 @@ function sanitizeShiftBody(form) {
     const n = Number(body.full_day_hours);
     body.full_day_hours = Number.isFinite(n) ? n : null;
   }
+  if (shiftPayloadCompact) {
+    body.weekly_off_days = [];
+    body.late_deduction_minutes = 0;
+    body.late_deduction_amount = 0;
+    body.lunch_over_deduction_minutes = 0;
+    body.lunch_over_deduction_amount = 0;
+    body.no_leave_incentive = 0;
+    body.allow_overtime = false;
+    body.overtime_rate_per_hour = 0;
+    body.overtime_rate_mode = 'fixed';
+  }
   return body;
 }
 
-const emptyForm = () => ({
-  shift_name: '',
-  start_time: '09:00',
-  end_time: '18:00',
-  grace_minutes: 0,
-  lunch_minutes: 60,
-  weekly_off_days: [],
-  late_deduction_minutes: 0,
-  late_deduction_amount: 0,
-  lunch_over_deduction_minutes: 0,
-  lunch_over_deduction_amount: 0,
-  no_leave_incentive: 0,
-  paid_leave_days: 0,
-  attendance_mode: 'day_based',
-  required_hours_per_day: 8,
-  half_day_hours: 0,
-  full_day_hours: null,
-  monthly_permission_hours: 0,
-  allow_overtime: true,
-  overtime_rate_per_hour: 0,
-  overtime_rate_mode: 'fixed',
-});
+/** @param {boolean} compact — matches `companies.shifts_compact_ui` (Tharagai-style simplified shifts). */
+function getEmptyForm(compact) {
+  return {
+    shift_name: '',
+    start_time: '09:00',
+    end_time: '18:00',
+    grace_minutes: 0,
+    lunch_minutes: 60,
+    weekly_off_days: [],
+    late_deduction_minutes: 0,
+    late_deduction_amount: 0,
+    lunch_over_deduction_minutes: 0,
+    lunch_over_deduction_amount: 0,
+    no_leave_incentive: 0,
+    paid_leave_days: compact ? 3 : 0,
+    attendance_mode: 'day_based',
+    required_hours_per_day: 8,
+    half_day_hours: 0,
+    full_day_hours: null,
+    monthly_permission_hours: 0,
+    allow_overtime: true,
+    overtime_rate_per_hour: 0,
+    overtime_rate_mode: 'fixed',
+  };
+}
 
 export default function ShiftsPage() {
   const [shifts, setShifts] = useState([]);
@@ -45,7 +60,15 @@ export default function ShiftsPage() {
   const [editingShift, setEditingShift] = useState(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
-  const [form, setForm] = useState(emptyForm());
+  const [form, setForm] = useState(() => getEmptyForm(false));
+  const [company, setCompany] = useState(null);
+  const hoursBasedOnly = company?.hours_based_shifts_only === true;
+  /** Tharagai Readymades (and any company with `shifts_compact_ui`): simplified shifts + neutral legacy columns server-side. */
+  const shiftsCompactUi = company?.shifts_compact_ui === true;
+  /** Company policy: absent days above this → paid leave from shift not applied (editable). */
+  const [plForfeitGt, setPlForfeitGt] = useState('');
+  const [savingPlPolicy, setSavingPlPolicy] = useState(false);
+  const syncedDefaultPaidLeaveForCompanyId = useRef(null);
 
   const loadShifts = async () => {
     try {
@@ -68,12 +91,71 @@ export default function ShiftsPage() {
     loadShifts();
   }, []);
 
-  const toggleFormWeeklyOff = (dayNum) => {
-    const current = form.weekly_off_days || [];
-    const next = current.includes(dayNum)
-      ? current.filter((d) => d !== dayNum)
-      : [...current, dayNum].sort((a, b) => a - b);
-    setForm((prev) => ({ ...prev, weekly_off_days: next }));
+  useEffect(() => {
+    let mounted = true;
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (mounted && json?.data) setCompany(json.data);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    syncedDefaultPaidLeaveForCompanyId.current = null;
+  }, [company?.id]);
+
+  useEffect(() => {
+    if (hoursBasedOnly && !editingShift) {
+      setForm((prev) => ({ ...prev, attendance_mode: 'hours_based' }));
+    }
+  }, [hoursBasedOnly, editingShift]);
+
+  useEffect(() => {
+    if (!company?.id || editingShift) return;
+    if (syncedDefaultPaidLeaveForCompanyId.current === company.id) return;
+    syncedDefaultPaidLeaveForCompanyId.current = company.id;
+    setForm((prev) => ({ ...prev, paid_leave_days: shiftsCompactUi ? 3 : 0 }));
+  }, [company?.id, shiftsCompactUi, editingShift]);
+
+  useEffect(() => {
+    if (!company) return;
+    const v = company.paid_leave_forfeit_if_absence_gt;
+    if (v === null || v === undefined || v === '') {
+      setPlForfeitGt('6');
+    } else {
+      setPlForfeitGt(String(v));
+    }
+  }, [company]);
+
+  const savePaidLeaveCompanyPolicy = async () => {
+    try {
+      setSavingPlPolicy(true);
+      setError(null);
+      const raw = String(plForfeitGt).trim();
+      const body =
+        raw === ''
+          ? { paid_leave_forfeit_if_absence_gt: null }
+          : { paid_leave_forfeit_if_absence_gt: Number(raw) };
+      const res = await authFetch('/api/company', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message || 'Failed to save policy');
+      }
+      const json = await res.json();
+      if (json?.data) setCompany(json.data);
+    } catch (err) {
+      setError(err.message || 'Failed to save policy');
+    } finally {
+      setSavingPlPolicy(false);
+    }
   };
 
   const handleFullDayHoursChange = (event) => {
@@ -84,6 +166,14 @@ export default function ShiftsPage() {
     }
     const n = Number(v);
     setForm((prev) => ({ ...prev, full_day_hours: Number.isFinite(n) ? n : prev.full_day_hours }));
+  };
+
+  const toggleFormWeeklyOff = (dayNum) => {
+    const current = form.weekly_off_days || [];
+    const next = current.includes(dayNum)
+      ? current.filter((d) => d !== dayNum)
+      : [...current, dayNum].sort((a, b) => a - b);
+    setForm((prev) => ({ ...prev, weekly_off_days: next }));
   };
 
   const handleChange = (field) => (event) => {
@@ -116,10 +206,10 @@ export default function ShiftsPage() {
       const res = await authFetch('/api/shifts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sanitizeShiftBody(form)),
+        body: JSON.stringify(sanitizeShiftBody(form, shiftsCompactUi)),
       });
       if (!res.ok) throw new Error('Failed to create shift');
-      setForm(emptyForm());
+      setForm(getEmptyForm(shiftsCompactUi));
       await loadShifts();
     } catch (err) {
       setError(err.message || 'Failed to create shift');
@@ -129,6 +219,9 @@ export default function ShiftsPage() {
   };
 
   const startEdit = (shift) => {
+    const resolvedMode = company?.hours_based_shifts_only
+      ? 'hours_based'
+      : shift.attendance_mode || 'day_based';
     setForm({
       shift_name: shift.shift_name || '',
       start_time: (shift.start_time || '09:00').slice(0, 5),
@@ -142,7 +235,7 @@ export default function ShiftsPage() {
       lunch_over_deduction_amount: shift.lunch_over_deduction_amount ?? 0,
       no_leave_incentive: shift.no_leave_incentive ?? 0,
       paid_leave_days: shift.paid_leave_days ?? 0,
-      attendance_mode: shift.attendance_mode || 'day_based',
+      attendance_mode: resolvedMode,
       required_hours_per_day: shift.required_hours_per_day ?? 8,
       half_day_hours: shift.half_day_hours ?? 0,
       full_day_hours:
@@ -160,7 +253,7 @@ export default function ShiftsPage() {
 
   const cancelEdit = () => {
     setEditingShift(null);
-    setForm(emptyForm());
+    setForm(getEmptyForm(shiftsCompactUi));
   };
 
   const handleUpdate = async (e) => {
@@ -172,11 +265,11 @@ export default function ShiftsPage() {
       const res = await authFetch(`/api/shifts/${editingShift.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sanitizeShiftBody(form)),
+        body: JSON.stringify(sanitizeShiftBody(form, shiftsCompactUi)),
       });
       if (!res.ok) throw new Error('Failed to update shift');
       setEditingShift(null);
-      setForm(emptyForm());
+      setForm(getEmptyForm(shiftsCompactUi));
       await loadShifts();
     } catch (err) {
       setError(err.message || 'Failed to update shift');
@@ -208,6 +301,13 @@ export default function ShiftsPage() {
         <p className="text-xs text-slate-500">
           Define standard working hours and grace time for your factory.
         </p>
+        {shiftsCompactUi && (
+          <p className="mt-1 text-[10px] text-slate-500 max-w-xl">
+            Compact shifts for this company (e.g. Tharagai Readymades): weekly-off, late, no-leave incentive, and
+            lunch-over deductions are hidden and not saved—payroll follows worked hours. Other companies still see the
+            full shift form.
+          </p>
+        )}
       </header>
 
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft transition-shadow duration-200 hover:shadow-md">
@@ -231,7 +331,14 @@ export default function ShiftsPage() {
                 <p className="text-[10px] text-slate-500">
                   Choose how attendance is calculated for this shift.
                 </p>
+                {hoursBasedOnly && (
+                  <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-100 rounded px-2 py-1">
+                    This company uses <strong>hours-based</strong> shifts only.
+                  </p>
+                )}
                 <div className="flex flex-col gap-1.5">
+                  {!hoursBasedOnly && (
+                    <>
                   <label className="inline-flex items-start gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -245,7 +352,10 @@ export default function ShiftsPage() {
                     <span className="text-[11px] text-slate-700">
                       <span className="font-medium">Day based</span>
                       <span className="block text-[10px] text-slate-500">
-                        Same calendar day: start and end fall on one IST date (e.g. 09:00–18:00). Late, lunch, and full-day rules use that day.
+                        Same calendar day: start and end fall on one IST date (e.g. 09:00–18:00).{' '}
+                        {shiftsCompactUi
+                          ? 'Lunch and full-day rules use that day.'
+                          : 'Late, lunch, and full-day rules use that day.'}
                       </span>
                     </span>
                   </label>
@@ -266,6 +376,8 @@ export default function ShiftsPage() {
                       </span>
                     </span>
                   </label>
+                    </>
+                  )}
                   <label className="inline-flex items-start gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -437,6 +549,7 @@ export default function ShiftsPage() {
                   </p>
                 </div>
               )}
+              {!shiftsCompactUi && (
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">
                   Overtime configuration
@@ -490,116 +603,174 @@ export default function ShiftsPage() {
                   />
                 </div>
               </div>
+              )}
 
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">
-                  Holidays (weekly off) — paid, no loss of pay
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  Select which weekdays are off for this shift (e.g. Sunday).
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {WEEKDAY_LABELS.map((label, dayNum) => (
-                    <label
-                      key={dayNum}
-                      className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 cursor-pointer hover:border-primary-200 hover:bg-primary-50/50 has-[:checked]:border-primary-300 has-[:checked]:bg-primary-50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={(form.weekly_off_days || []).includes(dayNum)}
-                        onChange={() => toggleFormWeeklyOff(dayNum)}
-                        disabled={creating}
-                        className="rounded border-slate-300 text-primary-600 focus:ring-primary-300"
-                      />
-                      <span className="text-[11px] font-medium text-slate-700">{label}</span>
+              {shiftsCompactUi ? (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-3">
+                  <div>
+                    <p className="text-[11px] font-medium text-slate-700">Paid leave</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Payroll follows worked hours. Prescribed days apply when absence rules are met; company policy below
+                      controls when paid leave is forfeited for high absence.
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Prescribed paid leave (days/month)
                     </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">
-                  Late arrival deduction (optional)
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  If staff punch IN late (after grace), deduct this fixed amount per late day (e.g. late 5 days = 5 × amount).
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Late minutes</label>
-                    <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
+                    <input
+                      type="number"
+                      min={0}
+                      max={31}
+                      value={form.paid_leave_days}
+                      onChange={handleChange('paid_leave_days')}
+                      disabled={creating}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                      placeholder="3"
+                    />
+                    <p className="text-[10px] text-slate-500">Saved with this shift. Default 3.</p>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
-                    <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+                  <div className="space-y-1 border-t border-slate-100 pt-2">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Paid leave forfeit — if absent days in a month exceed this number
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={31}
+                      value={plForfeitGt}
+                      onChange={(e) => setPlForfeitGt(e.target.value)}
+                      disabled={creating || savingPlPolicy}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                      placeholder="6"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Company-wide: paid leave from the shift is not applied when total absent days are above this (e.g. 6).
+                      Default 6. Save separately from the shift.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={savePaidLeaveCompanyPolicy}
+                      disabled={creating || savingPlPolicy}
+                      className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {savingPlPolicy ? 'Saving…' : 'Save company policy'}
+                    </button>
                   </div>
                 </div>
-              </div>
-
-              <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">
-                  No-leave incentive (optional)
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  Fixed incentive amount for staff who have zero absences in this shift for the month.
-                </p>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Incentive amount</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.no_leave_incentive}
-                    onChange={handleChange('no_leave_incentive')}
-                    disabled={creating}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="e.g. 500"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">
-                  Paid leave allowance (optional)
-                </p>
-                <p className="text-[10px] text-slate-500">
-                  For companies without a fixed weekly off, set how many days per month staff can
-                  take as paid leave (with salary). For example, set 4 to allow 4 paid leave days.
-                </p>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Paid leave days per month
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.paid_leave_days}
-                    onChange={handleChange('paid_leave_days')}
-                    disabled={creating}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="e.g. 4"
-                  />
-                </div>
-              </div>
-
-              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
-                <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                  <p className="text-[11px] font-medium text-slate-700">
-                    Lunch over deduction (optional)
-                  </p>
-                  <p className="text-[10px] text-slate-500">
-                    If staff take more than allotted lunch minutes, deduct this fixed amount per day (e.g. 3 days over = 3 × amount).
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-slate-700">Lunch over minutes</label>
-                      <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
-                      <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+              ) : (
+                <>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">
+                      Holidays (weekly off) — paid, no loss of pay
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Select which weekdays are off for this shift (e.g. Sunday).
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {WEEKDAY_LABELS.map((label, dayNum) => (
+                        <label
+                          key={dayNum}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 cursor-pointer hover:border-primary-200 hover:bg-primary-50/50 has-[:checked]:border-primary-300 has-[:checked]:bg-primary-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={(form.weekly_off_days || []).includes(dayNum)}
+                            onChange={() => toggleFormWeeklyOff(dayNum)}
+                            disabled={creating}
+                            className="rounded border-slate-300 text-primary-600 focus:ring-primary-300"
+                          />
+                          <span className="text-[11px] font-medium text-slate-700">{label}</span>
+                        </label>
+                      ))}
                     </div>
                   </div>
-                </div>
+
+                  <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">
+                      Late arrival deduction (optional)
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      If staff punch IN late (after grace), deduct this fixed amount per late day (e.g. late 5 days = 5 × amount).
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-slate-700">Late minutes</label>
+                        <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
+                        <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">
+                      No-leave incentive (optional)
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Fixed incentive amount for staff who have zero absences in this shift for the month.
+                    </p>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Incentive amount</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.no_leave_incentive}
+                        onChange={handleChange('no_leave_incentive')}
+                        disabled={creating}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                        placeholder="e.g. 500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">
+                      Paid leave allowance (optional)
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      For companies without a fixed weekly off, set how many days per month staff can
+                      take as paid leave (with salary). For example, set 4 to allow 4 paid leave days.
+                    </p>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">
+                        Paid leave days per month
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.paid_leave_days}
+                        onChange={handleChange('paid_leave_days')}
+                        disabled={creating}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                        placeholder="e.g. 4"
+                      />
+                    </div>
+                  </div>
+
+                  {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                    <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                      <p className="text-[11px] font-medium text-slate-700">
+                        Lunch over deduction (optional)
+                      </p>
+                      <p className="text-[10px] text-slate-500">
+                        If staff take more than allotted lunch minutes, deduct this fixed amount per day (e.g. 3 days over = 3 × amount).
+                      </p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-medium text-slate-700">Lunch over minutes</label>
+                          <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
+                          <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
             <div className="flex justify-end">
@@ -657,6 +828,7 @@ export default function ShiftsPage() {
                           {(shift.required_hours_per_day ?? 8)}h / day
                         </span>
                       )}
+                      {!shiftsCompactUi && (
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
                         shift.allow_overtime === false
                           ? 'bg-slate-100 text-slate-600'
@@ -668,6 +840,7 @@ export default function ShiftsPage() {
                             ? 'OT Auto'
                             : `OT ₹${shift.overtime_rate_per_hour ?? 0}/hr`}
                       </span>
+                      )}
                       {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') &&
                         Number(shift.half_day_hours || 0) > 0 && (
                           <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
@@ -736,49 +909,75 @@ export default function ShiftsPage() {
                           </dd>
                         </div>
                       )}
-                      {Array.isArray(shift.weekly_off_days) && shift.weekly_off_days.length > 0 ? (
-                        <div className="flex justify-between gap-2">
-                          <dt className="text-slate-500">Weekly off</dt>
-                          <dd className="font-medium text-slate-800 text-right">
-                            {shift.weekly_off_days.filter((d) => d >= 0 && d <= 6).map((d) => WEEKDAY_LABELS[d]).join(', ')}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {shift.no_leave_incentive != null && Number(shift.no_leave_incentive) > 0 ? (
-                        <div className="flex justify-between">
-                          <dt className="text-slate-500">No-leave incentive</dt>
-                          <dd className="font-medium text-emerald-700">
-                            {shift.no_leave_incentive}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {(shift.late_deduction_minutes != null && shift.late_deduction_minutes > 0) ||
-                      (shift.late_deduction_amount != null && shift.late_deduction_amount > 0) ? (
-                        <div className="flex justify-between">
-                          <dt className="text-slate-500">Late deduction</dt>
-                          <dd className="font-medium text-slate-800">
-                            {shift.late_deduction_minutes ?? 0} min → {shift.late_deduction_amount ?? 0}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {(shift.lunch_over_deduction_minutes != null && shift.lunch_over_deduction_minutes > 0) ||
-                      (shift.lunch_over_deduction_amount != null && shift.lunch_over_deduction_amount > 0) ? (
-                        <div className="flex justify-between">
-                          <dt className="text-slate-500">Lunch over deduction</dt>
-                          <dd className="font-medium text-slate-800">
-                            {shift.lunch_over_deduction_minutes ?? 0} min → {shift.lunch_over_deduction_amount ?? 0}
-                          </dd>
-                        </div>
-                      ) : null}
-                      {shift.paid_leave_days != null && Number(shift.paid_leave_days) > 0 ? (
-                        <div className="flex justify-between">
-                          <dt className="text-slate-500">Paid leave allowance</dt>
-                          <dd className="font-medium text-slate-800">
-                            {shift.paid_leave_days} day
-                            {Number(shift.paid_leave_days) === 1 ? '' : 's'} / month
-                          </dd>
-                        </div>
-                      ) : null}
+                      {shiftsCompactUi ? (
+                        <>
+                          {shift.paid_leave_days != null && Number(shift.paid_leave_days) >= 0 ? (
+                            <div className="flex justify-between">
+                              <dt className="text-slate-500">Prescribed paid leave</dt>
+                              <dd className="font-medium text-slate-800">
+                                {shift.paid_leave_days} day
+                                {Number(shift.paid_leave_days) === 1 ? '' : 's'} / month
+                              </dd>
+                            </div>
+                          ) : null}
+                          {company?.paid_leave_forfeit_if_absence_gt != null &&
+                          company.paid_leave_forfeit_if_absence_gt !== '' ? (
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-slate-500">PL forfeit if absent &gt;</dt>
+                              <dd className="font-medium text-slate-800 text-right">
+                                {company.paid_leave_forfeit_if_absence_gt} days
+                              </dd>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          {Array.isArray(shift.weekly_off_days) && shift.weekly_off_days.length > 0 ? (
+                            <div className="flex justify-between gap-2">
+                              <dt className="text-slate-500">Weekly off</dt>
+                              <dd className="font-medium text-slate-800 text-right">
+                                {shift.weekly_off_days.filter((d) => d >= 0 && d <= 6).map((d) => WEEKDAY_LABELS[d]).join(', ')}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {shift.no_leave_incentive != null && Number(shift.no_leave_incentive) > 0 ? (
+                            <div className="flex justify-between">
+                              <dt className="text-slate-500">No-leave incentive</dt>
+                              <dd className="font-medium text-emerald-700">
+                                {shift.no_leave_incentive}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {(shift.late_deduction_minutes != null && shift.late_deduction_minutes > 0) ||
+                          (shift.late_deduction_amount != null && shift.late_deduction_amount > 0) ? (
+                            <div className="flex justify-between">
+                              <dt className="text-slate-500">Late deduction</dt>
+                              <dd className="font-medium text-slate-800">
+                                {shift.late_deduction_minutes ?? 0} min → {shift.late_deduction_amount ?? 0}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {(shift.lunch_over_deduction_minutes != null && shift.lunch_over_deduction_minutes > 0) ||
+                          (shift.lunch_over_deduction_amount != null && shift.lunch_over_deduction_amount > 0) ? (
+                            <div className="flex justify-between">
+                              <dt className="text-slate-500">Lunch over deduction</dt>
+                              <dd className="font-medium text-slate-800">
+                                {shift.lunch_over_deduction_minutes ?? 0} min → {shift.lunch_over_deduction_amount ?? 0}
+                              </dd>
+                            </div>
+                          ) : null}
+                          {shift.paid_leave_days != null && Number(shift.paid_leave_days) > 0 ? (
+                            <div className="flex justify-between">
+                              <dt className="text-slate-500">Paid leave allowance</dt>
+                              <dd className="font-medium text-slate-800">
+                                {shift.paid_leave_days} day
+                                {Number(shift.paid_leave_days) === 1 ? '' : 's'} / month
+                              </dd>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                      {!shiftsCompactUi && (
                       <div className="flex justify-between">
                         <dt className="text-slate-500">Overtime</dt>
                         <dd className="font-medium text-slate-800">
@@ -789,6 +988,7 @@ export default function ShiftsPage() {
                               : `₹${shift.overtime_rate_per_hour ?? 0}/hr`}
                         </dd>
                       </div>
+                      )}
                     </dl>
                   </article>
                 ))}
@@ -825,7 +1025,14 @@ export default function ShiftsPage() {
               </div>
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">Attendance mode</p>
+                {hoursBasedOnly && (
+                  <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-100 rounded px-2 py-1">
+                    Hours-based only for this company.
+                  </p>
+                )}
                 <div className="flex flex-col gap-1.5">
+                  {!hoursBasedOnly && (
+                    <>
                   <label className="inline-flex items-start gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -850,6 +1057,8 @@ export default function ShiftsPage() {
                     />
                     <span className="text-[11px] text-slate-700">Shift based (overnight)</span>
                   </label>
+                    </>
+                  )}
                   <label className="inline-flex items-start gap-2 cursor-pointer">
                     <input
                       type="radio"
@@ -889,6 +1098,7 @@ export default function ShiftsPage() {
                   />
                 </div>
               )}
+              {!shiftsCompactUi && (
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">Overtime configuration</p>
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -937,6 +1147,7 @@ export default function ShiftsPage() {
                   />
                 </div>
               </div>
+              )}
               {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Half-day threshold hours</label>
@@ -986,43 +1197,92 @@ export default function ShiftsPage() {
                   className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
                 />
               </div>
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">No-leave incentive (optional)</p>
-                <p className="text-[10px] text-slate-500">
-                  Fixed incentive for staff with zero absences on this shift for the month.
-                </p>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Incentive amount</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.no_leave_incentive}
-                    onChange={handleChange('no_leave_incentive')}
-                    disabled={savingEdit}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="e.g. 500"
-                  />
+              {shiftsCompactUi ? (
+                <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-3">
+                  <div>
+                    <p className="text-[11px] font-medium text-slate-700">Paid leave</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      Prescribed days save with this shift. Forfeit threshold is company-wide (same as add form).
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Prescribed paid leave (days/month)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={31}
+                      value={form.paid_leave_days}
+                      onChange={handleChange('paid_leave_days')}
+                      disabled={savingEdit}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                    />
+                  </div>
+                  <div className="space-y-1 border-t border-slate-100 pt-2">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Paid leave forfeit — if absent days exceed
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={31}
+                      value={plForfeitGt}
+                      onChange={(e) => setPlForfeitGt(e.target.value)}
+                      disabled={savingEdit || savingPlPolicy}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={savePaidLeaveCompanyPolicy}
+                      disabled={savingEdit || savingPlPolicy}
+                      className="mt-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {savingPlPolicy ? 'Saving…' : 'Save company policy'}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">Paid leave allowance (optional)</p>
-                <p className="text-[10px] text-slate-500">
-                  Days per month that can count as paid (with salary) when the employee would otherwise be absent.
-                  Use 0 if you do not offer shift-level paid leave.
-                </p>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Paid leave days per month</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.paid_leave_days}
-                    onChange={handleChange('paid_leave_days')}
-                    disabled={savingEdit}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="e.g. 4"
-                  />
-                </div>
-              </div>
+              ) : (
+                <>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">No-leave incentive (optional)</p>
+                    <p className="text-[10px] text-slate-500">
+                      Fixed incentive for staff with zero absences on this shift for the month.
+                    </p>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Incentive amount</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.no_leave_incentive}
+                        onChange={handleChange('no_leave_incentive')}
+                        disabled={savingEdit}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                        placeholder="e.g. 500"
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">Paid leave allowance (optional)</p>
+                    <p className="text-[10px] text-slate-500">
+                      Days per month that can count as paid (with salary) when the employee would otherwise be absent.
+                      Use 0 if you do not offer shift-level paid leave.
+                    </p>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Paid leave days per month</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.paid_leave_days}
+                        onChange={handleChange('paid_leave_days')}
+                        disabled={savingEdit}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                        placeholder="e.g. 4"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Grace min</label>
@@ -1035,28 +1295,32 @@ export default function ShiftsPage() {
                   </div>
                 )}
               </div>
-              <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
-                <p className="text-[11px] font-medium text-slate-700">Holidays (weekly off)</p>
-                <div className="flex flex-wrap gap-2">
-                  {WEEKDAY_LABELS.map((label, dayNum) => (
-                    <label key={dayNum} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 cursor-pointer hover:border-primary-200 has-[:checked]:border-primary-300 has-[:checked]:bg-primary-50">
-                      <input type="checkbox" checked={(form.weekly_off_days || []).includes(dayNum)} onChange={() => toggleFormWeeklyOff(dayNum)} disabled={savingEdit} className="rounded border-slate-300 text-primary-600" />
-                      <span className="text-[11px] font-medium text-slate-700">{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Late min</label>
-                  <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Late deduction amt</label>
-                  <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                </div>
-              </div>
-              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+              {!shiftsCompactUi && (
+                <>
+                  <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+                    <p className="text-[11px] font-medium text-slate-700">Holidays (weekly off)</p>
+                    <div className="flex flex-wrap gap-2">
+                      {WEEKDAY_LABELS.map((label, dayNum) => (
+                        <label key={dayNum} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5 cursor-pointer hover:border-primary-200 has-[:checked]:border-primary-300 has-[:checked]:bg-primary-50">
+                          <input type="checkbox" checked={(form.weekly_off_days || []).includes(dayNum)} onChange={() => toggleFormWeeklyOff(dayNum)} disabled={savingEdit} className="rounded border-slate-300 text-primary-600" />
+                          <span className="text-[11px] font-medium text-slate-700">{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Late min</label>
+                      <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Late deduction amt</label>
+                      <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                    </div>
+                  </div>
+                </>
+              )}
+              {!shiftsCompactUi && (form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-700">Lunch over min</label>

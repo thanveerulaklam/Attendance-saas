@@ -45,15 +45,22 @@ function computePermissionOffset({
   absenceDays,
   hourlyRate,
   deductionsBeforeOffset,
+  /**
+   * Hours per absent day counted toward permission eligibility, and consistent with `hourlyRate`
+   * (= dailyRate ÷ this value). Use required_hours_per_day for hours_based, shift span for day/shift based.
+   * Default 8 matches legacy behaviour when shift length was assumed to be 8h.
+   */
+  workDayHoursForPermission = 8,
 }) {
   const safeAllocatedHours = Math.max(0, Number(allocatedHours || 0));
   const safeLateMinutes = Math.max(0, Number(lateMinutes || 0));
   const safeAbsenceDays = Math.max(0, Number(absenceDays || 0));
   const safeHourlyRate = Math.max(0, Number(hourlyRate || 0));
   const safeDeductionsBeforeOffset = Math.max(0, Number(deductionsBeforeOffset || 0));
+  const hoursPerAbsenceDay = Math.max(0, Number(workDayHoursForPermission || 8)) || 8;
 
   const allocatedMinutes = safeAllocatedHours * 60;
-  const eligibleMinutes = safeLateMinutes + safeAbsenceDays * 8 * 60;
+  const eligibleMinutes = safeLateMinutes + safeAbsenceDays * hoursPerAbsenceDay * 60;
   const usedMinutes = Math.min(allocatedMinutes, eligibleMinutes);
   const rawOffsetAmount = (usedMinutes / 60) * safeHourlyRate;
   const offsetAmount = Math.min(rawOffsetAmount, safeDeductionsBeforeOffset);

@@ -5,7 +5,8 @@ import { useAuth } from '../context/AuthContext';
 
 export default function ChangePasswordPage() {
   const { user } = useAuth();
-  const isCompanyAdmin = user?.role === 'admin' && Number(user?.company_id) > 0;
+  const canChangePassword =
+    Number(user?.company_id) > 0 && (user?.role === 'admin' || user?.role === 'hr');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
@@ -13,7 +14,7 @@ export default function ChangePasswordPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  if (!isCompanyAdmin) {
+  if (!canChangePassword) {
     return <Navigate to="/attendance" replace />;
   }
 
