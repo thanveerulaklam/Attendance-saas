@@ -157,7 +157,8 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
   if (mins >= startMin) {
     return istYmd;
   }
-  if (mins < endMin) {
+  // End boundary belongs to the shift that started previous day as well.
+  if (mins <= endMin) {
     return addDaysIst(istYmd, -1);
   }
   return istYmd;
@@ -726,7 +727,8 @@ async function getDailyAttendance(
         const shiftEndMs = shiftStartMs + shiftConfig.shiftMs;
         rawDayLogs = rawDayLogs.filter((l) => {
           const t = new Date(l.punch_time).getTime();
-          return t >= shiftStartMs && t < shiftEndMs;
+          // Include exact shift end punch (e.g. 09:00 OUT for 21:00-09:00).
+          return t >= shiftStartMs && t <= shiftEndMs;
         });
       }
       const dayLogs = normalizePunchTypesByOrder(rawDayLogs);

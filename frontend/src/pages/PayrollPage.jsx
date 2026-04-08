@@ -796,6 +796,7 @@ export default function PayrollPage() {
       return {
         breakdown: breakdownJson.data,
         attendanceMeta: {
+          basic_salary: e?.basic_salary ?? null,
           department: e?.department || null,
           join_date: e?.join_date || null,
           shift_name: e?.shift_name || null,
@@ -828,6 +829,7 @@ export default function PayrollPage() {
     return {
       breakdown: breakdownJson.data,
       attendanceMeta: {
+        basic_salary: e?.basic_salary ?? null,
         department: e?.department || null,
         join_date: e?.join_date || null,
         shift_name: shift?.shift_name || null,
@@ -968,6 +970,7 @@ export default function PayrollPage() {
           const att = json.data?.attendance || {};
 
           setAttendanceMeta({
+            basic_salary: e?.basic_salary ?? null,
             designation: e?.designation || null,
             department: e?.department || null,
             join_date: e?.join_date || null,
@@ -1022,6 +1025,7 @@ export default function PayrollPage() {
               }),
             ]);
             const empMeta = {
+              basic_salary: null,
               designation: null,
               department: null,
               join_date: null,
@@ -1099,6 +1103,7 @@ export default function PayrollPage() {
                 empMeta.lateCount = empMeta.lateDetails.length;
               }
               if (employeeRecord) {
+                empMeta.basic_salary = employeeRecord.basic_salary ?? null;
                 empMeta.designation = employeeRecord.designation || null;
                 empMeta.department = employeeRecord.department || null;
                 empMeta.join_date = employeeRecord.join_date || null;
