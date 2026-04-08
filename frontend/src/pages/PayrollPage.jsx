@@ -475,6 +475,7 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   writeKv('Advance Repayment', `INR ${formatMoney(b.salaryAdvance)}`);
   writeKv('Absent Deduction', `INR ${formatMoney(b.absenceDeduction)}`);
   writeKv('ESI Deduction', `INR ${formatMoney(b.esiDeduction)}`);
+  writeKv('PF Deduction', `INR ${formatMoney(b.pfDeduction)}`);
   writeKv(
     'Total Deductions',
     `INR ${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`,

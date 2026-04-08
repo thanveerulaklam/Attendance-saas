@@ -348,6 +348,7 @@ export default function PayslipModal({
       doc.setFontSize(9);
     }
     writeKv('ESI Deduction', `INR ${formatMoney(b.esiDeduction)}`);
+    writeKv('PF Deduction', `INR ${formatMoney(b.pfDeduction)}`);
     writeKv('Total Deductions', `INR ${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`, [180, 83, 9]);
 
     y += 2;
@@ -385,6 +386,7 @@ export default function PayslipModal({
       ['Advance Repayment', b.salaryAdvance],
       ['Absent Deduction', b.absenceDeduction],
       ['ESI Deduction', b.esiDeduction],
+      ['PF Deduction', b.pfDeduction],
     ];
     const payslipText = `
 PAYSLIP — ${periodLabel}
@@ -656,6 +658,12 @@ punchpay.in
                   <span>ESI Deduction</span>
                   <span className="font-medium text-amber-700">
                     ₹{formatMoney(breakdown.breakdown?.esiDeduction)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>PF Deduction</span>
+                  <span className="font-medium text-amber-700">
+                    ₹{formatMoney(breakdown.breakdown?.pfDeduction)}
                   </span>
                 </div>
               </div>
