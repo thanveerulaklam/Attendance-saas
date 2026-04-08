@@ -47,6 +47,30 @@ function getMonthBounds(year, month) {
 }
 
 /** For compact hours-based shops, map after-midnight close punches to previous attendance day. */
+const LATE_CLOSE_CUTOFF_MINUTES = 6 * 60; // 06:00 IST
+
+function getIstMinutesFromMidnight(date) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: COMPANY_TZ,
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(date);
+  const hh = Number(parts.find((p) => p.type === 'hour')?.value || 0);
+  const mm = Number(parts.find((p) => p.type === 'minute')?.value || 0);
+  return hh * 60 + mm;
+}
+
+function attributedCompactHoursBasedDateStr(punchTime, shiftConfig) {
+  const ymd = istYmdFromDate(punchTime);
+  const startMin = Number(shiftConfig.startHour || 0) * 60 + Number(shiftConfig.startMinute || 0);
+  const mins = getIstMinutesFromMidnight(punchTime);
+  if (mins < LATE_CLOSE_CUTOFF_MINUTES && mins < startMin) {
+    return addDaysIst(ymd, -1);
+  }
+  return ymd;
+}
+
 /** Company policy: zero shift PL allowance when rawAbsenceDays exceeds threshold. */
 function effectivePaidLeaveDaysAllowed(shiftPaidLeaveDays, rawAbsenceDays, forfeitIfAbsenceGt) {
   let allowed = Number(shiftPaidLeaveDays || 0);
