@@ -1801,8 +1801,11 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * presentWorkingDays;
 
-    const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
-    const paidLeaveUsed = Number(summary.paidLeaveUsed || 0);
+    const paidLeaveDaysAllowed = isMonthComplete ? Number(summary.paidLeaveDaysAllowed || 0) : 0;
+    const paidLeaveUsed = isMonthComplete ? Number(summary.paidLeaveUsed || 0) : 0;
+    const absenceDaysForPayroll = isMonthComplete
+      ? Number(summary.absenceDays || 0)
+      : Number(summary.rawAbsenceDays || summary.absenceDays || 0);
     const { unusedPaidLeaveDays, paidLeaveEncashmentAmount } =
       computePaidLeaveEncashment({
         enabled: encashUnusedPaidLeave,
@@ -1831,8 +1834,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         dailyRate,
         presentDays: summary.presentDays,
         paidLeaveDaysAllowed,
-        paidLeaveUsed: Number(summary.paidLeaveUsed || 0),
-        absenceDays: summary.absenceDays,
+        paidLeaveUsed,
+        absenceDays: absenceDaysForPayroll,
       });
       earnedBasic = computed.earnedBasic;
       absenceDeduction = computed.absenceDeduction;
@@ -1869,7 +1872,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const permissionOffset = computePermissionOffset({
       allocatedHours: effectivePermissionHours,
       lateMinutes: summary.lateMinutes,
-      absenceDays: summary.absenceDays,
+      absenceDays: absenceDaysForPayroll,
       hourlyRate,
       deductionsBeforeOffset: deductionsBeforePermission,
       workDayHoursForPermission,
@@ -2112,8 +2115,11 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
   const travelAllowance = dailyTravelAllowance * presentWorkingDays;
 
-  const paidLeaveDaysAllowed = Number(summary.paidLeaveDaysAllowed || 0);
-  const paidLeaveUsed = Number(summary.paidLeaveUsed || 0);
+  const paidLeaveDaysAllowed = isMonthComplete ? Number(summary.paidLeaveDaysAllowed || 0) : 0;
+  const paidLeaveUsed = isMonthComplete ? Number(summary.paidLeaveUsed || 0) : 0;
+  const absenceDaysForPayroll = isMonthComplete
+    ? Number(summary.absenceDays || 0)
+    : Number(summary.rawAbsenceDays || summary.absenceDays || 0);
   const { unusedPaidLeaveDays: unusedPaidLeaveDaysComputed, paidLeaveEncashmentAmount: paidLeaveEncashmentComputed } =
     computePaidLeaveEncashment({
       enabled: encashUnusedPaidLeave,
@@ -2141,8 +2147,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       dailyRate,
       presentDays: summary.presentDays,
       paidLeaveDaysAllowed,
-      paidLeaveUsed: Number(summary.paidLeaveUsed || 0),
-      absenceDays: summary.absenceDays,
+      paidLeaveUsed,
+      absenceDays: absenceDaysForPayroll,
     });
     earnedBasic = computed.earnedBasic;
     absenceDeduction = computed.absenceDeduction;
@@ -2175,7 +2181,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const permissionOffsetComputed = computePermissionOffset({
     allocatedHours: effectivePermissionHours,
     lateMinutes: summary.lateMinutes,
-    absenceDays: summary.absenceDays,
+    absenceDays: absenceDaysForPayroll,
     hourlyRate,
     deductionsBeforeOffset: deductionsBeforePermission,
     workDayHoursForPermission,

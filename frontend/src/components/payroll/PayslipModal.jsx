@@ -10,6 +10,11 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+function formatInrWithSymbol(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return `₹${formatMoney(n)}`;
+}
+
 const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const MONTH_LONG = [
   'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
@@ -284,6 +289,7 @@ export default function PayslipModal({
     doc.setFontSize(9);
     writeKv('Employee Name', payrollRow.employee_name || '—');
     writeKv('Employee Code', payrollRow.employee_code || '—');
+    writeKv('Basic Salary', formatInrWithSymbol(attendanceDetails?.basic_salary));
     writeKv('Department', attendanceDetails?.department || '—');
     writeKv('Date of Joining', formatJoinDate(attendanceDetails?.join_date));
     writeKv('Shift', attendanceDetails?.shift_name || '—');
@@ -478,6 +484,10 @@ punchpay.in
               <div className="flex justify-between">
                 <span className="font-medium text-slate-600">Department</span>
                 <span>{attendanceDetails?.department || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="font-medium text-slate-600">Basic Salary</span>
+                <span>{formatInrWithSymbol(attendanceDetails?.basic_salary)}</span>
               </div>
             </div>
             <div className="space-y-1.5">
