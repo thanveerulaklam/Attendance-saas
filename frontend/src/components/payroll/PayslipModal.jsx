@@ -137,6 +137,19 @@ function renderGroupedLateDetails(lateDetails) {
   ));
 }
 
+/** Match payroll period end (ISO Y-M-D); hide future calendar days on in-progress payslips. */
+function filterYmdOnOrBefore(asOfYmd, dateValues) {
+  const cap = String(asOfYmd || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cap)) return dateValues || [];
+  return (dateValues || []).filter((d) => String(d).slice(0, 10) <= cap);
+}
+
+function filterLateDetailsOnOrBefore(asOfYmd, items) {
+  const cap = String(asOfYmd || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cap)) return items || [];
+  return (items || []).filter((it) => String(it?.date || '').slice(0, 10) <= cap);
+}
+
 export default function PayslipModal({
   open,
   onClose,
@@ -164,18 +177,37 @@ export default function PayslipModal({
         .filter((d) => Boolean(d.date)),
     [dayDetails]
   );
-  const effectiveAbsentDates =
-    Array.isArray(attendanceDetails?.absentDates) && attendanceDetails.absentDates.length > 0
-      ? attendanceDetails.absentDates
-      : fallbackAbsentDates;
-  const effectiveHalfDayDates =
-    Array.isArray(attendanceDetails?.halfDayDates) && attendanceDetails.halfDayDates.length > 0
-      ? attendanceDetails.halfDayDates
-      : fallbackHalfDayDates;
-  const effectiveLateDetails =
-    Array.isArray(attendanceDetails?.lateDetails) && attendanceDetails.lateDetails.length > 0
-      ? attendanceDetails.lateDetails
-      : fallbackLateDetails;
+  const payrollAsOfYmd = (breakdown?.attendance?.workingDaysUpToDate || '').slice(0, 10);
+  const rawAbsentDates = useMemo(() => {
+    if (Array.isArray(attendanceDetails?.absentDates) && attendanceDetails.absentDates.length > 0) {
+      return attendanceDetails.absentDates;
+    }
+    return fallbackAbsentDates;
+  }, [attendanceDetails?.absentDates, fallbackAbsentDates]);
+  const rawHalfDayDates = useMemo(() => {
+    if (Array.isArray(attendanceDetails?.halfDayDates) && attendanceDetails.halfDayDates.length > 0) {
+      return attendanceDetails.halfDayDates;
+    }
+    return fallbackHalfDayDates;
+  }, [attendanceDetails?.halfDayDates, fallbackHalfDayDates]);
+  const rawLateDetails = useMemo(() => {
+    if (Array.isArray(attendanceDetails?.lateDetails) && attendanceDetails.lateDetails.length > 0) {
+      return attendanceDetails.lateDetails;
+    }
+    return fallbackLateDetails;
+  }, [attendanceDetails?.lateDetails, fallbackLateDetails]);
+  const effectiveAbsentDates = useMemo(
+    () => filterYmdOnOrBefore(payrollAsOfYmd, rawAbsentDates),
+    [payrollAsOfYmd, rawAbsentDates]
+  );
+  const effectiveHalfDayDates = useMemo(
+    () => filterYmdOnOrBefore(payrollAsOfYmd, rawHalfDayDates),
+    [payrollAsOfYmd, rawHalfDayDates]
+  );
+  const effectiveLateDetails = useMemo(
+    () => filterLateDetailsOnOrBefore(payrollAsOfYmd, rawLateDetails),
+    [payrollAsOfYmd, rawLateDetails]
+  );
 
   const periodLabel = useMemo(() => {
     if (!payrollRow) return '';
@@ -541,9 +573,7 @@ punchpay.in
               </div>
               <div className="flex justify-between">
                 <span>Full Absent Days</span>
-                <span className="font-medium text-rose-600">
-                  {(attendanceDetails?.absentDates || []).length}
-                </span>
+                <span className="font-medium text-rose-600">{effectiveAbsentDates.length}</span>
               </div>
               <div className="flex justify-between">
                 <span>{isHoursBasedPayroll ? 'Partial Days' : 'Half Days'}</span>
@@ -554,7 +584,7 @@ punchpay.in
               <div className="flex justify-between">
                 <span>Late Arrivals</span>
                 <span className="font-medium text-amber-700">
-                  {attendanceDetails?.lateCount ?? '—'} times
+                  {effectiveLateDetails.length} times
                 </span>
               </div>
               <div className="flex justify-between">
@@ -572,6 +602,16 @@ punchpay.in
             </p>
             <div className="mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
+              {payrollAsOfYmd && (
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  Listed through {new Date(`${payrollAsOfYmd}T12:00:00`).toLocaleDateString('en-IN', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric',
+                  })}
+                  .
+                </p>
+              )}
               <p className="mt-0.5">{renderGroupedDayNumbers(effectiveAbsentDates)}</p>
               <p className="mt-2 font-semibold">Late Arrival Dates:</p>
               <p className="mt-0.5">{renderGroupedLateDetails(effectiveLateDetails)}</p>

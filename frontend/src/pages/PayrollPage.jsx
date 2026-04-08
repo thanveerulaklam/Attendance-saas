@@ -346,6 +346,13 @@ function toYmdDateString(value) {
   return toYmdLocal(d);
 }
 
+/** ISO date strings compare lexicographically; use for payroll "as of" vs calendar day keys. */
+function filterYmdOnOrBefore(asOfYmd, dateValues) {
+  const cap = String(asOfYmd || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cap)) return dateValues || [];
+  return (dateValues || []).filter((d) => String(d).slice(0, 10) <= cap);
+}
+
 function formatPayslipPeriodLabel(row, payrollMode) {
   if (payrollMode === 'weekly') {
     return formatWeekLabel(row.week_start_date, row.week_end_date);
@@ -1067,6 +1074,10 @@ export default function PayrollPage() {
                 effectiveWeeklyOffDays
               );
               const holidayDateSet = new Set([...explicitHolidaySet, ...weeklyOffDateSet]);
+              const payrollAsOfYmd = (json?.data?.attendance?.workingDaysUpToDate || '').slice(
+                0,
+                10
+              );
               if (employee) {
                 const days = employee.days || [];
                 const baseAbsentDates = days
@@ -1089,17 +1100,27 @@ export default function PayrollPage() {
                     }
                   }
                 }
-                empMeta.absentDates = [...new Set(adjustedAbsentDates)].sort();
-                empMeta.halfDayDates = days
-                  .filter((d) => d.half_day && !holidayDateSet.has(d.date))
-                  .map((d) => d.date);
+                empMeta.absentDates = filterYmdOnOrBefore(
+                  payrollAsOfYmd,
+                  [...new Set(adjustedAbsentDates)]
+                ).sort();
+                empMeta.halfDayDates = filterYmdOnOrBefore(
+                  payrollAsOfYmd,
+                  days
+                    .filter((d) => d.half_day && !holidayDateSet.has(d.date))
+                    .map((d) => d.date)
+                );
                 empMeta.halfDayCount = empMeta.halfDayDates.length;
                 empMeta.lateDetails = days
                   .filter((d) => d.late && !holidayDateSet.has(d.date))
                   .map((d) => ({
                     date: d.date,
                     minutes: d.minutes_late || null,
-                  }));
+                  }))
+                  .filter((row) => {
+                    if (!/^\d{4}-\d{2}-\d{2}$/.test(payrollAsOfYmd)) return true;
+                    return String(row.date).slice(0, 10) <= payrollAsOfYmd;
+                  });
                 empMeta.lateCount = empMeta.lateDetails.length;
               }
               if (employeeRecord) {

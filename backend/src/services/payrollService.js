@@ -1869,14 +1869,16 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       employee.permission_hours_override != null
         ? Number(employee.permission_hours_override || 0)
         : Number(shiftConfig.monthlyPermissionHours || 0);
-    const permissionOffset = computePermissionOffset({
-      allocatedHours: effectivePermissionHours,
-      lateMinutes: summary.lateMinutes,
-      absenceDays: absenceDaysForPayroll,
-      hourlyRate,
-      deductionsBeforeOffset: deductionsBeforePermission,
-      workDayHoursForPermission,
-    });
+    const permissionOffset = isMonthComplete
+      ? computePermissionOffset({
+          allocatedHours: effectivePermissionHours,
+          lateMinutes: summary.lateMinutes,
+          absenceDays: absenceDaysForPayroll,
+          hourlyRate,
+          deductionsBeforeOffset: deductionsBeforePermission,
+          workDayHoursForPermission,
+        })
+      : { allocatedHours: 0, usedMinutes: 0, offsetAmount: 0 };
     const deductions = deductionsBeforePermission - permissionOffset.offsetAmount;
     const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
     const repaymentRowsResult = applyAdvanceRepayments
@@ -2179,7 +2181,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const pfDeduction = Number(employee.pf_amount || 0);
   const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
   const permissionOffsetComputed = computePermissionOffset({
-    allocatedHours: effectivePermissionHours,
+    allocatedHours: isMonthComplete ? effectivePermissionHours : 0,
     lateMinutes: summary.lateMinutes,
     absenceDays: absenceDaysForPayroll,
     hourlyRate,
@@ -2187,15 +2189,21 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     workDayHoursForPermission,
   });
   const permissionHoursAllocated =
-    existingPayrollResult.rowCount > 0
+    !isMonthComplete
+      ? 0
+      : existingPayrollResult.rowCount > 0
       ? Number(existingPayrollResult.rows[0].permission_hours_allocated || 0)
       : permissionOffsetComputed.allocatedHours;
   const permissionMinutesUsed =
-    existingPayrollResult.rowCount > 0
+    !isMonthComplete
+      ? 0
+      : existingPayrollResult.rowCount > 0
       ? Number(existingPayrollResult.rows[0].permission_minutes_used || 0)
       : permissionOffsetComputed.usedMinutes;
   const permissionOffsetAmount =
-    existingPayrollResult.rowCount > 0
+    !isMonthComplete
+      ? 0
+      : existingPayrollResult.rowCount > 0
       ? Number(existingPayrollResult.rows[0].permission_offset_amount || 0)
       : permissionOffsetComputed.offsetAmount;
   const unusedPaidLeaveDays =
