@@ -372,6 +372,7 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   const sectionGap = 14;
   const b = breakdown?.breakdown || {};
   const att = breakdown?.attendance || {};
+  const isHoursBasedPayroll = String(att?.attendanceMode || '').toLowerCase() === 'hours_based';
   const periodLabel = formatPayslipPeriodLabel(row, payrollMode);
 
   const writeLeft = (text, options = {}) => {
@@ -441,6 +442,17 @@ function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceM
   doc.setFont(undefined, 'bold');
   doc.setTextColor(51, 65, 85);
   writeLeft('ATTENDANCE');
+  if (isHoursBasedPayroll) {
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(37, 99, 235);
+    const hoursModeNote = doc.splitTextToSize(
+      'Hours-based payroll mode: salary is prorated by worked hours/required hours per day. Full-day and half-day buckets are not used for payroll calculation.',
+      contentWidth
+    );
+    doc.text(hoursModeNote, labelX, y);
+    y += hoursModeNote.length * 9;
+  }
   doc.setFontSize(9);
   writeKv('Working Days', `${att.workingDays ?? '—'} days`);
   writeKv('Present', `${att.presentDays ?? '—'} days`);
@@ -527,7 +539,15 @@ export default function PayrollPage() {
 
   const subscription = getSubscriptionStatus(company);
   const subscriptionAllowed = subscription.allowed;
+  const monthlyOnlyPayroll = company?.shifts_compact_ui === true;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  useEffect(() => {
+    if (monthlyOnlyPayroll && payrollMode !== 'monthly') {
+      setPayrollMode('monthly');
+      setPage(1);
+    }
+  }, [monthlyOnlyPayroll, payrollMode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1123,7 +1143,8 @@ export default function PayrollPage() {
   const activeWeeklyCount = employees.filter(
     (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'weekly'
   ).length;
-  const activeCount = payrollMode === 'monthly' ? activeMonthlyCount : activeWeeklyCount;
+  const activeCount =
+    monthlyOnlyPayroll || payrollMode === 'monthly' ? activeMonthlyCount : activeWeeklyCount;
 
   const handleGenerateAll = async (e) => {
     e.preventDefault();
@@ -1330,20 +1351,22 @@ export default function PayrollPage() {
             >
               Monthly
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setPayrollMode('weekly');
-                setPage(1);
-              }}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
-                payrollMode === 'weekly'
-                  ? 'border-blue-200 bg-blue-50 text-blue-700'
-                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              Weekly
-            </button>
+            {!monthlyOnlyPayroll && (
+              <button
+                type="button"
+                onClick={() => {
+                  setPayrollMode('weekly');
+                  setPage(1);
+                }}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                  payrollMode === 'weekly'
+                    ? 'border-blue-200 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                Weekly
+              </button>
+            )}
           </div>
 
           {payrollMode === 'monthly' ? (

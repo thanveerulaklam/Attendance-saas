@@ -6,12 +6,10 @@ const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 
 /** @param {boolean} shiftPayloadCompact — Tharagai Readymades (`companies.shifts_compact_ui`): omit manual deduction fields from payload. */
 function sanitizeShiftBody(form, shiftPayloadCompact) {
   const body = { ...form };
-  if (body.full_day_hours === '' || body.full_day_hours === undefined || body.full_day_hours === null) {
-    body.full_day_hours = null;
-  } else {
-    const n = Number(body.full_day_hours);
-    body.full_day_hours = Number.isFinite(n) ? n : null;
-  }
+  const fullDayNum = Number(body.full_day_hours);
+  body.full_day_hours = Number.isFinite(fullDayNum) ? fullDayNum : 0;
+  const halfDayNum = Number(body.half_day_hours);
+  body.half_day_hours = Number.isFinite(halfDayNum) ? halfDayNum : 0;
   if (shiftPayloadCompact) {
     body.weekly_off_days = [];
     body.late_deduction_minutes = 0;
@@ -43,8 +41,8 @@ function getEmptyForm(compact) {
     paid_leave_days: compact ? 3 : 0,
     attendance_mode: 'day_based',
     required_hours_per_day: 8,
-    half_day_hours: 0,
-    full_day_hours: null,
+    half_day_hours: 4,
+    full_day_hours: 8,
     monthly_permission_hours: 0,
     allow_overtime: true,
     overtime_rate_per_hour: 0,
@@ -158,16 +156,6 @@ export default function ShiftsPage() {
     }
   };
 
-  const handleFullDayHoursChange = (event) => {
-    const v = event.target.value;
-    if (v === '') {
-      setForm((prev) => ({ ...prev, full_day_hours: null }));
-      return;
-    }
-    const n = Number(v);
-    setForm((prev) => ({ ...prev, full_day_hours: Number.isFinite(n) ? n : prev.full_day_hours }));
-  };
-
   const toggleFormWeeklyOff = (dayNum) => {
     const current = form.weekly_off_days || [];
     const next = current.includes(dayNum)
@@ -238,10 +226,7 @@ export default function ShiftsPage() {
       attendance_mode: resolvedMode,
       required_hours_per_day: shift.required_hours_per_day ?? 8,
       half_day_hours: shift.half_day_hours ?? 0,
-      full_day_hours:
-        shift.full_day_hours != null && shift.full_day_hours !== ''
-          ? Number(shift.full_day_hours)
-          : null,
+      full_day_hours: shift.full_day_hours ?? 0,
       monthly_permission_hours: shift.monthly_permission_hours ?? 0,
       allow_overtime: shift.allow_overtime !== false,
       overtime_rate_per_hour: shift.overtime_rate_per_hour ?? 0,
@@ -328,9 +313,7 @@ export default function ShiftsPage() {
             <div className="space-y-2">
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                 <p className="text-[11px] font-medium text-slate-700">Attendance Mode</p>
-                <p className="text-[10px] text-slate-500">
-                  Choose how attendance is calculated for this shift.
-                </p>
+                <p className="text-[10px] text-slate-500">Choose how attendance is calculated for this shift.</p>
                 {hoursBasedOnly && (
                   <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-100 rounded px-2 py-1">
                     This company uses <strong>hours-based</strong> shifts only.
@@ -338,45 +321,26 @@ export default function ShiftsPage() {
                 )}
                 <div className="flex flex-col gap-1.5">
                   {!hoursBasedOnly && (
-                    <>
-                  <label className="inline-flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="attendance_mode_create"
-                      value="day_based"
-                      checked={form.attendance_mode === 'day_based'}
-                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'day_based' }))}
-                      disabled={creating}
-                      className="mt-0.5 text-primary-600"
-                    />
-                    <span className="text-[11px] text-slate-700">
-                      <span className="font-medium">Day based</span>
-                      <span className="block text-[10px] text-slate-500">
-                        Same calendar day: start and end fall on one IST date (e.g. 09:00–18:00).{' '}
-                        {shiftsCompactUi
-                          ? 'Lunch and full-day rules use that day.'
-                          : 'Late, lunch, and full-day rules use that day.'}
+                    <label className="inline-flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="attendance_mode_create"
+                        value="day_based"
+                        checked={form.attendance_mode === 'day_based'}
+                        onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'day_based' }))}
+                        disabled={creating}
+                        className="mt-0.5 text-primary-600"
+                      />
+                      <span className="text-[11px] text-slate-700">
+                        <span className="font-medium">Day based</span>
+                        <span className="block text-[10px] text-slate-500">
+                          Same calendar day: start and end fall on one IST date (e.g. 09:00–18:00).{' '}
+                          {shiftsCompactUi
+                            ? 'Lunch and full-day rules use that day.'
+                            : 'Late, lunch, and full-day rules use that day.'}
+                        </span>
                       </span>
-                    </span>
-                  </label>
-                  <label className="inline-flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="attendance_mode_create"
-                      value="shift_based"
-                      checked={form.attendance_mode === 'shift_based'}
-                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'shift_based' }))}
-                      disabled={creating}
-                      className="mt-0.5 text-primary-600"
-                    />
-                    <span className="text-[11px] text-slate-700">
-                      <span className="font-medium">Shift based (overnight)</span>
-                      <span className="block text-[10px] text-slate-500">
-                        Night shift: end time is after midnight on the clock (e.g. 22:00–06:00). The whole block is counted on the shift start date.
-                      </span>
-                    </span>
-                  </label>
-                    </>
+                    </label>
                   )}
                   <label className="inline-flex items-start gap-2 cursor-pointer">
                     <input
@@ -430,14 +394,12 @@ export default function ShiftsPage() {
                 </div>
               </div>
 
-              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+              {form.attendance_mode === 'day_based' && (
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Half-day threshold hours (optional)
-                  </label>
+                  <label className="text-[11px] font-medium text-slate-700">Minimum half-day required hours</label>
                   <input
                     type="number"
-                    min={0}
+                    min={0.5}
                     max={24}
                     step={0.5}
                     value={form.half_day_hours}
@@ -446,34 +408,25 @@ export default function ShiftsPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
                     placeholder="0"
                   />
-                  <p className="text-[10px] text-slate-500">
-                    If set above 0, days with worked hours below this value are treated as half-day.
-                    Leave 0 to use default midpoint logic.
-                  </p>
+                  <p className="text-[10px] text-slate-500">Worked hours at or above this value count as half-day.</p>
                 </div>
               )}
 
-              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+              {form.attendance_mode === 'day_based' && (
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Full-day minimum worked hours (optional)
-                  </label>
+                  <label className="text-[11px] font-medium text-slate-700">Minimum full-day required hours</label>
                   <input
                     type="number"
-                    min={0}
+                    min={0.5}
                     max={24}
                     step={0.25}
-                    value={form.full_day_hours == null ? '' : form.full_day_hours}
-                    onChange={handleFullDayHoursChange}
+                    value={form.full_day_hours}
+                    onChange={handleChange('full_day_hours')}
                     disabled={creating}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="Auto (shift span − lunch)"
+                    placeholder="e.g. 8"
                   />
-                  <p className="text-[10px] text-slate-500">
-                    For a paid full day, staff need four punches (IN–OUT–IN–OUT) and at least this many
-                    hours worked. Leave empty to use (end − start) minus allotted lunch. Set 0 to ignore
-                    worked time (punch pattern only).
-                  </p>
+                  <p className="text-[10px] text-slate-500">Worked hours at or above this value count as full-day.</p>
                 </div>
               )}
 
@@ -509,7 +462,7 @@ export default function ShiftsPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
                   />
                 </div>
-                {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                {form.attendance_mode === 'day_based' && (
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-700">
                       Lunch minutes (allotted)
@@ -750,7 +703,7 @@ export default function ShiftsPage() {
                     </div>
                   </div>
 
-                  {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                  {form.attendance_mode === 'day_based' && (
                     <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                       <p className="text-[11px] font-medium text-slate-700">
                         Lunch over deduction (optional)
@@ -817,11 +770,7 @@ export default function ShiftsPage() {
                     <h3 className="text-sm font-semibold text-slate-900">{shift.shift_name}</h3>
                     <div className="mt-1 flex flex-wrap gap-1">
                       <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
-                        {shift.attendance_mode === 'hours_based'
-                          ? 'Hours based'
-                          : shift.attendance_mode === 'shift_based'
-                            ? 'Shift based (overnight)'
-                            : 'Day based'}
+                        {shift.attendance_mode === 'hours_based' ? 'Hours based' : 'Day based'}
                       </span>
                       {shift.attendance_mode === 'hours_based' && (
                         <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
@@ -841,10 +790,10 @@ export default function ShiftsPage() {
                             : `OT ₹${shift.overtime_rate_per_hour ?? 0}/hr`}
                       </span>
                       )}
-                      {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') &&
+                      {shift.attendance_mode === 'day_based' &&
                         Number(shift.half_day_hours || 0) > 0 && (
                           <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                            Half-day &lt; {shift.half_day_hours}h
+                            Half-day min {shift.half_day_hours}h
                           </span>
                         )}
                       {Number(shift.monthly_permission_hours || 0) > 0 && (
@@ -899,13 +848,11 @@ export default function ShiftsPage() {
                           {shift.lunch_minutes != null ? shift.lunch_minutes : 60} min
                         </dd>
                       </div>
-                      {(shift.attendance_mode === 'day_based' || shift.attendance_mode === 'shift_based') && (
+                      {shift.attendance_mode === 'day_based' && (
                         <div className="flex justify-between gap-2">
                           <dt className="text-slate-500">Full-day worked min</dt>
                           <dd className="font-medium text-slate-800 text-right">
-                            {shift.full_day_hours != null && shift.full_day_hours !== ''
-                              ? `${shift.full_day_hours} h (fixed)`
-                              : 'Auto (shift − lunch)'}
+                            {shift.full_day_hours ?? 0} h
                           </dd>
                         </div>
                       )}
@@ -1032,32 +979,18 @@ export default function ShiftsPage() {
                 )}
                 <div className="flex flex-col gap-1.5">
                   {!hoursBasedOnly && (
-                    <>
-                  <label className="inline-flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="attendance_mode_edit"
-                      value="day_based"
-                      checked={form.attendance_mode === 'day_based'}
-                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'day_based' }))}
-                      disabled={savingEdit}
-                      className="mt-0.5 text-primary-600"
-                    />
-                    <span className="text-[11px] text-slate-700">Day based</span>
-                  </label>
-                  <label className="inline-flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="attendance_mode_edit"
-                      value="shift_based"
-                      checked={form.attendance_mode === 'shift_based'}
-                      onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'shift_based' }))}
-                      disabled={savingEdit}
-                      className="mt-0.5 text-primary-600"
-                    />
-                    <span className="text-[11px] text-slate-700">Shift based (overnight)</span>
-                  </label>
-                    </>
+                    <label className="inline-flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="attendance_mode_edit"
+                        value="day_based"
+                        checked={form.attendance_mode === 'day_based'}
+                        onChange={() => setForm((prev) => ({ ...prev, attendance_mode: 'day_based' }))}
+                        disabled={savingEdit}
+                        className="mt-0.5 text-primary-600"
+                      />
+                      <span className="text-[11px] text-slate-700">Day based</span>
+                    </label>
                   )}
                   <label className="inline-flex items-start gap-2 cursor-pointer">
                     <input
@@ -1148,12 +1081,12 @@ export default function ShiftsPage() {
                 </div>
               </div>
               )}
-              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+              {form.attendance_mode === 'day_based' && (
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Half-day threshold hours</label>
+                  <label className="text-[11px] font-medium text-slate-700">Minimum half-day required hours</label>
                   <input
                     type="number"
-                    min={0}
+                    min={0.5}
                     max={24}
                     step={0.5}
                     value={form.half_day_hours}
@@ -1163,26 +1096,23 @@ export default function ShiftsPage() {
                   />
                 </div>
               )}
-              {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+              {form.attendance_mode === 'day_based' && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
-                    Full-day minimum worked hours
+                    Minimum full-day required hours
                   </label>
                   <input
                     type="number"
-                    min={0}
+                    min={0.5}
                     max={24}
                     step={0.25}
-                    value={form.full_day_hours == null ? '' : form.full_day_hours}
-                    onChange={handleFullDayHoursChange}
+                    value={form.full_day_hours}
+                    onChange={handleChange('full_day_hours')}
                     disabled={savingEdit}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
-                    placeholder="Auto (shift span − lunch)"
+                    placeholder="e.g. 8"
                   />
-                  <p className="text-[10px] text-slate-500">
-                    Empty = (end − start) minus lunch. 0 = punch pattern only. Otherwise need this many
-                    worked hours for a full paid day after four punches.
-                  </p>
+                  <p className="text-[10px] text-slate-500">Worked hours at or above this value count as full-day.</p>
                 </div>
               )}
               <div className="space-y-1">
@@ -1288,7 +1218,7 @@ export default function ShiftsPage() {
                   <label className="text-[11px] font-medium text-slate-700">Grace min</label>
                   <input type="number" min={0} value={form.grace_minutes} onChange={handleChange('grace_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
-                {(form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+                {form.attendance_mode === 'day_based' && (
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-700">Lunch min</label>
                     <input type="number" min={0} value={form.lunch_minutes} onChange={handleChange('lunch_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
@@ -1320,7 +1250,7 @@ export default function ShiftsPage() {
                   </div>
                 </>
               )}
-              {!shiftsCompactUi && (form.attendance_mode === 'day_based' || form.attendance_mode === 'shift_based') && (
+              {!shiftsCompactUi && form.attendance_mode === 'day_based' && (
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-slate-700">Lunch over min</label>

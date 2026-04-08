@@ -269,7 +269,6 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       [companyId]
     );
     const plForfeitIfAbsenceGt = companyPlResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
-    const shiftsCompactUi = companyPlResult.rows[0]?.shifts_compact_ui === true;
 
     const needOvernightRange =
       shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
@@ -345,8 +344,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     const allottedLunchMs = (shift.lunchMinutesAllotted ?? 60) * 60 * 1000;
 
-    // Hours-based mode: compute presence/absence and overtime purely from total hours inside,
-    // but still track late arrivals (first punch) using the same late logic.
+    // Hours-based mode: payroll is hour-ratio based for all companies.
+    // No half-day/full-day buckets are used; each day contributes workedHours/requiredHours.
     if (shift.attendanceMode === 'hours_based') {
       const required = Number(shift.requiredHoursPerDay || 8);
       const dayDetails = [];
@@ -368,7 +367,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         if (!dayLogs.length) {
           if (!isHoliday) {
             rawAbsenceDays += 1;
-            if (shiftsCompactUi) rawAbsenceHours += required;
+            rawAbsenceHours += required;
             dayDetails.push({
               date: dayKey,
               firstInTime: null,
@@ -385,22 +384,15 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
         const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
-        let presentFraction = 0;
+        const presentFraction = required > 0 ? workedHoursCapped / required : 0;
         let statusLabel = 'absent';
 
         if (hoursInside >= required) {
           overtimeHours += hoursInside - required;
         }
-        if (shiftsCompactUi) {
-          // Compact mode (Tharagai): attendance + leave are hour-ratio based.
-          presentFraction = required > 0 ? workedHoursCapped / required : 0;
-          if (presentFraction >= 1) statusLabel = 'present';
-          else if (presentFraction > 0) statusLabel = 'partial_day';
-        } else if (hoursInside >= required) {
-          presentFraction = 1;
+        if (hoursInside >= required) {
           statusLabel = 'present';
-        } else if (hoursInside >= required * 0.5) {
-          presentFraction = 0.5;
+        } else if (presentFraction > 0) {
           statusLabel = 'half_day';
         }
 
@@ -438,14 +430,14 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           presentDays += presentFraction;
           if (!isHoliday) {
             presentWorkingDays += presentFraction;
-            if (!shiftsCompactUi && presentFraction === 0.5) {
+            if (presentFraction > 0 && presentFraction < 1) {
               halfDayDays += 1;
             }
           }
         } else if (!isHoliday) {
           rawAbsenceDays += 1;
         }
-        if (!isHoliday && shiftsCompactUi) {
+        if (!isHoliday) {
           rawAbsenceHours += Math.max(0, required - workedHoursCapped);
         }
 
@@ -488,20 +480,18 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       );
       let paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
       let absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
-      if (shiftsCompactUi) {
-        // Compact mode: apply shift paid leave as hours against total shortfall hours.
-        const rawAbsenceDaysByHours = required > 0 ? rawAbsenceHours / required : 0;
-        paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
-          shift.paidLeaveDays,
-          rawAbsenceDaysByHours,
-          plForfeitIfAbsenceGt
-        );
-        const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * required);
-        const paidLeaveHoursUsed = Math.min(paidLeaveHoursAllowed, rawAbsenceHours);
-        paidLeaveUsed = required > 0 ? paidLeaveHoursUsed / required : 0;
-        absenceDays = required > 0 ? Math.max(0, rawAbsenceHours - paidLeaveHoursUsed) / required : 0;
-        rawAbsenceDays = rawAbsenceDaysByHours;
-      }
+      // Hours-based payroll always applies paid leave against shortfall hours.
+      const rawAbsenceDaysByHours = required > 0 ? rawAbsenceHours / required : 0;
+      paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+        shift.paidLeaveDays,
+        rawAbsenceDaysByHours,
+        plForfeitIfAbsenceGt
+      );
+      const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * required);
+      const paidLeaveHoursUsed = Math.min(paidLeaveHoursAllowed, rawAbsenceHours);
+      paidLeaveUsed = required > 0 ? paidLeaveHoursUsed / required : 0;
+      absenceDays = required > 0 ? Math.max(0, rawAbsenceHours - paidLeaveHoursUsed) / required : 0;
+      rawAbsenceDays = rawAbsenceDaysByHours;
       const unusedPaidLeaveDaysRaw = Math.max(
         0,
         Number(paidLeaveDaysAllowed || 0) - Number(paidLeaveUsed || 0)
@@ -755,7 +745,6 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       [companyId]
     );
     const plForfeitIfAbsenceGtRange = companyPlRangeResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
-    const shiftsCompactUi = companyPlRangeResult.rows[0]?.shifts_compact_ui === true;
 
     const needOvernightRange =
       shift.attendanceMode === 'shift_based' && shift.isOvernightClock;
@@ -843,20 +832,14 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
         const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
-        let presentFraction = 0;
+        const presentFraction = required > 0 ? workedHoursCapped / required : 0;
         let statusLabel = 'absent';
         if (hoursInside >= required) {
           totalOvertimeMs += (hoursInside - required) * 60 * 60 * 1000;
         }
-        if (shiftsCompactUi) {
-          presentFraction = required > 0 ? workedHoursCapped / required : 0;
-          if (presentFraction >= 1) statusLabel = 'present';
-          else if (presentFraction > 0) statusLabel = 'partial_day';
-        } else if (hoursInside >= required) {
-          presentFraction = 1;
+        if (hoursInside >= required) {
           statusLabel = 'present';
-        } else if (hoursInside >= required * 0.5) {
-          presentFraction = 0.5;
+        } else if (presentFraction > 0) {
           statusLabel = 'half_day';
         }
 
@@ -888,7 +871,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           presentDays += presentFraction;
           if (!isHoliday) {
             presentWorkingDays += presentFraction;
-            if (!shiftsCompactUi && presentFraction === 0.5) {
+            if (presentFraction > 0 && presentFraction < 1) {
               halfDayDays += 1;
             }
           }
@@ -898,7 +881,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         // Track workingDays for absence math (non-holidays only)
         if (!isHoliday) workingDays += 1;
-        if (!isHoliday && shiftsCompactUi) {
+        if (!isHoliday) {
           rawAbsenceHours += Math.max(0, required - workedHoursCapped);
         }
 
@@ -1010,7 +993,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       : effectivePaidLeaveDaysAllowed(shift.paidLeaveDays, rawAbsenceDays, plForfeitIfAbsenceGtRange);
     let paidLeaveUsed = disablePaidLeave ? 0 : Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
     let absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
-    if (shiftsCompactUi && shift.attendanceMode === 'hours_based' && disablePaidLeave !== true) {
+    if (shift.attendanceMode === 'hours_based' && disablePaidLeave !== true) {
       const required = Number(shift.requiredHoursPerDay || 8);
       const rawAbsenceDaysByHours = required > 0 ? rawAbsenceHours / required : 0;
       paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(

@@ -215,7 +215,6 @@ function parseShiftData(data) {
   const modeRaw = String(data.attendance_mode || 'day_based').toLowerCase();
   let attendanceMode = 'day_based';
   if (modeRaw === 'hours_based') attendanceMode = 'hours_based';
-  else if (modeRaw === 'shift_based') attendanceMode = 'shift_based';
   else if (modeRaw === 'day_based') attendanceMode = 'day_based';
   const requiredHoursPerDayRaw = Number(data.required_hours_per_day);
   const requiredHoursPerDay = Number.isFinite(requiredHoursPerDayRaw)
@@ -224,15 +223,11 @@ function parseShiftData(data) {
   const halfDayHoursRaw = Number(data.half_day_hours);
   const halfDayHours = Number.isFinite(halfDayHoursRaw)
     ? Math.min(24, Math.max(0, halfDayHoursRaw))
-    : null;
-  const rawFullDay = data.full_day_hours;
-  let fullDayHours = null;
-  if (rawFullDay !== null && rawFullDay !== undefined && rawFullDay !== '') {
-    const n = Number(rawFullDay);
-    if (Number.isFinite(n)) {
-      fullDayHours = Math.min(24, Math.max(0, n));
-    }
-  }
+    : 0;
+  const fullDayRaw = Number(data.full_day_hours);
+  const fullDayHours = Number.isFinite(fullDayRaw)
+    ? Math.min(24, Math.max(0, fullDayRaw))
+    : 0;
   const monthlyPermissionHoursRaw = Number(data.monthly_permission_hours);
   const monthlyPermissionHours = Number.isFinite(monthlyPermissionHoursRaw)
     ? Math.max(0, monthlyPermissionHoursRaw)
@@ -282,17 +277,29 @@ function validateShiftTimes(parsed) {
   const { attendanceMode } = parsed;
   if (attendanceMode === 'day_based' && endMin < startMin) {
     const err = new Error(
-      'Day-based shift must end on the same calendar day after start time. Use Shift based (overnight) for night shifts.'
+      'Day-based shift must end on the same calendar day after start time.'
     );
     err.statusCode = 400;
     throw err;
   }
-  if (attendanceMode === 'shift_based' && endMin >= startMin) {
-    const err = new Error(
-      'Shift based (overnight) requires end time before start time on the clock (e.g. 22:00 to 06:00).'
-    );
-    err.statusCode = 400;
-    throw err;
+  if (attendanceMode === 'day_based') {
+    const half = Number(parsed.halfDayHours);
+    const full = Number(parsed.fullDayHours);
+    if (!Number.isFinite(half) || half <= 0) {
+      const err = new Error('Minimum half-day required hours must be greater than 0 for day-based shifts.');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!Number.isFinite(full) || full <= 0) {
+      const err = new Error('Minimum full-day required hours must be greater than 0 for day-based shifts.');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (full <= half) {
+      const err = new Error('Minimum full-day required hours must be greater than minimum half-day required hours.');
+      err.statusCode = 400;
+      throw err;
+    }
   }
 }
 

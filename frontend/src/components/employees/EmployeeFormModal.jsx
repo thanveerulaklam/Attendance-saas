@@ -38,6 +38,7 @@ export default function EmployeeFormModal({
   const [shiftsLoading, setShiftsLoading] = useState(false);
   const [branches, setBranches] = useState([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
+  const [monthlyOnlyPayroll, setMonthlyOnlyPayroll] = useState(false);
 
 
   const [errors, setErrors] = useState({});
@@ -64,6 +65,11 @@ export default function EmployeeFormModal({
         })
         .catch(() => setBranches([]))
         .finally(() => setBranchesLoading(false));
+
+      authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((json) => setMonthlyOnlyPayroll(json?.data?.shifts_compact_ui === true))
+        .catch(() => setMonthlyOnlyPayroll(false));
     }
   }, [open]);
 
@@ -130,6 +136,11 @@ export default function EmployeeFormModal({
       setToast(null);
     }
   }, [open, employee]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (monthlyOnlyPayroll) setPayrollFrequency('monthly');
+  }, [open, monthlyOnlyPayroll]);
 
   useEffect(() => {
     if (!open || !branches.length) return;
@@ -722,9 +733,14 @@ export default function EmployeeFormModal({
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
               >
                 <option value="monthly">Monthly</option>
-                <option value="weekly">Weekly</option>
+                {!monthlyOnlyPayroll && <option value="weekly">Weekly</option>}
               </select>
             </label>
+            {monthlyOnlyPayroll && (
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                This client uses monthly payroll only.
+              </p>
+            )}
           </div>
         </form>
 

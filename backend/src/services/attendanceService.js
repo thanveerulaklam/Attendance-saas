@@ -122,8 +122,8 @@ function rowToShiftConfig(row) {
 }
 
 /**
- * Minimum worked time (ms) for a paid full day when IN–OUT–IN–OUT is complete.
- * fullDayHours null → (shift wall hours) − (allotted lunch hours), floored at 0.
+ * Minimum worked time (ms) for a paid full day.
+ * Uses configured fullDayHours when present; falls back for legacy records.
  */
 function getFullDayMinimumWorkMs(shiftConfig) {
   const explicit = shiftConfig.fullDayHours;
@@ -377,14 +377,8 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     }
   }
 
-  const present = workedMs > 0 || firstInTime != null;
-  const punchCount = sorted.length;
-
-  // Completed 4-punch pattern (IN, OUT, IN, OUT); payroll "full day" also requires minimum worked time below.
-  const punchPatternComplete =
-    punchCount >= 4 && sorted[punchCount - 1].punch_type?.toLowerCase() === 'out';
-
   // Left during lunch = exactly 2 punches (IN, OUT) — went out for lunch and never punched back IN
+  const punchCount = sorted.length;
   const leftDuringLunch = punchCount === 2 &&
     sorted[0].punch_type?.toLowerCase() === 'in' &&
     sorted[1].punch_type?.toLowerCase() === 'out';
@@ -409,7 +403,7 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     shiftConfig.startMinute
   );
   const late =
-    present &&
+    (workedMs > 0 || firstInTime != null) &&
     firstInTime != null &&
     firstInTime.getTime() > shiftStartMs + shiftConfig.graceMs;
 
@@ -418,28 +412,39 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     workedMs - shiftConfig.shiftMs - shiftConfig.graceMs
   );
   const overtimeHours = overtimeMs / (60 * 60 * 1000);
-  const midpointMs = shiftStartMs + (shiftConfig.shiftMs || 0) / 2;
-
-  const fullDayMinWorkMs = getFullDayMinimumWorkMs(shiftConfig);
-  const fullDay =
-    punchPatternComplete && workedMs + 0.001 >= fullDayMinWorkMs;
-
   const workedHours = workedMs / (60 * 60 * 1000);
+  const fullDayMinHours = Number(shiftConfig.fullDayHours);
+  const halfDayMinHours = Number(shiftConfig.halfDayHours);
+  const fullDayMinWorkMs = getFullDayMinimumWorkMs(shiftConfig);
+  const hasConfiguredThresholds =
+    Number.isFinite(fullDayMinHours) &&
+    Number.isFinite(halfDayMinHours) &&
+    fullDayMinHours > 0 &&
+    halfDayMinHours > 0 &&
+    fullDayMinHours > halfDayMinHours;
+
+  let present = workedMs > 0 || firstInTime != null;
+  let fullDay = false;
   let halfDay = false;
-  const configuredHalfDayHours = Number(shiftConfig.halfDayHours);
-  if (fullDay) {
-    halfDay = false;
-  } else if (punchPatternComplete && workedMs + 0.001 < fullDayMinWorkMs) {
-    // Four punches but not enough worked time for full-day pay → half-day credit.
-    halfDay = true;
-  } else if (Number.isFinite(configuredHalfDayHours) && configuredHalfDayHours > 0) {
-    halfDay = present && workedHours < configuredHalfDayHours;
-  } else if (present && !leftDuringLunch && midpointMs) {
-    if (lastOutTime && lastOutTime.getTime() < midpointMs) {
+
+  if (hasConfiguredThresholds) {
+    if (workedHours + 0.0001 >= fullDayMinHours) {
+      present = true;
+      fullDay = true;
+      halfDay = false;
+    } else if (workedHours + 0.0001 >= halfDayMinHours) {
+      present = true;
+      fullDay = false;
       halfDay = true;
-    } else if (firstInTime && firstInTime.getTime() > midpointMs) {
-      halfDay = true;
+    } else {
+      present = false;
+      fullDay = false;
+      halfDay = false;
     }
+  } else {
+    // Backward-compatible behavior for legacy shifts without configured thresholds.
+    fullDay = workedMs + 0.001 >= fullDayMinWorkMs;
+    halfDay = present && !fullDay;
   }
 
   return {

@@ -41,6 +41,15 @@ function formatHours(value) {
   return num.toFixed(2).replace(/\.?0+$/, '');
 }
 
+function formatMoneyPrecise(n) {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return new Intl.NumberFormat('en-IN', {
+    style: 'decimal',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(Number(n));
+}
+
 function groupDayNumbersByMonth(dateValues) {
   const map = new Map();
   for (const raw of dateValues || []) {
@@ -186,9 +195,20 @@ export default function PayslipModal({
 
   if (!open || !payrollRow || !breakdown) return null;
   const b = breakdown.breakdown || {};
+  const isHoursBasedPayroll =
+    String(breakdown?.attendance?.attendanceMode || '').toLowerCase() === 'hours_based';
+  const absentDaysNum = Number(breakdown?.attendance?.absenceDays || 0);
+  const absentDeductNum = Number(breakdown?.breakdown?.absenceDeduction || 0);
+  const absentPerDayRate =
+    absentDaysNum > 0 && Number.isFinite(absentDeductNum)
+      ? absentDeductNum / absentDaysNum
+      : 0;
+  const absentDeductFormula =
+    absentDaysNum > 0 && absentDeductNum > 0
+      ? `${formatHours(absentDaysNum)} days x Rs ${formatMoneyPrecise(absentPerDayRate)}/day = Rs ${formatMoneyPrecise(absentDeductNum)}`
+      : null;
   const isCompletePeriod =
     b.isMonthComplete != null ? Boolean(b.isMonthComplete) : (b.isWeekComplete != null ? Boolean(b.isWeekComplete) : true);
-  const basicEarnedLabel = isCompletePeriod ? 'Basic Earned' : 'Basic Earned (MTD)';
 
   const handlePrint = () => {
     window.print();
@@ -209,6 +229,8 @@ export default function PayslipModal({
     const sectionGap = 14;
     const b = breakdown.breakdown || {};
     const att = breakdown.attendance || {};
+    const isHoursBasedPayrollPdf =
+      String(att.attendanceMode || '').toLowerCase() === 'hours_based';
 
     const writeLeft = (text, options = {}) => {
       doc.text(String(text), labelX, y, options);
@@ -271,10 +293,31 @@ export default function PayslipModal({
     doc.setFont(undefined, 'bold');
     doc.setTextColor(51, 65, 85);
     writeLeft('ATTENDANCE');
+    if (isHoursBasedPayrollPdf) {
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(37, 99, 235);
+      const hoursModeNote = doc.splitTextToSize(
+        'Hours-based payroll mode: salary is prorated by worked hours/required hours per day. Full-day and half-day buckets are not used for payroll calculation.',
+        contentWidth
+      );
+      doc.text(hoursModeNote, labelX, y);
+      y += hoursModeNote.length * 9;
+    }
     doc.setFontSize(9);
     writeKv('Working Days', String(att.workingDays ?? '—'));
     writeKv('Present', `${att.presentDays ?? '—'} days`);
-    writeKv('Absent', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
+    writeKv('Salary Deduction Absence', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.setTextColor(100, 116, 139);
+    const payrollAbsentHelp = doc.splitTextToSize(
+      'Salary deduction absence = full absent days + (half days x 0.5).',
+      contentWidth
+    );
+    doc.text(payrollAbsentHelp, labelX, y);
+    y += payrollAbsentHelp.length * 8;
+    doc.setFontSize(9);
     writeKv('Late', `${attendanceDetails?.lateCount ?? '—'} times`, [180, 83, 9]);
     writeKv('Overtime', `${formatHours(att.overtimeHours)} hrs`, [5, 150, 105]);
     writeKv('Unused Paid Leave', `${formatHours(b.unusedPaidLeaveDays)} days`, [22, 101, 52]);
@@ -292,6 +335,18 @@ export default function PayslipModal({
     writeKv('Lunch Deduction', `INR ${formatMoney(b.lunchOverDeduction)}`);
     writeKv('Advance Repayment', `INR ${formatMoney(b.salaryAdvance)}`);
     writeKv('Absent Deduction', `INR ${formatMoney(b.absenceDeduction)}`);
+    if (absentDeductFormula) {
+      doc.setFontSize(8);
+      doc.setFont(undefined, 'normal');
+      doc.setTextColor(100, 116, 139);
+      const absentCalcLines = doc.splitTextToSize(
+        absentDeductFormula,
+        contentWidth
+      );
+      doc.text(absentCalcLines, labelX, y);
+      y += absentCalcLines.length * 8;
+      doc.setFontSize(9);
+    }
     writeKv('ESI Deduction', `INR ${formatMoney(b.esiDeduction)}`);
     writeKv('Total Deductions', `INR ${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`, [180, 83, 9]);
 
@@ -451,6 +506,12 @@ punchpay.in
             <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">
               ATTENDANCE SUMMARY
             </h3>
+            {isHoursBasedPayroll && (
+              <p className="mb-2 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] text-blue-800">
+                Hours-based payroll mode: salary is prorated by hours worked (worked hours / required hours per day).
+                Full-day and half-day buckets are not used for payroll calculation.
+              </p>
+            )}
             <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
               <div className="flex justify-between">
                 <span>Working Days</span>
@@ -461,7 +522,7 @@ punchpay.in
                 <span className="font-medium">{breakdown.attendance?.presentDays ?? '—'}</span>
               </div>
               <div className="flex justify-between">
-                <span>Payroll Absent Days</span>
+                <span>Salary Deduction Absence</span>
                 <span className="font-medium text-rose-600">
                   {breakdown.attendance?.absenceDays ?? '—'}
                 </span>
@@ -473,7 +534,7 @@ punchpay.in
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Half Days</span>
+                <span>{isHoursBasedPayroll ? 'Partial Days' : 'Half Days'}</span>
                 <span className="font-medium text-amber-600">
                   {breakdown.attendance?.halfDayDays ?? attendanceDetails?.halfDayCount ?? '—'}
                 </span>
@@ -494,12 +555,15 @@ punchpay.in
                 </span>
               </div>
             </div>
+            <p className="mt-2 text-[10px] text-slate-500">
+              Salary deduction absence = full absent days + (half days x 0.5).
+            </p>
             <div className="mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
               <p className="mt-0.5">{renderGroupedDayNumbers(effectiveAbsentDates)}</p>
               <p className="mt-2 font-semibold">Late Arrival Dates:</p>
               <p className="mt-0.5">{renderGroupedLateDetails(effectiveLateDetails)}</p>
-              <p className="mt-2 font-semibold">Half Day Dates:</p>
+              <p className="mt-2 font-semibold">{isHoursBasedPayroll ? 'Partial Day Dates:' : 'Half Day Dates:'}</p>
               <p className="mt-0.5">{renderGroupedDayNumbers(effectiveHalfDayDates)}</p>
             </div>
           </section>
@@ -516,10 +580,6 @@ punchpay.in
                     <span className="font-medium">₹{formatMoney(breakdown.employee?.basic_salary)}</span>
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span>{basicEarnedLabel}</span>
-                  <span className="font-medium">₹{formatMoney(breakdown.breakdown?.basicSalary)}</span>
-                </div>
                 <div className="flex justify-between">
                   <span>Travel Allow.</span>
                   <span className="font-medium">
@@ -587,6 +647,11 @@ punchpay.in
                     ₹{formatMoney(breakdown.breakdown?.absenceDeduction)}
                   </span>
                 </div>
+                {absentDeductFormula && (
+                  <p className="-mt-0.5 text-[10px] text-slate-500">
+                    {absentDeductFormula}
+                  </p>
+                )}
                 <div className="flex justify-between">
                   <span>ESI Deduction</span>
                   <span className="font-medium text-amber-700">
