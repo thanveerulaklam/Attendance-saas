@@ -90,7 +90,7 @@ export default function EnquiriesPage() {
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-slate-600">
             Showing page <span className="font-medium text-slate-900">{page}</span> of{' '}
@@ -136,7 +136,7 @@ export default function EnquiriesPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full min-w-[760px] text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3 font-medium">Name</th>

@@ -191,7 +191,7 @@ export default function DevicesPage() {
   return (
     <div className="space-y-4">
       {toast && (
-        <div className="fixed right-6 top-20 z-30">
+        <div className="fixed inset-x-3 top-20 z-30 sm:inset-x-auto sm:right-6">
           <div
             className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
               toast.type === 'error'
@@ -226,7 +226,7 @@ export default function DevicesPage() {
         </p>
       </header>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-slate-500">
             Each device gets its own secure API key. The last sync time tells you if data is flowing.
@@ -386,7 +386,7 @@ export default function DevicesPage() {
       </section>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
           <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
             <h2 className="text-sm font-semibold text-slate-900">
               Register new device

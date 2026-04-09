@@ -1303,7 +1303,7 @@ export default function PayrollPage() {
   return (
     <div className="space-y-6">
       {toast && (
-        <div className="fixed top-20 z-30" style={{ right: '20%' }}>
+        <div className="fixed inset-x-3 top-20 z-30 sm:inset-x-auto sm:right-6">
           <div
             className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
               toast.type === 'error'
@@ -1361,7 +1361,7 @@ export default function PayrollPage() {
         </div>
       )}
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
             <button
@@ -1398,7 +1398,7 @@ export default function PayrollPage() {
 
           {payrollMode === 'monthly' ? (
             <>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full sm:w-auto items-center gap-2">
                 <label className="text-[11px] font-medium text-slate-600">Year</label>
                 <select
                   value={year}
@@ -1415,7 +1415,7 @@ export default function PayrollPage() {
                   ))}
                 </select>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex w-full sm:w-auto items-center gap-2">
                 <label className="text-[11px] font-medium text-slate-600">Month</label>
                 <select
                   value={month}
@@ -1434,7 +1434,7 @@ export default function PayrollPage() {
               </div>
             </>
           ) : (
-            <div className="flex items-center gap-2">
+            <div className="flex w-full sm:w-auto items-center gap-2">
               <label className="text-[11px] font-medium text-slate-600">Week start</label>
               <input
                 type="date"
@@ -1447,12 +1447,12 @@ export default function PayrollPage() {
               />
             </div>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex w-full sm:w-auto items-center gap-2">
             <label className="text-[11px] font-medium text-slate-600">Employee</label>
             <select
               value={employeeId}
               onChange={(e) => { setEmployeeId(e.target.value); setPage(1); }}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 min-w-[140px]"
+              className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 min-w-[140px]"
             >
               <option value="">All employees</option>
               {employees.map((emp) => (
@@ -1559,7 +1559,7 @@ export default function PayrollPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full min-w-[1080px] text-xs">
                 <thead>
                   <tr className="border-b border-slate-200 text-left text-slate-600">
                     <th className="w-10 pb-2 pr-2 font-medium">
@@ -1661,7 +1661,7 @@ export default function PayrollPage() {
             </div>
 
             {totalPages > 1 && (
-              <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-500">
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-t border-slate-100 pt-3 text-[11px] text-slate-500">
                 <p>
                   Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}
                 </p>
@@ -1691,7 +1691,7 @@ export default function PayrollPage() {
       </section>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
           <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
             <h2 className="text-sm font-semibold text-slate-900">
               {payrollMode === 'monthly' ? 'Generate payroll for all' : 'Generate weekly payroll for all'}

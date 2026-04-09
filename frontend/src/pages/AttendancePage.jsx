@@ -144,6 +144,15 @@ export default function AttendancePage() {
     return (employees || []).filter((e) => Number(e.branch_id) === bid);
   }, [employees, branchFilter]);
 
+  /** Manual attendance must not list deactivated (inactive) employees; API also rejects them. */
+  const employeesForManualAttendance = useMemo(
+    () =>
+      (employeesForBranch || []).filter(
+        (e) => String(e.status || 'active').toLowerCase() === 'active'
+      ),
+    [employeesForBranch]
+  );
+
   useEffect(() => {
     let isMounted = true;
     authFetch('/api/employees/departments', {
@@ -416,7 +425,7 @@ export default function AttendancePage() {
   const selectAllEmployees = () => {
     setManualForm((f) => ({
       ...f,
-      selected_ids: employeesForBranch.map((e) => e.id),
+      selected_ids: employeesForManualAttendance.map((e) => e.id),
     }));
   };
 
@@ -446,19 +455,19 @@ export default function AttendancePage() {
       </header>
 
       {/* Daily summary card for selected date */}
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
-        <div className="flex items-start justify-between gap-2">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Daily summary</h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
               Attendance for {formatDateLongIstYmd(dateStr)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+              className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
             >
               <option value="all">All departments</option>
               {(departmentOptions || []).map((d) => (
@@ -470,7 +479,7 @@ export default function AttendancePage() {
             <select
               value={branchFilter}
               onChange={(e) => setBranchFilter(e.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+              className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
             >
               <option value="">All branches</option>
               {(branches || []).map((b) => (
@@ -482,7 +491,7 @@ export default function AttendancePage() {
             <button
               type="button"
               onClick={openManualModal}
-              className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
+              className="w-full sm:w-auto shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700"
             >
               Mark manual attendance
             </button>
@@ -570,8 +579,8 @@ export default function AttendancePage() {
               Punch timings for{' '}
               {formatDateDisplayFromYMD(dateStr)}
             </h3>
-            <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-100">
-              <table className="w-full text-[11px]">
+            <div className="max-h-80 overflow-auto rounded-lg border border-slate-100">
+              <table className="w-full min-w-[720px] text-[11px]">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Employee</th>
@@ -726,14 +735,14 @@ export default function AttendancePage() {
       </section>
 
         {/* Monthly calendar */}
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-sm font-semibold text-slate-900">Monthly view</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value)}
-              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+              className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
             >
               <option value="">All employees (summary)</option>
               {employeesForBranch.map((emp) => (
@@ -1359,7 +1368,7 @@ export default function AttendancePage() {
                     </div>
                   </div>
                   <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 p-2 space-y-1">
-                    {employeesForBranch.map((emp) => (
+                    {employeesForManualAttendance.map((emp) => (
                       <label
                         key={emp.id}
                         className="flex items-center gap-2 py-1 px-2 rounded hover:bg-slate-100 cursor-pointer"
@@ -1389,7 +1398,7 @@ export default function AttendancePage() {
                     required={!manualForm.bulk}
                   >
                     <option value="">Select employee</option>
-                    {employeesForBranch.map((emp) => (
+                    {employeesForManualAttendance.map((emp) => (
                       <option key={emp.id} value={emp.id}>
                         {emp.name} ({emp.employee_code})
                       </option>

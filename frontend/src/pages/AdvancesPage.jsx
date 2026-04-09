@@ -316,25 +316,25 @@ export default function AdvancesPage() {
   return (
     <div className="space-y-6">
       {toast && (
-        <div className="fixed top-20 z-30" style={{ right: '20%' }}>
+        <div className="fixed inset-x-3 top-20 z-30 sm:inset-x-auto sm:right-6">
           <div className={`rounded-lg border px-3 py-2 text-xs shadow-soft ${toast.type === 'error' ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'}`}>
             {toast.message}
           </div>
         </div>
       )}
 
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Advance Loans</h1>
           <p className="text-xs text-slate-500">Track multi-month loan repayments and payroll deductions.</p>
         </div>
-        <button type="button" onClick={() => setCreateOpen(true)} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+        <button type="button" onClick={() => setCreateOpen(true)} className="w-full sm:w-auto rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
           New Advance
         </button>
       </header>
 
       <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-soft">
-        <div className="mb-4 flex gap-2">
+        <div className="mb-4 flex flex-wrap gap-2">
           <button type="button" onClick={() => setTab('active')} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab === 'active' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>Active Loans</button>
           <button type="button" onClick={() => setTab('monthly')} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab === 'monthly' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>This Month&apos;s Deductions</button>
           <button type="button" onClick={() => setTab('history')} className={`rounded-lg px-3 py-1.5 text-xs font-medium ${tab === 'history' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'}`}>Loan History</button>
@@ -344,7 +344,7 @@ export default function AdvancesPage() {
           <div className="h-24 animate-pulse rounded bg-slate-50" />
         ) : tab === 'active' ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            <table className="w-full min-w-[980px] text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3">Employee</th>
@@ -385,7 +385,7 @@ export default function AdvancesPage() {
                           <div className="mb-3 h-2 rounded bg-slate-200">
                             <div className="h-2 rounded bg-emerald-500" style={{ width: `${Math.min(100, (Number(expandedLoan.total_repaid || 0) / Number(expandedLoan.loan_amount || 1)) * 100)}%` }} />
                           </div>
-                          <table className="w-full text-xs">
+                          <table className="w-full min-w-[640px] text-xs">
                             <thead>
                               <tr className="text-left text-slate-500">
                                 <th className="pb-1 pr-2">Month</th>
@@ -431,7 +431,8 @@ export default function AdvancesPage() {
             <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
               Total advance deductions this month: ₹{formatMoney(totalMonthlyDeduction)} across {new Set(monthlyRepayments.map((r) => r.employee_id)).size} employees
             </div>
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[900px] text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3">Employee</th>
@@ -489,10 +490,12 @@ export default function AdvancesPage() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
         ) : (
-          <table className="w-full text-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-600">
                 <th className="pb-2 pr-3">Employee</th>
@@ -519,7 +522,8 @@ export default function AdvancesPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         )}
       </div>
 

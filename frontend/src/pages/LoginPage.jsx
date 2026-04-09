@@ -1089,6 +1089,24 @@ if (!document.getElementById('pp-vars')) {
       display: flex; align-items: center; justify-content: center;
       position: relative; z-index: 1;
     }
+
+    @media (max-width: 900px) {
+      body { overflow-x: hidden !important; }
+      .pp-nav-inner { padding: 0 14px !important; }
+      .pp-nav-links { display: none !important; }
+      .pp-nav-actions { gap: 10px !important; }
+      .pp-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; row-gap: 12px !important; }
+      .pp-stats-grid > div { border-right: none !important; }
+      .pp-features-grid { grid-template-columns: 1fr !important; }
+      .pp-steps-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+      .pp-steps-line { display: none !important; }
+      .pp-plans-grid { grid-template-columns: 1fr !important; }
+      .pp-compare-wrap { overflow-x: auto !important; }
+      .pp-compare-wrap table { min-width: 840px !important; }
+      .pp-testimonials-grid { grid-template-columns: 1fr !important; }
+      .pp-footer-grid { grid-template-columns: 1fr !important; gap: 20px !important; }
+      .pp-wa-float { bottom: 14px !important; right: 14px !important; width: 50px !important; height: 50px !important; font-size: 22px !important; }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -1211,9 +1229,9 @@ export default function LoginPage() {
 
   /* ── shared styles ── */
   const S = {
-    page:     { background: 'var(--pp-black)', color: 'var(--pp-white)', fontFamily: "'DM Sans', sans-serif" },
+    page:     { background: 'var(--pp-black)', color: 'var(--pp-white)', fontFamily: "'DM Sans', sans-serif", width: '100%', minHeight: '100vh', overflowX: 'hidden' },
     section:  (bg) => ({ background: bg || 'var(--pp-black)', padding: '80px 24px', position: 'relative' }),
-    maxW:     { maxWidth: 1100, margin: '0 auto' },
+    maxW:     { maxWidth: 1100, width: '100%', margin: '0 auto', boxSizing: 'border-box' },
     heading:  { fontFamily: "'Syne', sans-serif", fontWeight: 800, color: 'var(--pp-white)', letterSpacing: '-1px' },
     gold:     { color: 'var(--pp-gold)' },
     dim:      { color: 'var(--pp-white-dim)' },
@@ -1240,7 +1258,7 @@ export default function LoginPage() {
         background: 'rgba(10,10,10,0.92)', backdropFilter: 'blur(12px)',
         borderBottom: '1px solid var(--pp-border)',
       }}>
-        <div style={{ ...S.maxW, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
+        <div className="pp-nav-inner" style={{ ...S.maxW, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
           {/* logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -1260,8 +1278,8 @@ export default function LoginPage() {
           </div>
 
           {/* nav links */}
-          <nav style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
-            <div style={{ display: 'flex', gap: 24 }}>
+          <nav className="pp-nav-actions" style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
+            <div className="pp-nav-links" style={{ display: 'flex', gap: 24 }}>
               {[['Features','features'],['How it Works','how-it-works'],['Pricing','pricing']].map(([label, id]) => (
                 <button key={id} type="button" className="pp-nav-link" onClick={() => handleScrollToSection(id)}>{label}</button>
               ))}
@@ -1343,7 +1361,7 @@ export default function LoginPage() {
 
         {/* ══ STATS BAR ══ */}
         <section ref={statsRef} style={{ background: '#0d0d0d', borderTop: '1px solid var(--pp-border)', borderBottom: '1px solid var(--pp-border)', padding: '28px 24px' }}>
-          <div style={{ ...S.maxW, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 0 }}>
+          <div className="pp-stats-grid" style={{ ...S.maxW, display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 0 }}>
             {[
               { num: '50+', label: 'Businesses Using PunchPay' },
               { num: '10,000+', label: 'Employees Tracked' },
@@ -1369,7 +1387,7 @@ export default function LoginPage() {
               <p style={{ ...S.dim, fontSize: 14 }}>No HR software training needed. If you can use WhatsApp, you can use PunchPay.</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
+            <div className="pp-features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
               {[
                 { icon: '🔌', title: 'Biometric Sync',       desc: 'Connect ZKTeco or ESSL machine. Punch data syncs to cloud automatically. Zero manual entry.' },
                 { icon: '⏱️', title: 'Smart Attendance',     desc: 'Daily and monthly view. Overtime, lunch breaks, half-day detection — calculated automatically.' },
@@ -1397,9 +1415,9 @@ export default function LoginPage() {
               <p style={{ ...S.dim, fontSize: 14, marginTop: 8 }}>From signup to first payroll in under 30 minutes</p>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 0, position: 'relative' }}>
+            <div className="pp-steps-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 0, position: 'relative' }}>
               {/* connector line */}
-              <div style={{ position: 'absolute', top: 21, left: '12.5%', right: '12.5%', height: 1, borderTop: '1px dashed var(--pp-border)' }} />
+              <div className="pp-steps-line" style={{ position: 'absolute', top: 21, left: '12.5%', right: '12.5%', height: 1, borderTop: '1px dashed var(--pp-border)' }} />
               {[
                 { n:1, title:'Register & Get Approved', desc:'Sign up with company details. We approve within 2 hours.' },
                 { n:2, title:'Add Employees & Shifts',  desc:'Add staff, set salaries, assign shifts and weekly offs.' },
@@ -1426,7 +1444,7 @@ export default function LoginPage() {
             </div>
 
             {/* plan cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 32 }}>
+            <div className="pp-plans-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 32 }}>
               {plans.map((p) => (
                 <div key={p.code} style={{
                   background: p.popular ? 'linear-gradient(160deg,#1c1600,#111)' : 'var(--pp-card)',
@@ -1476,7 +1494,7 @@ export default function LoginPage() {
             </div>
 
             {/* ── comparison table ── */}
-            <div style={{ marginTop: 36 }}>
+            <div className="pp-compare-wrap" style={{ marginTop: 36 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
                 <div>
                   <div className="pp-eyebrow" style={{ marginBottom: 4 }}>Why PunchPay?</div>
@@ -1527,7 +1545,7 @@ export default function LoginPage() {
               <div className="pp-eyebrow">Trusted Across Tamil Nadu</div>
               <h2 className="pp-syne" style={{ ...S.heading, fontSize:32 }}>What Our Clients Say</h2>
             </div>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16 }}>
+            <div className="pp-testimonials-grid" style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16 }}>
               {[
                 { quote:'Finally a software that works with our existing biometric machine. Setup done in one visit and payroll now takes 5 minutes.', name:'Rajesh K.', role:'Textile Factory Owner, Tirupur' },
                 { quote:'The founder came personally and set everything up. Very good support. 80 staff salary is now error-free every month.', name:'Murugan S.', role:'Garment Exporter, Coimbatore' },
@@ -1684,7 +1702,7 @@ export default function LoginPage() {
 
       {/* ══ FOOTER ══ */}
       <footer style={{ background:'#050505', borderTop:'1px solid var(--pp-border)', padding:'48px 24px 24px' }}>
-        <div style={{ ...S.maxW, display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:32, marginBottom:32 }}>
+        <div className="pp-footer-grid" style={{ ...S.maxW, display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:32, marginBottom:32 }}>
           <div>
             <div className="pp-syne" style={{ fontSize:20, fontWeight:800, color:'var(--pp-white)', letterSpacing:'-0.5px', marginBottom:4 }}>
               Punch<span style={S.gold}>Pay</span>

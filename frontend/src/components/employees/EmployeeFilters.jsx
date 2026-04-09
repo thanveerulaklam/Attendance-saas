@@ -21,9 +21,9 @@ export default function EmployeeFilters({ search, status, onSearchChange, onStat
       </div>
 
       {/* Status filter */}
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex flex-col items-start gap-2 text-[11px] sm:flex-row sm:items-center">
         <span className="text-slate-500">Status:</span>
-        <div className="inline-flex rounded-full bg-slate-100 p-0.5">
+        <div className="inline-flex w-full sm:w-auto rounded-full bg-slate-100 p-0.5">
           {[
             { value: 'all', label: 'All' },
             { value: 'active', label: 'Active' },
@@ -35,7 +35,7 @@ export default function EmployeeFilters({ search, status, onSearchChange, onStat
                 key={option.value}
                 type="button"
                 onClick={() => onStatusChange?.(option.value)}
-                className={`px-3 py-1 rounded-full font-medium transition-colors ${
+                className={`flex-1 sm:flex-none px-3 py-1 rounded-full font-medium transition-colors ${
                   isActive
                     ? 'bg-white text-primary-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-800'

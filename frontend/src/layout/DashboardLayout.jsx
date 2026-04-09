@@ -21,6 +21,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [company, setCompany] = useState(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isSuperAdmin =
     user?.role === 'admin' &&
     (user?.company_id == null || Number(user?.company_id) === 0);
@@ -67,8 +68,22 @@ export default function DashboardLayout() {
         </div>
       )}
 
+      {/* Mobile nav overlay */}
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-30 bg-slate-900/50 md:hidden"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-950 text-slate-100 flex flex-col py-6 px-4">
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-950 text-slate-100 flex flex-col py-6 px-4 transform transition-transform duration-200 md:static md:translate-x-0 ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div className="flex items-center gap-3 px-2 mb-8">
           <div
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#D4A843]"
@@ -101,6 +116,7 @@ export default function DashboardLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              onClick={() => setMobileNavOpen(false)}
               className={({ isActive }) =>
                 `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                   isActive
@@ -121,20 +137,30 @@ export default function DashboardLayout() {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <header className="h-16 border-b border-slate-200 bg-white/70 backdrop-blur flex items-center justify-between px-6">
-          <div>
-            <h1 className="text-lg font-semibold text-slate-900">
+        <header className="h-16 border-b border-slate-200 bg-white/70 backdrop-blur flex items-center justify-between px-3 sm:px-4 md:px-6">
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              className="md:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-700"
+              aria-label="Open navigation"
+            >
+              <span className="text-xs font-medium">Menu</span>
+            </button>
+            <div className="min-w-0">
+              <h1 className="truncate text-base sm:text-lg font-semibold text-slate-900">
               {company?.name || 'PunchPay'}
-            </h1>
-            <p className="text-xs text-slate-500">Realtime insights into attendance and payroll</p>
+              </h1>
+              <p className="hidden sm:block text-xs text-slate-500">Realtime insights into attendance and payroll</p>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             <button
               type="button"
               onClick={() => { logout(); navigate('/login'); }}
-              className="text-xs rounded-full px-3 py-1.5 border border-slate-200 text-slate-700 hover:border-primary-200 hover:text-primary-700 transition-colors"
+              className="text-xs rounded-full px-2.5 sm:px-3 py-1.5 border border-slate-200 text-slate-700 hover:border-primary-200 hover:text-primary-700 transition-colors"
             >
               Log out
             </button>
@@ -145,7 +171,7 @@ export default function DashboardLayout() {
         </header>
 
         {/* Page body */}
-        <main className="flex-1 px-6 py-6">
+        <main className="flex-1 px-3 sm:px-4 md:px-6 py-4 md:py-6">
           <Outlet />
         </main>
       </div>

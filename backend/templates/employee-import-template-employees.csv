@@ -1,0 +1,2 @@
+name,employee_code,basic_salary,join_date,department,phone_number,aadhar_number,esi_number,esi_amount,pf_amount,shift_id,branch_id,status,payroll_frequency,salary_type,daily_travel_allowance,permission_hours_override
+Sample Employee,TR001,18000,2026-04-01,Sales,9876543210,123412341234,ESI12345,0,0,,,active,monthly,monthly,0,

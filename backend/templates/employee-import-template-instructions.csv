@@ -1,0 +1,18 @@
+Field,Required,Format / Allowed values,Example
+name,Yes,Text (min 2 chars),John Kumar
+employee_code,Yes,Unique per company,TR001
+basic_salary,Yes,Positive number,18000
+join_date,Yes,YYYY-MM-DD preferred (Excel date also OK),2026-04-01
+department,No,Text,Sales
+phone_number,No,Text or number,9876543210
+aadhar_number,No,Text or number,123412341234
+esi_number,No,Text,ESI12345
+esi_amount,No,Number >= 0,0
+pf_amount,No,Number >= 0,0
+shift_id,No,Numeric shift id,1
+branch_id,No,Numeric branch id,1
+status,No,active | inactive (default: active),active
+payroll_frequency,No,monthly | weekly (for Tharagai use monthly),monthly
+salary_type,No,monthly | per_day,monthly
+daily_travel_allowance,No,Number >= 0,0
+permission_hours_override,No,Number >= 0 (hours),2

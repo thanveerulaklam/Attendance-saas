@@ -206,7 +206,7 @@ export default function EmployeesPage() {
     <div className="space-y-6">
       {/* Toast */}
       {toast && (
-        <div className="fixed left-[58%] top-24 z-30 -translate-x-1/2">
+        <div className="fixed inset-x-3 top-20 z-30 sm:inset-x-auto sm:right-6">
           <div
             className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
               toast.type === 'error'
@@ -273,7 +273,7 @@ export default function EmployeesPage() {
 
         {loading ? (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
+            <table className="min-w-[900px] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-slate-500">
                   <th className="pb-3 pr-4 font-medium">Name</th>
@@ -330,7 +330,7 @@ export default function EmployeesPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
+              <table className="min-w-[900px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500">
                     <th className="pb-3 pr-4 font-medium">Name</th>

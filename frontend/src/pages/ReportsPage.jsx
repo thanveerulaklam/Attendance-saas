@@ -325,7 +325,7 @@ export default function ReportsPage() {
   return (
     <div className="space-y-6">
       {toast && (
-        <div className="fixed right-6 top-20 z-30">
+        <div className="fixed inset-x-3 top-20 z-30 sm:inset-x-auto sm:right-6">
           <div
             className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs shadow-soft ${
               toast.type === 'error'
@@ -356,12 +356,12 @@ export default function ReportsPage() {
         </p>
       </header>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <h2 className="text-sm font-semibold text-slate-900">Current month overview</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
           Live summary for {MONTHS.find((m) => m.value === currentMonthNumber)?.label} {currentMonthYear} up to day {currentDay}.
         </p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           <button
             type="button"
             onClick={() => setDetailsModal('employees')}
@@ -394,12 +394,12 @@ export default function ReportsPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <h2 className="text-sm font-semibold text-slate-900">Date range</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
           Select year and month for the report period.
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-4">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center">
           <div className="flex items-center gap-2">
             <label className="text-[11px] font-medium text-slate-600">Year</label>
             <select
@@ -514,7 +514,7 @@ export default function ReportsPage() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <h2 className="text-sm font-semibold text-slate-900">Detailed Attendance Report (PDF)</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
           Generate a printable PDF with per-employee summary and per-day attendance details.
@@ -653,7 +653,7 @@ export default function ReportsPage() {
       </section>
 
       {detailsModal && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3 sm:px-4">
           <div className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white p-4 shadow-soft">
             <div className="mb-3 flex items-start justify-between">
               <div>

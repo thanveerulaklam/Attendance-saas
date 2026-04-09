@@ -1172,7 +1172,7 @@ export default function AdminPage() {
             <div className="p-6 text-center text-slate-500">No pending requests.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-slate-900">
+              <table className="w-full min-w-[760px] text-sm text-slate-900">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Company</th>
@@ -1248,7 +1248,7 @@ export default function AdminPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1180px] text-sm text-slate-900">
+              <table className="w-full min-w-[980px] text-sm text-slate-900">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Company</th>
@@ -1403,7 +1403,7 @@ export default function AdminPage() {
             <div className="p-4 text-sm text-slate-500">No companies in collections queue.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[700px] text-sm text-slate-900">
+              <table className="w-full min-w-[760px] text-sm text-slate-900">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-4 py-2 text-left">Company</th>
@@ -1458,7 +1458,7 @@ export default function AdminPage() {
             <div className="p-8 text-center text-slate-500">No enquiries yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-slate-900">
+              <table className="w-full min-w-[760px] text-sm text-slate-900">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Name</th>
