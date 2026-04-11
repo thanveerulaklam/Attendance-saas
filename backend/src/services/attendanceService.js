@@ -291,6 +291,23 @@ function computeWorkedMsFromShiftStartToNow(
     }
   }
 
+  // Today only, while shift is still in progress: count last unpaired IN through now (capped at shift end).
+  // After shift end, do not infer hours from an unpaired IN (missing OUT → incomplete day for metrics).
+  if (
+    isCurrentDate &&
+    currentInMs != null &&
+    Number.isFinite(endMs) &&
+    endMs < shiftStartMs + shiftConfig.shiftMs
+  ) {
+    const shiftEndMs = shiftStartMs + shiftConfig.shiftMs;
+    const segStart = Math.max(currentInMs, shiftStartMs);
+    const segEnd = Math.min(endMs, shiftEndMs);
+    const diffMs = segEnd - segStart;
+    if (diffMs > 0 && diffMs <= maxSessionMs) {
+      workedMs += diffMs;
+    }
+  }
+
   return workedMs;
 }
 
@@ -330,8 +347,16 @@ function computeHoursInsideForHoursBasedPayroll(
  * Expects 4-punch pattern: 1=IN, 2=OUT (lunch start), 3=IN (lunch end), 4=OUT (end of day).
  * shiftConfig: { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted, halfDayHours, fullDayHours }
  * calendarDateStr: YYYY-MM-DD attendance day in IST
+ * @param {boolean} [isCurrentDate] - when true, unpaired IN counts through now (capped at shift end) for thresholds and hours
+ * @param {number} [nowMs] - current time for in-progress segments (defaults to Date.now())
  */
-function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
+function computeDayStatus(
+  dayLogs,
+  shiftConfig,
+  calendarDateStr,
+  isCurrentDate = false,
+  nowMs = Date.now()
+) {
   const empty = {
     present: false,
     late: false,
@@ -407,6 +432,23 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
     shiftConfig.startHour,
     shiftConfig.startMinute
   );
+  const shiftEndMs = shiftStartMs + shiftConfig.shiftMs;
+  const maxOpenSessionMs = 24 * 60 * 60 * 1000;
+  if (
+    isCurrentDate &&
+    currentIn != null &&
+    Number.isFinite(nowMs) &&
+    nowMs < shiftEndMs
+  ) {
+    const tIn = currentIn.getTime();
+    const segStart = Math.max(tIn, shiftStartMs);
+    const segEnd = Math.min(nowMs, shiftEndMs);
+    const diffMs = segEnd - segStart;
+    if (diffMs > 0 && diffMs <= maxOpenSessionMs) {
+      workedMs += diffMs;
+    }
+  }
+
   const late =
     (workedMs > 0 || firstInTime != null) &&
     firstInTime != null &&
@@ -433,6 +475,12 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
   let halfDay = false;
 
   if (hasConfiguredThresholds) {
+    const provisionalPresent =
+      isCurrentDate &&
+      currentIn != null &&
+      Number.isFinite(nowMs) &&
+      nowMs < shiftEndMs &&
+      !leftDuringLunch;
     if (workedHours + 0.0001 >= fullDayMinHours) {
       present = true;
       fullDay = true;
@@ -441,6 +489,10 @@ function computeDayStatus(dayLogs, shiftConfig, calendarDateStr) {
       present = true;
       fullDay = false;
       halfDay = true;
+    } else if (provisionalPresent) {
+      present = true;
+      fullDay = false;
+      halfDay = false;
     } else {
       present = false;
       fullDay = false;
@@ -735,7 +787,7 @@ async function getDailyAttendance(
       const status =
         shiftConfig.attendanceMode === 'hours_based'
           ? computeHoursBasedDayStatus(dayLogs, shiftConfig, dateStr, isCurrentDate, nowMs)
-          : computeDayStatus(dayLogs, shiftConfig, dateStr);
+          : computeDayStatus(dayLogs, shiftConfig, dateStr, isCurrentDate, nowMs);
       const isProvisionalHoursBased =
         shiftConfig.attendanceMode === 'hours_based' && isCurrentDate;
       const presentForDaily =
@@ -930,7 +982,7 @@ async function getMonthlyAttendance(
         const status =
           shiftConfig.attendanceMode === 'hours_based'
             ? computeHoursBasedDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs)
-            : computeDayStatus(dayLogs, shiftConfig, key);
+            : computeDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs);
         const workedMsFromShiftStart = computeWorkedMsFromShiftStartToNow(
           dayLogs,
           shiftConfig,

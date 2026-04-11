@@ -52,6 +52,22 @@ function log(msg) {
   } catch (_) {}
 }
 
+/** SDK / network errors are not always Error instances with .message */
+function formatErr(err) {
+  if (err == null) return 'unknown error';
+  if (typeof err === 'string') return err;
+  const m = err.message || err.msg || err.code;
+  const c = err.cause && (err.cause.message || err.cause.code);
+  if (m && c) return `${m} (${c})`;
+  if (m) return String(m);
+  if (typeof err.toString === 'function' && err.toString() !== '[object Object]') return err.toString();
+  try {
+    return JSON.stringify(err);
+  } catch (_) {
+    return String(err);
+  }
+}
+
 /** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
 const MIN_BREAK_MINUTES = 30;
 
@@ -209,9 +225,7 @@ async function fetchAndPush() {
       } catch (_) {}
     }
   } catch (err) {
-    const cause = err?.cause?.message || err?.cause?.code || err?.code;
-    const detail = cause ? `${err.message} (${cause})` : err.message;
-    log(`Error: ${detail}`);
+    log(`Error: ${formatErr(err)}`);
     try {
       await client.disconnect();
     } catch (_) {}
@@ -228,11 +242,11 @@ async function main() {
   }
 
   setInterval(() => {
-    fetchAndPush().catch((e) => log(`Poll error: ${e.message}`));
+    fetchAndPush().catch((e) => log(`Poll error: ${formatErr(e)}`));
   }, POLL_INTERVAL_MS);
   log(`Polling every ${POLL_INTERVAL_MS / 1000}s. Auto-starts with system.`);
 
-  fetchAndPush().catch((e) => log(`Poll error: ${e.message}`));
+  fetchAndPush().catch((e) => log(`Poll error: ${formatErr(e)}`));
 }
 
 main();

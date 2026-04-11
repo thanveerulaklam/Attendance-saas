@@ -42,3 +42,62 @@ test('day_based: full_day_hours 0 restores punch-pattern-only full day', () => {
   assert.equal(status.fullDay, true);
   assert.equal(status.halfDay, false);
 });
+
+test('day_based: single IN on today during shift is present (below half-day hours)', () => {
+  const dayStr = '2026-04-11';
+  const shift = {
+    startHour: 9,
+    startMinute: 0,
+    endHour: 18,
+    endMinute: 0,
+    shiftMs: 9 * 60 * 60 * 1000,
+    graceMs: 15 * 60 * 1000,
+    lunchMinutesAllotted: 60,
+    halfDayHours: 4,
+    fullDayHours: 8,
+  };
+  const logs = [{ punch_time: `${dayStr}T10:00:00+05:30`, punch_type: 'in' }];
+  const nowMs = new Date(`${dayStr}T11:00:00+05:30`).getTime();
+  const status = computeDayStatus(logs, shift, dayStr, true, nowMs);
+  assert.equal(status.present, true);
+  assert.equal(status.fullDay, false);
+  assert.equal(status.halfDay, false);
+});
+
+test('day_based: single IN on past date stays absent when below thresholds', () => {
+  const dayStr = '2026-04-11';
+  const shift = {
+    startHour: 9,
+    startMinute: 0,
+    endHour: 18,
+    endMinute: 0,
+    shiftMs: 9 * 60 * 60 * 1000,
+    graceMs: 0,
+    lunchMinutesAllotted: 60,
+    halfDayHours: 4,
+    fullDayHours: 8,
+  };
+  const logs = [{ punch_time: `${dayStr}T10:00:00+05:30`, punch_type: 'in' }];
+  const nowMs = new Date(`${dayStr}T11:00:00+05:30`).getTime();
+  const status = computeDayStatus(logs, shift, dayStr, false, nowMs);
+  assert.equal(status.present, false);
+});
+
+test('day_based: single IN after shift end today is absent', () => {
+  const dayStr = '2026-04-11';
+  const shift = {
+    startHour: 9,
+    startMinute: 0,
+    endHour: 18,
+    endMinute: 0,
+    shiftMs: 9 * 60 * 60 * 1000,
+    graceMs: 0,
+    lunchMinutesAllotted: 60,
+    halfDayHours: 4,
+    fullDayHours: 8,
+  };
+  const logs = [{ punch_time: `${dayStr}T10:00:00+05:30`, punch_type: 'in' }];
+  const nowMs = new Date(`${dayStr}T20:00:00+05:30`).getTime();
+  const status = computeDayStatus(logs, shift, dayStr, true, nowMs);
+  assert.equal(status.present, false);
+});

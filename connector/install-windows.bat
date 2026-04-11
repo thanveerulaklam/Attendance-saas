@@ -17,7 +17,6 @@ if %errorlevel% neq 0 goto :not_admin
 echo %date% %time% - Running as Administrator >> "%LOG_FILE%"
 echo Installing Attendance Connector to run at Windows startup...
 
-set "RUN_SCRIPT=%CONNECTOR_DIR%run-windows.bat"
 set "TASK_NAME=AttendanceConnector"
 
 REM pkg multi-target `npm run build` -> connector-win.exe; single-target `build:win` -> connector.exe
@@ -41,21 +40,24 @@ if not exist "%CONNECTOR_DIR%config.json" (
 
 echo %date% %time% - config.json found >> "%LOG_FILE%"
 
+REM Node 18 (inside connector-win.exe) blocks Windows 7 unless this is set.
+echo %date% %time% - Setting NODE_SKIP_PLATFORM_CHECK=1 (machine) for older Windows >> "%LOG_FILE%"
+setx NODE_SKIP_PLATFORM_CHECK 1 /M >> "%LOG_FILE%" 2>&1
+REM SYSTEM account reads this key; setx alone sometimes needs a reboot before new scheduled runs see it.
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v NODE_SKIP_PLATFORM_CHECK /t REG_SZ /d 1 /f >> "%LOG_FILE%" 2>&1
+
 REM Remove existing task if any
 echo %date% %time% - Deleting old task if any >> "%LOG_FILE%"
 schtasks /delete /tn "%TASK_NAME%" /f 2>nul
 
 REM Create task: run at SYSTEM startup, as LOCAL SYSTEM
 echo %date% %time% - Creating scheduled task >> "%LOG_FILE%"
-REM Task Scheduler can be picky about running .bat directly; wrap with cmd.exe /c.
-if not exist "%RUN_SCRIPT%" (
-    echo %date% %time% - ERROR: run-windows.bat not found at "%RUN_SCRIPT%" >> "%LOG_FILE%"
-    goto :pause_section
-)
-echo %date% %time% - Scheduled cmd command: cmd.exe /c "%RUN_SCRIPT%" >> "%LOG_FILE%"
-REM Use the same style that previously worked (schedule the .bat directly).
-REM If RUN_SCRIPT path has spaces, Task Scheduler still handles quotes because we pass the full quoted path.
-schtasks /create /tn "%TASK_NAME%" /tr "%RUN_SCRIPT%" /sc onstart /ru SYSTEM /f >> "%LOG_FILE%" 2>>&1
+REM Run the 64-bit .exe directly (no cmd.exe / .bat). On Windows 7, Task Scheduler often starts .bat via
+REM 32-bit WOW64 cmd, which then fails to start this 64-bit exe with exit code 216 (ERROR_EXE_MACHINE_TYPE_MISMATCH).
+REM Config path is derived from the exe location in index.js, so working directory is not required.
+echo %date% %time% - Scheduled task runs: "%CONNECTOR_EXE%" >> "%LOG_FILE%"
+REM Quote the exe path for schtasks (required if the folder path contains spaces, e.g. Program Files).
+schtasks /create /tn "%TASK_NAME%" /tr "\"%CONNECTOR_EXE%\"" /sc onstart /ru SYSTEM /f >> "%LOG_FILE%" 2>>&1
 
 REM Check result immediately (next command overwrites errorlevel)
 if errorlevel 1 goto :task_failed
@@ -66,6 +68,9 @@ echo %date% %time% - SUCCESS: Task created. Connector will start at Windows star
 echo.
 echo SUCCESS: Connector will start automatically when Windows starts.
 echo Log file: %CONNECTOR_DIR%connector.log
+echo.
+echo Windows 7: NODE_SKIP_PLATFORM_CHECK was set machine-wide. Reboot once so the scheduled task ^(SYSTEM^) always sees it.
+echo For auto-restart after crashes, use run-windows.bat from a shortcut ^(not the scheduled task^).
 echo.
 echo Starting the connector now...
 schtasks /run /tn "%TASK_NAME%" >> "%LOG_FILE%" 2>>&1
