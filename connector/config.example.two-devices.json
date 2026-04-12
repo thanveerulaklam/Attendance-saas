@@ -1,0 +1,18 @@
+{
+  "backendUrl": "https://punchpay.in",
+  "pollIntervalMs": 60000,
+  "devices": [
+    {
+      "label": "device-1-entrance",
+      "deviceIp": "192.168.1.50",
+      "devicePort": 4370,
+      "deviceApiKey": "paste-api-key-for-first-device-from-app"
+    },
+    {
+      "label": "device-2-office",
+      "deviceIp": "192.168.1.51",
+      "devicePort": 4370,
+      "deviceApiKey": "paste-api-key-for-second-device-from-app"
+    }
+  ]
+}

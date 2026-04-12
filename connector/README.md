@@ -22,7 +22,7 @@ If `pkg` fails with cache permission errors, run with: `PKG_CACHE_PATH=./.pkg-ca
 ### Give each client a zip with:
 
 1. **connector.exe** (Windows) or **connector-mac** (Mac)
-2. **config.example.json** → they rename to **config.json** and edit
+2. **config.example.json** and **config.example.two-devices.json** → client renames one pattern to **config.json** and edits
 3. **install-windows.bat** (Windows) or **install-mac.sh** (Mac)
 4. **run-windows.bat** (Windows only)
 5. **SETUP_GUIDE_CLIENTS.txt** (step-by-step instructions for clients)
@@ -43,9 +43,8 @@ Put `connector.exe` (or `connector-mac`), `config.example.json`, and the install
 
 1. Rename `config.example.json` to `config.json`
 2. Edit with Notepad/TextEdit. Fill in:
-   - **deviceIp**: their biometric device IP (e.g. 192.168.1.50)
-   - **deviceApiKey**: from your app (Devices → Add device → Copy key)
-   - **backendUrl**: your cloud API (e.g. https://api.yourapp.com)
+   - **One device:** `deviceIp`, `deviceApiKey`, `backendUrl` (see `config.example.json`).
+   - **Two devices on same network:** use a **`devices`** array — each entry has its own `deviceIp` and `deviceApiKey` (register **two** devices in the app; each gets a different key). See `config.example.two-devices.json`.
 
 ### Step 4: Install auto-start
 

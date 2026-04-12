@@ -251,7 +251,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_pass http://attendance_api;
         proxy_read_timeout 60s;
-        client_max_body_size 5M;
+        client_max_body_size 50M;
     }
 
     # React SPA - serve index.html for all other routes

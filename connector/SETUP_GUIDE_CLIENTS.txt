@@ -150,6 +150,30 @@ STEP 5: Verify (optional)
 
 
 ================================================================================
+TWO BIOMETRIC DEVICES (SAME ROUTER / ONE PC) — OPTIONAL
+================================================================================
+
+If you have TWO machines and ONE Windows/Mac PC on the same network:
+
+1) On EACH biometric device: Communication → Ethernet → set a DIFFERENT IP
+   (example: 192.168.1.50 and 192.168.1.51). Same gateway as your router. Port 4370.
+
+2) In the app: Devices → Add device → TWICE (e.g. "Gate" and "Office").
+   Copy EACH device's API key (they are different).
+
+3) In the AttendanceConnector folder, use the file "config.example.two-devices.json"
+   as a template: copy its contents into config.json (or rename it to config.json
+   after editing). Put the correct IP and API key for EACH device in the "devices" list.
+
+4) Run install-windows.bat (as Administrator) or install-mac.sh once as usual.
+   One connector will sync BOTH devices in turn. Check connector.log for lines
+   like [device-1-entrance] and [device-2-office].
+
+If you only have ONE machine, keep the normal config.json with deviceIp and
+deviceApiKey only (see STEP 3 above).
+
+
+================================================================================
 TROUBLESHOOTING
 ================================================================================
 

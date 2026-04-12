@@ -41,6 +41,9 @@ function log(msg) {
   console.log(`[${ts}] ${msg}`);
 }
 
+/** Keep each POST under reverse-proxy body limits (avoid 413). */
+const MAX_LOGS_PER_PUSH = 1200;
+
 /** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
 const MIN_BREAK_MINUTES = 30;
 
@@ -151,29 +154,39 @@ async function fetchAndPush() {
 
     const logsToSend = assignInOut(logs);
 
-    const payload = {
-      logs: logsToSend.map((l) => ({
-        employee_code: l.employee_code,
-        punch_time: l.punch_time,
-        punch_type: l.punch_type,
-      })),
-    };
+    const entries = logsToSend.map((l) => ({
+      employee_code: l.employee_code,
+      punch_time: l.punch_time,
+      punch_type: l.punch_type,
+    }));
 
-    const res = await fetch(`${BACKEND_URL}/api/device/push`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-device-key': DEVICE_API_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
+    const pushUrl = `${BACKEND_URL}/api/device/push`;
+    let totalInserted = 0;
+    const numChunks = Math.ceil(entries.length / MAX_LOGS_PER_PUSH) || 1;
 
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      log(`Push failed ${res.status}: ${body.message || res.statusText}`);
-      return;
+    for (let offset = 0; offset < entries.length; offset += MAX_LOGS_PER_PUSH) {
+      const chunk = entries.slice(offset, offset + MAX_LOGS_PER_PUSH);
+      const chunkIndex = Math.floor(offset / MAX_LOGS_PER_PUSH) + 1;
+      const res = await fetch(pushUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-device-key': DEVICE_API_KEY,
+        },
+        body: JSON.stringify({ logs: chunk }),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        log(
+          `Push failed ${res.status} (chunk ${chunkIndex}/${numChunks}): ${body.message || res.statusText}`
+        );
+        return;
+      }
+      totalInserted += Number(body.data?.inserted ?? chunk.length) || 0;
     }
-    log(`Pushed ${body.data?.inserted ?? logsToSend.length} logs to backend.`);
+
+    log(`Pushed ${totalInserted} logs to backend in ${numChunks} chunk(s).`);
 
     // Clear device logs after successful push (reconnect to do it)
     const clearClient = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);

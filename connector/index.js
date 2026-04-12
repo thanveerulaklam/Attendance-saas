@@ -30,13 +30,40 @@ function loadConfig() {
 }
 
 const config = loadConfig();
-const DEVICE_IP = config.deviceIp || '192.168.1.50';
-const DEVICE_PORT = parseInt(config.devicePort || '4370', 10);
-const DEVICE_API_KEY = config.deviceApiKey;
 const BACKEND_URL = (config.backendUrl || 'https://punchpay.in').replace(/\/$/, '');
 const POLL_INTERVAL_MS = parseInt(config.pollIntervalMs || '60000', 10);
 
 const runOnce = process.argv.includes('--once');
+
+/**
+ * One device: use top-level deviceIp + deviceApiKey (legacy).
+ * Two+ devices on same LAN: use "devices": [ { deviceIp, deviceApiKey }, ... ] — each needs its own key from the app.
+ */
+function normalizeDevices(cfg) {
+  if (Array.isArray(cfg.devices) && cfg.devices.length > 0) {
+    return cfg.devices
+      .map((d, i) => ({
+        label: d.label || `device-${i + 1}`,
+        deviceIp: d.deviceIp || d.ip,
+        devicePort: parseInt(d.devicePort || d.port || cfg.devicePort || '4370', 10),
+        deviceApiKey: d.deviceApiKey || d.apiKey,
+      }))
+      .filter((d) => d.deviceIp && d.deviceApiKey);
+  }
+  const ip = cfg.deviceIp || '192.168.1.50';
+  const key = cfg.deviceApiKey;
+  if (!key) return [];
+  return [
+    {
+      label: 'device-1',
+      deviceIp: ip,
+      devicePort: parseInt(cfg.devicePort || '4370', 10),
+      deviceApiKey: key,
+    },
+  ];
+}
+
+const DEVICES = normalizeDevices(config);
 
 process.on('unhandledRejection', (reason) => {
   log(`Unhandled rejection (will retry): ${reason && (reason.message || reason)}`);
@@ -67,6 +94,9 @@ function formatErr(err) {
     return String(err);
   }
 }
+
+/** Split pushes so each request stays under proxy limits (413) even with months of backlog. */
+const MAX_LOGS_PER_PUSH = 1200;
 
 /** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
 const MIN_BREAK_MINUTES = 30;
@@ -115,18 +145,19 @@ function assignInOut(logs) {
   return result;
 }
 
-async function fetchAndPush() {
-  if (!DEVICE_API_KEY) {
-    log('ERROR: deviceApiKey not set in config.json');
+async function fetchAndPushOne(dev) {
+  const { label, deviceIp, devicePort, deviceApiKey } = dev;
+  if (!deviceApiKey) {
+    log(`ERROR [${label}]: deviceApiKey not set`);
     return;
   }
 
   const ZKAttendanceClient = require('zk-attendance-sdk');
-  const client = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);
+  const client = new ZKAttendanceClient(deviceIp, devicePort, 5000);
 
   try {
     await client.createSocket();
-    log(`Connected to device at ${DEVICE_IP}:${DEVICE_PORT}`);
+    log(`[${label}] Connected to device at ${deviceIp}:${devicePort}`);
 
     let size = 0;
     let sizeCheckFailed = false;
@@ -134,13 +165,13 @@ async function fetchAndPush() {
       size = await client.getAttendanceSize();
     } catch (sizeErr) {
       const msg = sizeErr?.message || sizeErr?.msg || (typeof sizeErr === 'string' ? sizeErr : (sizeErr && typeof sizeErr === 'object' ? (sizeErr.toString?.() !== '[object Object]' ? sizeErr.toString() : JSON.stringify(sizeErr)) : String(sizeErr)));
-      log(`Size check failed (will try to fetch anyway): ${msg}`);
+      log(`[${label}] Size check failed (will try to fetch anyway): ${msg}`);
       sizeCheckFailed = true;
       size = 1; // so we don't exit early; try getAttendances() once
     }
 
     if (size === 0) {
-      log('No attendance records on device.');
+      log(`[${label}] No attendance records on device.`);
       try { await client.disconnect(); } catch (_) {}
       return;
     }
@@ -151,7 +182,7 @@ async function fetchAndPush() {
     } catch (sdkErr) {
       const errMsg = sdkErr?.toast?.() || sdkErr?.err?.message || sdkErr?.message || sdkErr?.msg
         || (typeof sdkErr === 'string' ? sdkErr : (sdkErr?.toString?.() !== '[object Object]' ? sdkErr?.toString?.() : 'Device communication failed'));
-      log(`Device read error (will retry): ${errMsg}`);
+      log(`[${label}] Device read error (will retry): ${errMsg}`);
       try { await client.disconnect(); } catch (_) {}
       return;
     } finally {
@@ -160,7 +191,7 @@ async function fetchAndPush() {
 
     const rawRecords = result?.data || [];
     if (rawRecords.length === 0) {
-      log('No attendance records on device.');
+      log(`[${label}] No attendance records on device.`);
       return;
     }
 
@@ -174,79 +205,104 @@ async function fetchAndPush() {
       }));
 
     if (logs.length === 0) {
-      log('No valid records after mapping.');
+      log(`[${label}] No valid records after mapping.`);
       return;
     }
 
     const logsToSend = assignInOut(logs);
 
-    const payload = {
-      logs: logsToSend.map((l) => ({
-        employee_code: l.employee_code,
-        punch_time: l.punch_time,
-        punch_type: l.punch_type,
-      })),
-    };
+    const entries = logsToSend.map((l) => ({
+      employee_code: l.employee_code,
+      punch_time: l.punch_time,
+      punch_type: l.punch_type,
+    }));
 
     const pushUrl = `${BACKEND_URL.replace(/\/$/, '')}/api/device/push`;
-    let res;
-    try {
-      res = await fetch(pushUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-device-key': DEVICE_API_KEY,
-        },
-        body: JSON.stringify(payload),
-      });
-    } catch (fetchErr) {
-      const cause = fetchErr?.cause?.message || fetchErr?.cause?.code || fetchErr?.code;
-      log(`Backend unreachable: ${fetchErr.message}${cause ? ` (${cause})` : ''}. Check backendUrl in config.json.`);
-      return;
+    let totalInserted = 0;
+    const numChunks = Math.ceil(entries.length / MAX_LOGS_PER_PUSH) || 1;
+
+    for (let offset = 0; offset < entries.length; offset += MAX_LOGS_PER_PUSH) {
+      const chunk = entries.slice(offset, offset + MAX_LOGS_PER_PUSH);
+      const chunkIndex = Math.floor(offset / MAX_LOGS_PER_PUSH) + 1;
+      const payload = { logs: chunk };
+
+      let res;
+      try {
+        res = await fetch(pushUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-device-key': deviceApiKey,
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (fetchErr) {
+        const cause = fetchErr?.cause?.message || fetchErr?.cause?.code || fetchErr?.code;
+        log(
+          `[${label}] Backend unreachable (chunk ${chunkIndex}/${numChunks}): ${fetchErr.message}${cause ? ` (${cause})` : ''}. Check backendUrl in config.json.`
+        );
+        return;
+      }
+
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        log(
+          `[${label}] Push failed ${res.status} (chunk ${chunkIndex}/${numChunks}, ${chunk.length} logs): ${body.message || res.statusText}`
+        );
+        return;
+      }
+      totalInserted += Number(body.data?.inserted ?? chunk.length) || 0;
     }
 
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      log(`Push failed ${res.status}: ${body.message || res.statusText}`);
-      return;
-    }
-    log(`Pushed ${body.data?.inserted ?? logsToSend.length} logs to backend.`);
+    log(`[${label}] Pushed ${totalInserted} logs to backend in ${numChunks} chunk(s).`);
 
-    const clearClient = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);
+    const clearClient = new ZKAttendanceClient(deviceIp, devicePort, 5000);
     try {
       await clearClient.createSocket();
       await clearClient.clearAttendanceLog();
-      log('Cleared attendance logs from device.');
+      log(`[${label}] Cleared attendance logs from device.`);
     } catch (e) {
-      log(`Warning: could not clear device logs: ${e.message}`);
+      log(`[${label}] Warning: could not clear device logs: ${e.message}`);
     } finally {
       try {
         await clearClient.disconnect();
       } catch (_) {}
     }
   } catch (err) {
-    log(`Error: ${formatErr(err)}`);
+    log(`[${label}] Error: ${formatErr(err)}`);
     try {
       await client.disconnect();
     } catch (_) {}
   }
 }
 
+async function pollAllDevices() {
+  for (const dev of DEVICES) {
+    await fetchAndPushOne(dev);
+  }
+}
+
 async function main() {
+  if (DEVICES.length === 0) {
+    console.error('ERROR: No devices configured. Set deviceIp + deviceApiKey, or a non-empty "devices" array in config.json');
+    process.exit(1);
+  }
+
   log('Connector started.');
-  log(`Device: ${DEVICE_IP}:${DEVICE_PORT} | Backend: ${BACKEND_URL}`);
+  log(`Devices: ${DEVICES.length} | Backend: ${BACKEND_URL}`);
+  DEVICES.forEach((d) => log(`  - ${d.label}: ${d.deviceIp}:${d.devicePort}`));
 
   if (runOnce) {
-    await fetchAndPush();
+    await pollAllDevices();
     process.exit(0);
   }
 
   setInterval(() => {
-    fetchAndPush().catch((e) => log(`Poll error: ${formatErr(e)}`));
+    pollAllDevices().catch((e) => log(`Poll error: ${formatErr(e)}`));
   }, POLL_INTERVAL_MS);
   log(`Polling every ${POLL_INTERVAL_MS / 1000}s. Auto-starts with system.`);
 
-  fetchAndPush().catch((e) => log(`Poll error: ${formatErr(e)}`));
+  pollAllDevices().catch((e) => log(`Poll error: ${formatErr(e)}`));
 }
 
 main();

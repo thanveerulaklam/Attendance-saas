@@ -100,6 +100,30 @@ Same as Part A: **Devices → Add device → Copy API key.**
 
 The connector pulls logs from the device (TCP) and pushes them to `BACKEND_URL/api/device/push`.
 
+### Two (or more) devices on the same router / LAN
+
+Use this when **multiple biometric machines** and **one PC** are on the same network (typical for Tharagai-style setups).
+
+1. **Give each device a different static IP**  
+   On each machine: **Communication → Ethernet** → e.g. Device A `192.168.1.50`, Device B `192.168.1.51`. Same subnet and gateway as the PC. Port **4370** (default ZKTeco). Do **not** use Cloud server on the device if you use the connector.
+
+2. **Register each device separately in the app**  
+   **Devices → Add device** twice (e.g. “Main gate”, “Back office”). **Each registration gets its own API key.** Copy both keys.
+
+3. **One connector on the PC** (recommended)  
+   Use the standalone **connector** (`connector/` in the repo, or `connector.exe` you distribute). In `config.json`, use a **`devices`** array so one process polls both machines in turn:
+
+   - Copy `connector/config.example.two-devices.json` to `config.json` and edit:
+     - `deviceIp` = each device’s LAN IP  
+     - `deviceApiKey` = the key that belongs to **that** device in the app  
+     - `backendUrl` = your cloud URL (e.g. `https://punchpay.in`)  
+   - Install/start the connector once (Windows: `install-windows.bat` as Administrator). Logs will show `[device-1-entrance]` / `[device-2-office]` per device.
+
+   **Alternative:** Two folders, two `config.json` files (single-device format each), and **two** scheduled tasks — works but more to maintain.
+
+4. **Employee codes**  
+   Same as below: on **both** devices, user **User ID** must match **employee_code** in the app (employees are not tied to a specific machine unless you enforce it in policy).
+
 ## 4. Employee codes
 
 Same as Part A: device User ID must match **employee_code** in the app.
