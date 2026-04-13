@@ -288,15 +288,15 @@ async function processDeviceLogs(apiKey, logs) {
     return e && e.branch_id === deviceBranchId;
   });
 
+  // Entire batch may be device junk (e.g. user id 0) or unknown IDs — do not 400; let connector finish other chunks.
   if (validLogs.length === 0) {
-    if (unknownCodes.length > 0) {
-      throw new AppError(`Unknown employee_code for this company: ${unknownCodes[0]}`, 400);
-    }
-    if (wrongBranchCodes.length > 0) {
-      throw new AppError(
-        `Employee(s) not registered at this device's branch: ${wrongBranchCodes.join(', ')}`,
-        400
-      );
+    if (unknownCodes.length > 0 || wrongBranchCodes.length > 0) {
+      const skipped = [...new Set([...unknownCodes, ...wrongBranchCodes])];
+      await pool.query(`UPDATE devices SET last_seen_at = NOW() WHERE id = $1`, [device.id]);
+      return {
+        inserted: 0,
+        skipped_unknown_codes: skipped,
+      };
     }
     throw new AppError('No valid punches to import', 400);
   }
