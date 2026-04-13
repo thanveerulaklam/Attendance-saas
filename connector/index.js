@@ -65,8 +65,12 @@ function normalizeDevices(cfg) {
 
 const DEVICES = normalizeDevices(config);
 
+/** Reset when SDK throws outside awaited promises (see zk-attendance-sdk readWithBuffer). */
+let pollInProgress = false;
+
 process.on('unhandledRejection', (reason) => {
   log(`Unhandled rejection (will retry): ${reason && (reason.message || reason)}`);
+  pollInProgress = false;
 });
 
 function log(msg) {
@@ -289,8 +293,6 @@ async function pollAllDevices() {
 }
 
 /** Prevents overlapping runs: large device buffers can take several minutes per poll. */
-let pollInProgress = false;
-
 async function runPollTick() {
   if (pollInProgress) {
     log('Previous sync still in progress; skipping this scheduled tick (wait for it to finish).');

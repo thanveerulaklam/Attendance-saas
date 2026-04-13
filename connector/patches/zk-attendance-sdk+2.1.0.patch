@@ -1,0 +1,40 @@
+diff --git a/node_modules/zk-attendance-sdk/src/jtcp.js b/node_modules/zk-attendance-sdk/src/jtcp.js
+index 939309a..866f9a9 100644
+--- a/node_modules/zk-attendance-sdk/src/jtcp.js
++++ b/node_modules/zk-attendance-sdk/src/jtcp.js
+@@ -240,7 +240,12 @@ class JTCP {
+       } catch (err) {
+         reject(err)
+         console.log(reply)
++        return
++      }
+ 
++      if (!reply || !Buffer.isBuffer(reply) || reply.length < 16) {
++        reject(new Error('No reply from device or invalid response'))
++        return
+       }
+ 
+       const header = decodeTCPHeader(reply.subarray(0, 16))
+@@ -269,7 +274,7 @@ class JTCP {
+           let realTotalBuffer = Buffer.from([])
+ 
+ 
+-          const timeout = 10000
++          const timeout = 120000
+           let timer = setTimeout(() => {
+             internalCallback(replyData, new Error('TIMEOUT WHEN RECEIVING PACKET'))
+           }, timeout)
+@@ -419,6 +424,13 @@ class JTCP {
+       return Promise.reject(err)
+     }
+ 
++    if (data.err) {
++      return Promise.reject(data.err)
++    }
++    if (!data.data || !Buffer.isBuffer(data.data) || data.data.length < 4) {
++      return Promise.reject(new Error('Invalid or empty attendance buffer from device'))
++    }
++
+     if (this.socket) {
+       try {
+         await this.freeData()

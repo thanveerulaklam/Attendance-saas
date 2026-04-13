@@ -10,7 +10,7 @@ Runs on the client's PC. Syncs biometric device to your cloud. **Install once �
 
 ```bash
 cd connector
-npm install
+npm install   # applies patches/zk-attendance-sdk+2.1.0.patch (SDK bugfixes + longer device read timeout)
 npm run build:win   # → dist/connector.exe (run on Windows or use cross-compile)
 npm run build:mac   # → dist/connector-mac (run on Mac)
 ```

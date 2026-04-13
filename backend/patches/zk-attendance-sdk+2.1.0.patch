@@ -1,0 +1,59 @@
+diff --git a/node_modules/zk-attendance-sdk/src/jtcp.js b/node_modules/zk-attendance-sdk/src/jtcp.js
+index 939309a..2d2ec46 100644
+--- a/node_modules/zk-attendance-sdk/src/jtcp.js
++++ b/node_modules/zk-attendance-sdk/src/jtcp.js
+@@ -159,9 +159,7 @@ class JTCP {
+         }, this.timeout)
+ 
+       })
+-    }).catch(function () {
+-      console.log("Promise Rejected");
+-     });
++    });
+ 
+   }
+ 
+@@ -239,8 +237,12 @@ class JTCP {
+         
+       } catch (err) {
+         reject(err)
+-        console.log(reply)
++        return
++      }
+ 
++      if (!reply || !Buffer.isBuffer(reply) || reply.length < 16) {
++        reject(new Error('No reply from device or invalid response'))
++        return
+       }
+       
+       const header = decodeTCPHeader(reply.subarray(0, 16))
+@@ -269,7 +271,7 @@ class JTCP {
+           let realTotalBuffer = Buffer.from([])
+ 
+ 
+-          const timeout = 10000
++          const timeout = 120000
+           let timer = setTimeout(() => {
+             internalCallback(replyData, new Error('TIMEOUT WHEN RECEIVING PACKET'))
+           }, timeout)
+@@ -419,6 +421,10 @@ class JTCP {
+       return Promise.reject(err)
+     }
+ 
++    if (data.err) {
++      return Promise.reject(data.err)
++    }
++
+     if (this.socket) {
+       try {
+         await this.freeData()
+@@ -430,6 +436,9 @@ class JTCP {
+ 
+     const RECORD_PACKET_SIZE = 40
+ 
++    if (!data || !data.data || !Buffer.isBuffer(data.data)) {
++      return Promise.reject(new Error('Invalid attendance data from device'))
++    }
+     let recordData = data.data.subarray(4)
+     let records = []
+     while (recordData.length >= RECORD_PACKET_SIZE) {
