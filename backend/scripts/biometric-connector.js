@@ -213,6 +213,23 @@ async function fetchAndPush() {
   }
 }
 
+let pollInProgress = false;
+
+async function runPollTick() {
+  if (pollInProgress) {
+    log('Previous sync still in progress; skipping this scheduled tick.');
+    return;
+  }
+  pollInProgress = true;
+  try {
+    await fetchAndPush();
+  } catch (e) {
+    log(`Poll error: ${e.message}`);
+  } finally {
+    pollInProgress = false;
+  }
+}
+
 async function main() {
   log('Biometric connector started.');
   log(`Device: ${DEVICE_IP}:${DEVICE_PORT} | Backend: ${BACKEND_URL}`);
@@ -222,14 +239,12 @@ async function main() {
     process.exit(0);
   }
 
-  // Register interval FIRST so it runs even if the first poll hangs or crashes
   setInterval(() => {
-    fetchAndPush().catch((e) => log(`Poll error: ${e.message}`));
+    runPollTick();
   }, POLL_INTERVAL_MS);
   log(`Polling every ${POLL_INTERVAL_MS / 1000}s. Ctrl+C to stop.`);
 
-  // First poll (don't await – SDK can hang on rejection)
-  fetchAndPush().catch((e) => log(`Poll error: ${e.message}`));
+  runPollTick();
 }
 
 main();

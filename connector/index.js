@@ -288,6 +288,24 @@ async function pollAllDevices() {
   }
 }
 
+/** Prevents overlapping runs: large device buffers can take several minutes per poll. */
+let pollInProgress = false;
+
+async function runPollTick() {
+  if (pollInProgress) {
+    log('Previous sync still in progress; skipping this scheduled tick (wait for it to finish).');
+    return;
+  }
+  pollInProgress = true;
+  try {
+    await pollAllDevices();
+  } catch (e) {
+    log(`Poll error: ${formatErr(e)}`);
+  } finally {
+    pollInProgress = false;
+  }
+}
+
 async function main() {
   if (DEVICES.length === 0) {
     console.error('ERROR: No devices configured. Set deviceIp + deviceApiKey, or a non-empty "devices" array in config.json');
@@ -304,11 +322,11 @@ async function main() {
   }
 
   setInterval(() => {
-    pollAllDevices().catch((e) => log(`Poll error: ${formatErr(e)}`));
+    runPollTick();
   }, POLL_INTERVAL_MS);
   log(`Polling every ${POLL_INTERVAL_MS / 1000}s. Auto-starts with system.`);
 
-  pollAllDevices().catch((e) => log(`Poll error: ${formatErr(e)}`));
+  runPollTick();
 }
 
 main();
