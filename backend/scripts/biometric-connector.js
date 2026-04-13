@@ -99,7 +99,7 @@ async function fetchAndPush() {
     return;
   }
 
-  const client = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);
+    const client = new ZKAttendanceClient(DEVICE_IP, DEVICE_PORT, 5000);
 
   try {
     await client.createSocket();
@@ -107,7 +107,9 @@ async function fetchAndPush() {
 
     let size = 0;
     try {
+      log('Reading log buffer size from device…');
       size = await client.getAttendanceSize();
+      log(`Device reports ${size} record(s) in buffer.`);
     } catch (_) {}
 
     if (size === 0) {
@@ -120,7 +122,9 @@ async function fetchAndPush() {
 
     let result;
     try {
+      log('Downloading attendance logs (may take several minutes if buffer is large)…');
       result = await client.getAttendances();
+      log(`Finished download (${result?.data?.length ?? 0} raw row(s)).`);
     } catch (sdkErr) {
       const errMsg = (sdkErr && (sdkErr.message || String(sdkErr))) || 'Unknown error';
       log(`Device read error (will retry): ${errMsg}`);

@@ -162,7 +162,9 @@ async function fetchAndPushOne(dev) {
     let size = 0;
     let sizeCheckFailed = false;
     try {
+      log(`[${label}] Reading log buffer size from device…`);
       size = await client.getAttendanceSize();
+      log(`[${label}] Device reports ${size} record(s) in buffer.`);
     } catch (sizeErr) {
       const msg = sizeErr?.message || sizeErr?.msg || (typeof sizeErr === 'string' ? sizeErr : (sizeErr && typeof sizeErr === 'object' ? (sizeErr.toString?.() !== '[object Object]' ? sizeErr.toString() : JSON.stringify(sizeErr)) : String(sizeErr)));
       log(`[${label}] Size check failed (will try to fetch anyway): ${msg}`);
@@ -178,7 +180,11 @@ async function fetchAndPushOne(dev) {
 
     let result;
     try {
+      log(
+        `[${label}] Downloading attendance logs (this can take several minutes if the buffer is large; please wait)…`
+      );
       result = await client.getAttendances();
+      log(`[${label}] Finished download (${result?.data?.length ?? 0} raw row(s)).`);
     } catch (sdkErr) {
       const errMsg = sdkErr?.toast?.() || sdkErr?.err?.message || sdkErr?.message || sdkErr?.msg
         || (typeof sdkErr === 'string' ? sdkErr : (sdkErr?.toString?.() !== '[object Object]' ? sdkErr?.toString?.() : 'Device communication failed'));

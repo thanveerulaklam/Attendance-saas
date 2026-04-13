@@ -201,28 +201,55 @@ async function pushLogs(req, res, next) {
       throw new AppError('logs must be a non-empty array', 400);
     }
 
-    const normalisedLogs = logs.map((log, index) => {
-      const employeeCode = log.employee_code;
-      const punchType = (log.punch_type || '').toLowerCase();
-      if (!employeeCode || !log.punch_time || !['in', 'out'].includes(punchType)) {
-        throw new AppError(`Invalid log at index ${index}`, 400);
+    // Skip bad rows instead of failing the whole chunk (large device buffers often have a few corrupt lines).
+    const normalisedLogs = [];
+    let skippedInvalid = 0;
+    for (let i = 0; i < logs.length; i += 1) {
+      const log = logs[i];
+      const rawCode = log.employee_code;
+      if (rawCode == null || String(rawCode).trim() === '') {
+        skippedInvalid += 1;
+        continue;
+      }
+      if (log.punch_time == null || log.punch_time === '') {
+        skippedInvalid += 1;
+        continue;
+      }
+      const punchType = String(log.punch_type || '')
+        .trim()
+        .toLowerCase();
+      if (punchType !== 'in' && punchType !== 'out') {
+        skippedInvalid += 1;
+        continue;
       }
       const punchTime = new Date(log.punch_time);
       if (Number.isNaN(punchTime.getTime())) {
-        throw new AppError(`Invalid punch_time at index ${index}`, 400);
+        skippedInvalid += 1;
+        continue;
       }
-      return {
-        employeeCode: String(employeeCode).trim(),
+      normalisedLogs.push({
+        employeeCode: String(rawCode).trim(),
         punchTime,
         punchType,
         deviceId: log.device_id,
-      };
-    });
+      });
+    }
+
+    if (normalisedLogs.length === 0) {
+      throw new AppError(
+        `No valid logs in batch (${skippedInvalid} row(s) failed validation)`,
+        400
+      );
+    }
 
     const result = await processDeviceLogs(apiKey, normalisedLogs);
     return res.status(201).json({
       success: true,
-      data: { inserted: result.inserted, ...(result.skipped_unknown_codes && { skipped_unknown_codes: result.skipped_unknown_codes }) },
+      data: {
+        inserted: result.inserted,
+        ...(skippedInvalid > 0 && { skipped_invalid: skippedInvalid }),
+        ...(result.skipped_unknown_codes && { skipped_unknown_codes: result.skipped_unknown_codes }),
+      },
     });
   } catch (err) {
     next(err);
