@@ -3,5 +3,6 @@
   "devicePort": 4370,
   "deviceApiKey": "paste-your-device-api-key-from-the-app",
   "backendUrl": "https://punchpay.in",
-  "pollIntervalMs": 60000
+  "pollIntervalMs": 60000,
+  "syncDownloadTimeoutMs": 7200000
 }

@@ -32,6 +32,8 @@ function loadConfig() {
 const config = loadConfig();
 const BACKEND_URL = (config.backendUrl || 'https://punchpay.in').replace(/\/$/, '');
 const POLL_INTERVAL_MS = parseInt(config.pollIntervalMs || '60000', 10);
+/** Hard cap so a stuck SDK call cannot block the next poll forever (ms). Default 2h. */
+const SYNC_DOWNLOAD_TIMEOUT_MS = parseInt(config.syncDownloadTimeoutMs || String(2 * 60 * 60 * 1000), 10);
 
 const runOnce = process.argv.includes('--once');
 
@@ -157,7 +159,8 @@ async function fetchAndPushOne(dev) {
   }
 
   const ZKAttendanceClient = require('zk-attendance-sdk');
-  const client = new ZKAttendanceClient(deviceIp, devicePort, 5000);
+  // Large attendance buffers need a long initial response timeout (ms), not 5000.
+  const client = new ZKAttendanceClient(deviceIp, devicePort, 120000);
 
   try {
     await client.createSocket();
@@ -183,11 +186,41 @@ async function fetchAndPushOne(dev) {
     }
 
     let result;
+    let deviceDisabled = false;
     try {
       log(
         `[${label}] Downloading attendance logs (this can take several minutes if the buffer is large; please wait)…`
       );
-      result = await client.getAttendances();
+      try {
+        await client.disableDevice();
+        deviceDisabled = true;
+      } catch (disableErr) {
+        log(`[${label}] disableDevice not applied (continuing): ${formatErr(disableErr)}`);
+      }
+
+      let lastProgressLog = 0;
+      const onProgress = (receivedBytes, totalBytes) => {
+        if (totalBytes <= 0 || receivedBytes <= 0) return;
+        const now = Date.now();
+        if (lastProgressLog !== 0 && now - lastProgressLog < 30000) return;
+        lastProgressLog = now;
+        const pct = Math.min(99, Math.floor((receivedBytes / totalBytes) * 100));
+        log(`[${label}] Download progress: ~${pct}% (${receivedBytes} / ${totalBytes} bytes)…`);
+      };
+
+      let timeoutId;
+      const downloadPromise = client.getAttendances(onProgress);
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(
+          () => reject(new Error(`Attendance download timed out after ${SYNC_DOWNLOAD_TIMEOUT_MS} ms`)),
+          SYNC_DOWNLOAD_TIMEOUT_MS
+        );
+      });
+      try {
+        result = await Promise.race([downloadPromise, timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutId);
+      }
       log(`[${label}] Finished download (${result?.data?.length ?? 0} raw row(s)).`);
     } catch (sdkErr) {
       const errMsg = sdkErr?.toast?.() || sdkErr?.err?.message || sdkErr?.message || sdkErr?.msg
@@ -196,6 +229,13 @@ async function fetchAndPushOne(dev) {
       try { await client.disconnect(); } catch (_) {}
       return;
     } finally {
+      if (deviceDisabled) {
+        try {
+          await client.enableDevice();
+        } catch (enErr) {
+          log(`[${label}] enableDevice failed (device may need a power cycle): ${formatErr(enErr)}`);
+        }
+      }
       try { await client.disconnect(); } catch (_) {}
     }
 
@@ -266,7 +306,7 @@ async function fetchAndPushOne(dev) {
 
     log(`[${label}] Pushed ${totalInserted} logs to backend in ${numChunks} chunk(s).`);
 
-    const clearClient = new ZKAttendanceClient(deviceIp, devicePort, 5000);
+    const clearClient = new ZKAttendanceClient(deviceIp, devicePort, 120000);
     try {
       await clearClient.createSocket();
       await clearClient.clearAttendanceLog();

@@ -3,6 +3,39 @@ import { authFetch } from '../utils/api';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+function parseTimeToMinutes(value) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function getShiftSpanMinutes(startTime, endTime, attendanceMode) {
+  const start = parseTimeToMinutes(startTime);
+  const end = parseTimeToMinutes(endTime);
+  if (start == null || end == null) return null;
+  if (attendanceMode === 'day_based') {
+    return Math.max(0, end - start);
+  }
+  // hours-based / overnight-friendly
+  return end >= start ? end - start : 24 * 60 - start + end;
+}
+
+function clampNumber(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function buildHoursLunchSummary(form) {
+  const spanMinutes = getShiftSpanMinutes(form.start_time, form.end_time, form.attendance_mode);
+  if (!Number.isFinite(spanMinutes)) return null;
+  const totalShiftHours = spanMinutes / 60;
+  const required = Number(form.required_hours_per_day || 0);
+  const lunch = Number(form.lunch_minutes || 0);
+  return `Total shift: ${totalShiftHours.toFixed(2)}h | Required: ${required.toFixed(2)}h | Lunch: ${Math.round(lunch)}m`;
+}
+
 /** @param {boolean} shiftPayloadCompact — Tharagai Readymades (`companies.shifts_compact_ui`): omit manual deduction fields from payload. */
 function sanitizeShiftBody(form, shiftPayloadCompact) {
   const body = { ...form };
@@ -11,6 +44,10 @@ function sanitizeShiftBody(form, shiftPayloadCompact) {
   const halfDayNum = Number(body.half_day_hours);
   body.half_day_hours = Number.isFinite(halfDayNum) ? halfDayNum : 0;
   if (shiftPayloadCompact) {
+    // Compact (hours-based focused) companies should not silently inherit a 60-minute lunch default.
+    if (body.attendance_mode === 'hours_based' && !Number.isFinite(Number(body.lunch_minutes))) {
+      body.lunch_minutes = 0;
+    }
     body.weekly_off_days = [];
     body.late_deduction_minutes = 0;
     body.late_deduction_amount = 0;
@@ -31,7 +68,7 @@ function getEmptyForm(compact) {
     start_time: '09:00',
     end_time: '18:00',
     grace_minutes: 0,
-    lunch_minutes: 60,
+    lunch_minutes: compact ? 0 : 60,
     weekly_off_days: [],
     late_deduction_minutes: 0,
     late_deduction_amount: 0,
@@ -67,6 +104,7 @@ export default function ShiftsPage() {
   const [plForfeitGt, setPlForfeitGt] = useState('');
   const [savingPlPolicy, setSavingPlPolicy] = useState(false);
   const syncedDefaultPaidLeaveForCompanyId = useRef(null);
+  const hoursLunchSummary = buildHoursLunchSummary(form);
 
   const loadShifts = async () => {
     try {
@@ -182,7 +220,31 @@ export default function ShiftsPage() {
     const value = numericFields.includes(field)
       ? Number(event.target.value || 0)
       : event.target.value;
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+
+      // Tharagai compact logic: in hours-based mode, lunch and required-hours are linked.
+      if (shiftsCompactUi && next.attendance_mode === 'hours_based') {
+        const spanMinutes = getShiftSpanMinutes(next.start_time, next.end_time, next.attendance_mode);
+        if (Number.isFinite(spanMinutes) && spanMinutes >= 0) {
+          if (field === 'lunch_minutes') {
+            const lunch = clampNumber(Number(next.lunch_minutes) || 0, 0, spanMinutes);
+            next.lunch_minutes = lunch;
+            next.required_hours_per_day = Number(((spanMinutes - lunch) / 60).toFixed(2));
+          } else if (field === 'required_hours_per_day') {
+            const required = clampNumber(Number(next.required_hours_per_day) || 0, 0, spanMinutes / 60);
+            next.required_hours_per_day = Number(required.toFixed(2));
+            next.lunch_minutes = Math.round(spanMinutes - required * 60);
+          } else if (field === 'start_time' || field === 'end_time') {
+            const lunch = clampNumber(Number(next.lunch_minutes) || 0, 0, spanMinutes);
+            next.lunch_minutes = lunch;
+            next.required_hours_per_day = Number(((spanMinutes - lunch) / 60).toFixed(2));
+          }
+        }
+      }
+
+      return next;
+    });
   };
 
   const handleCreate = async (event) => {
@@ -215,7 +277,7 @@ export default function ShiftsPage() {
       start_time: (shift.start_time || '09:00').slice(0, 5),
       end_time: (shift.end_time || '18:00').slice(0, 5),
       grace_minutes: shift.grace_minutes ?? 0,
-      lunch_minutes: shift.lunch_minutes ?? 60,
+      lunch_minutes: shift.lunch_minutes ?? (shiftsCompactUi ? 0 : 60),
       weekly_off_days: Array.isArray(shift.weekly_off_days) ? [...shift.weekly_off_days] : [],
       late_deduction_minutes: shift.late_deduction_minutes ?? 0,
       late_deduction_amount: shift.late_deduction_amount ?? 0,
@@ -482,24 +544,49 @@ export default function ShiftsPage() {
               </div>
 
               {form.attendance_mode === 'hours_based' && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">
-                    Required Hours Per Day
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={24}
-                    step={0.5}
-                    value={form.required_hours_per_day}
-                    onChange={handleChange('required_hours_per_day')}
-                    disabled={creating}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                    placeholder="10"
-                  />
-                  <p className="text-[10px] text-slate-500">
-                    Employee must be inside for at least this many hours to be marked present.
-                  </p>
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Required Hours Per Day
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={24}
+                      step={0.5}
+                      value={form.required_hours_per_day}
+                      onChange={handleChange('required_hours_per_day')}
+                      disabled={creating}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                      placeholder="10"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Employee must be inside for at least this many hours to be marked present.
+                    </p>
+                  </div>
+                  {shiftsCompactUi && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Lunch minutes (auto-linked)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={form.lunch_minutes}
+                        onChange={handleChange('lunch_minutes')}
+                        disabled={creating}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                        placeholder="60"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        Lunch = total shift time − required hours. Changing lunch updates required hours.
+                      </p>
+                      {hoursLunchSummary && (
+                        <p className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                          {hoursLunchSummary}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {!shiftsCompactUi && (
@@ -845,7 +932,7 @@ export default function ShiftsPage() {
                       <div className="flex justify-between">
                         <dt className="text-slate-500">Lunch allotted</dt>
                         <dd className="font-medium text-slate-800">
-                          {shift.lunch_minutes != null ? shift.lunch_minutes : 60} min
+                          {shift.lunch_minutes != null ? shift.lunch_minutes : 0} min
                         </dd>
                       </div>
                       {shift.attendance_mode === 'day_based' && (
@@ -1017,18 +1104,42 @@ export default function ShiftsPage() {
                 </div>
               </div>
               {form.attendance_mode === 'hours_based' && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Required hours per day</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={24}
-                    step={0.5}
-                    value={form.required_hours_per_day}
-                    onChange={handleChange('required_hours_per_day')}
-                    disabled={savingEdit}
-                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
-                  />
+                <div className="space-y-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">Required hours per day</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={24}
+                      step={0.5}
+                      value={form.required_hours_per_day}
+                      onChange={handleChange('required_hours_per_day')}
+                      disabled={savingEdit}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                    />
+                  </div>
+                  {shiftsCompactUi && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Lunch minutes (auto-linked)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={form.lunch_minutes}
+                        onChange={handleChange('lunch_minutes')}
+                        disabled={savingEdit}
+                        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
+                      />
+                      <p className="text-[10px] text-slate-500">
+                        Lunch = total shift time − required hours. Changing lunch updates required hours.
+                      </p>
+                      {hoursLunchSummary && (
+                        <p className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                          {hoursLunchSummary}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {!shiftsCompactUi && (

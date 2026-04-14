@@ -1,6 +1,7 @@
 {
   "backendUrl": "https://punchpay.in",
   "pollIntervalMs": 60000,
+  "syncDownloadTimeoutMs": 7200000,
   "devices": [
     {
       "label": "device-1-entrance",

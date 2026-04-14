@@ -1,7 +1,22 @@
 diff --git a/node_modules/zk-attendance-sdk/src/jtcp.js b/node_modules/zk-attendance-sdk/src/jtcp.js
-index 939309a..866f9a9 100644
+index 939309a..9123142 100644
 --- a/node_modules/zk-attendance-sdk/src/jtcp.js
 +++ b/node_modules/zk-attendance-sdk/src/jtcp.js
+@@ -159,10 +159,10 @@ class JTCP {
+         }, this.timeout)
+ 
+       })
+-    }).catch(function () {
+-      console.log("Promise Rejected");
+-     });
+-
++    }).catch((err) => {
++      console.log('Promise Rejected');
++      return Promise.reject(err);
++    });
+   }
+ 
+ 
 @@ -240,7 +240,12 @@ class JTCP {
        } catch (err) {
          reject(err)
@@ -13,18 +28,155 @@ index 939309a..866f9a9 100644
 +        reject(new Error('No reply from device or invalid response'))
 +        return
        }
- 
+       
        const header = decodeTCPHeader(reply.subarray(0, 16))
-@@ -269,7 +274,7 @@ class JTCP {
+@@ -256,63 +261,95 @@ class JTCP {
+           const recvData = reply.subarray(16)
+           const size = recvData.readUIntLE(1, 4)
+ 
++          if (size <= 0) {
++            resolve({ data: Buffer.alloc(0), err: null })
++            break
++          }
+ 
+-          // We need to split the data to many chunks to receive , because it's to large
+-          // After receiving all chunk data , we concat it to TotalBuffer variable , that 's the data we want
+-          let remain = size % MAX_CHUNK
+-          let numberChunks = Math.round(size - remain) / MAX_CHUNK
+-          let totalPackets = numberChunks + (remain > 0 ? 1 : 0)
+-          let replyData = Buffer.from([])
+-
++          const remain = size % MAX_CHUNK
++          const numberChunks = (size - remain) / MAX_CHUNK
++          const chunks = []
++          for (let i = 0; i < numberChunks; i++) {
++            chunks.push({ start: i * MAX_CHUNK, size: MAX_CHUNK })
++          }
++          if (remain > 0) {
++            chunks.push({ start: numberChunks * MAX_CHUNK, size: remain })
++          }
+ 
++          let replyData = Buffer.from([])
+           let totalBuffer = Buffer.from([])
            let realTotalBuffer = Buffer.from([])
++          let currentChunkIndex = 0
  
- 
+-
 -          const timeout = 10000
-+          const timeout = 120000
++          // Per-chunk idle timeout (large buffers need long gaps between chunks on slow devices).
++          const timeout = 300000
            let timer = setTimeout(() => {
              internalCallback(replyData, new Error('TIMEOUT WHEN RECEIVING PACKET'))
            }, timeout)
-@@ -419,6 +424,13 @@ class JTCP {
+ 
++          // Node socket idle timeout would kill multi-minute downloads; disable during bulk read.
++          const prevSockTimeout = this.timeout
++          if (this.socket) {
++            this.socket.setTimeout(0)
++          }
++
++          let handleOnData
++          const cleanupListeners = () => {
++            if (this.socket && handleOnData) {
++              this.socket.removeListener('data', handleOnData)
++              if (prevSockTimeout) {
++                this.socket.setTimeout(prevSockTimeout)
++              }
++            }
++          }
+ 
+           const internalCallback = (replyData, err = null) => {
+-            // this.socket && this.socket.removeListener('data', handleOnData)
+             timer && clearTimeout(timer)
++            cleanupListeners()
+             resolve({ data: replyData, err })
+-
+           }
+ 
+-
+-          const handleOnData = (reply) => {
+-
+-            if (checkNotEventTCP(reply)) return;
++          handleOnData = (reply) => {
++            if (checkNotEventTCP(reply)) return
+             clearTimeout(timer)
+             timer = setTimeout(() => {
+-              internalCallback(replyData,
+-                new Error(`TIME OUT !! ${totalPackets} PACKETS REMAIN !`))
++              internalCallback(
++                replyData,
++                new Error(`TIME OUT !! ${chunks.length - currentChunkIndex} CHUNK(S) REMAIN !`)
++              )
+             }, timeout)
+ 
+             totalBuffer = Buffer.concat([totalBuffer, reply])
+-            const packetLength = totalBuffer.readUIntLE(4, 2)
+-            if (totalBuffer.length >= 8 + packetLength) {
++
++            while (totalBuffer.length >= 8) {
++              const packetLength = totalBuffer.readUIntLE(4, 2)
++              if (totalBuffer.length < 8 + packetLength) {
++                return
++              }
+ 
+               realTotalBuffer = Buffer.concat([realTotalBuffer, totalBuffer.subarray(16, 8 + packetLength)])
+               totalBuffer = totalBuffer.subarray(8 + packetLength)
+ 
+-              if ((totalPackets > 1 && realTotalBuffer.length === MAX_CHUNK + 8)
+-                || (totalPackets === 1 && realTotalBuffer.length === remain + 8)) {
++              const expectedPacketLen = chunks[currentChunkIndex].size + 8
++              if (realTotalBuffer.length < expectedPacketLen) {
++                break
++              }
++              if (realTotalBuffer.length > expectedPacketLen) {
++                internalCallback(replyData, new Error('Invalid chunk length from device'))
++                return
++              }
+ 
+-                replyData = Buffer.concat([replyData, realTotalBuffer.subarray(8)])
+-                totalBuffer = Buffer.from([])
+-                realTotalBuffer = Buffer.from([])
++              replyData = Buffer.concat([replyData, realTotalBuffer.subarray(8)])
++              realTotalBuffer = Buffer.from([])
+ 
+-                totalPackets -= 1
+-                cb && cb(replyData.length, size)
++              currentChunkIndex += 1
++              cb && cb(replyData.length, size)
+ 
+-                if (totalPackets <= 0) {
+-                  internalCallback(replyData)
+-                }
++              if (currentChunkIndex >= chunks.length) {
++                internalCallback(replyData)
++                return
+               }
++              this.sendChunkRequest(chunks[currentChunkIndex].start, chunks[currentChunkIndex].size)
+             }
+           }
+ 
+@@ -320,14 +357,13 @@ class JTCP {
+             internalCallback(replyData, new Error('Socket is disconnected unexpectedly'))
+           })
+ 
+-          this.socket.on('data', handleOnData);
++          this.socket.on('data', handleOnData)
+ 
+-          for (let i = 0; i <= numberChunks; i++) {
+-            if (i === numberChunks) {
+-              this.sendChunkRequest(numberChunks * MAX_CHUNK, remain)
+-            } else {
+-              this.sendChunkRequest(i * MAX_CHUNK, MAX_CHUNK)
+-            }
++          // Request one chunk at a time — many devices fail when all CMD_DATA_RDY are fired at once.
++          if (chunks.length > 0) {
++            this.sendChunkRequest(chunks[0].start, chunks[0].size)
++          } else {
++            internalCallback(replyData)
+           }
+ 
+           break;
+@@ -419,6 +455,13 @@ class JTCP {
        return Promise.reject(err)
      }
  

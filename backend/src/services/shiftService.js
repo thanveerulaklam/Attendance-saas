@@ -191,9 +191,14 @@ function parseShiftData(data) {
   const graceMinutes = Number.isFinite(Number(data.grace_minutes))
     ? Number(data.grace_minutes)
     : 0;
+  const modeRaw = String(data.attendance_mode || 'day_based').toLowerCase();
+  let attendanceMode = 'day_based';
+  if (modeRaw === 'hours_based') attendanceMode = 'hours_based';
+  else if (modeRaw === 'day_based') attendanceMode = 'day_based';
+  const defaultLunchMinutes = attendanceMode === 'hours_based' ? 0 : 60;
   const lunchMinutes = Number.isFinite(Number(data.lunch_minutes)) && Number(data.lunch_minutes) >= 0
     ? Number(data.lunch_minutes)
-    : 60;
+    : defaultLunchMinutes;
   const lateDeductionMinutes = Number.isFinite(Number(data.late_deduction_minutes))
     ? Number(data.late_deduction_minutes)
     : 0;
@@ -212,10 +217,6 @@ function parseShiftData(data) {
   const paidLeaveDays = Number.isFinite(Number(data.paid_leave_days))
     ? Math.max(0, Number(data.paid_leave_days))
     : 0;
-  const modeRaw = String(data.attendance_mode || 'day_based').toLowerCase();
-  let attendanceMode = 'day_based';
-  if (modeRaw === 'hours_based') attendanceMode = 'hours_based';
-  else if (modeRaw === 'day_based') attendanceMode = 'day_based';
   const requiredHoursPerDayRaw = Number(data.required_hours_per_day);
   const requiredHoursPerDay = Number.isFinite(requiredHoursPerDayRaw)
     ? Math.min(24, Math.max(1, requiredHoursPerDayRaw))
