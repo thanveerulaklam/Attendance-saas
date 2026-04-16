@@ -21,6 +21,7 @@ const adminRouter = require('./routes/admin');
 const advancesRouter = require('./routes/advances');
 const advanceLoansRouter = require('./routes/advanceLoans');
 const demoEnquiriesRouter = require('./routes/demoEnquiries');
+const admsRouter = require('./routes/adms');
 
 const app = express();
 
@@ -90,6 +91,8 @@ app.use('/api/admin', adminRouter);
 app.use('/api/advances', advancesRouter);
 app.use('/api/advance-loans', advanceLoansRouter);
 app.use('/api/demo-enquiries', demoEnquiriesRouter);
+// ZKTeco/eSSL ADMS endpoints (outside /api for device compatibility)
+app.use('/iclock', express.text({ type: '*/*', limit: '10mb' }), admsRouter);
 
 // 404
 app.use((_req, res) => {

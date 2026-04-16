@@ -28,6 +28,7 @@ export default function DevicesPage() {
   const [toast, setToast] = useState(null);
   const [branches, setBranches] = useState([]);
   const [newBranchId, setNewBranchId] = useState('');
+  const [admsInputs, setAdmsInputs] = useState({});
 
   const branchNameById = useMemo(() => {
     const m = {};
@@ -63,7 +64,17 @@ export default function DevicesPage() {
         throw new Error('Unable to load devices');
       }
       const json = await res.json();
-      setDevices(Array.isArray(json.data) ? json.data : []);
+      const list = Array.isArray(json.data) ? json.data : [];
+      setDevices(list);
+      setAdmsInputs((prev) => {
+        const next = { ...prev };
+        list.forEach((d) => {
+          if (next[d.id] == null) {
+            next[d.id] = d.adms_sn || '';
+          }
+        });
+        return next;
+      });
     } catch (err) {
       setError(err.message || 'Unable to load devices');
     } finally {
@@ -230,6 +241,31 @@ export default function DevicesPage() {
         type: 'error',
         message: 'Unable to copy cloud token. Please copy it manually.',
       });
+    }
+  };
+
+  const handleSaveAdmsSerial = async (device) => {
+    try {
+      setBusyId(device.id);
+      const admsSn = String(admsInputs[device.id] || '').trim();
+      const res = await authFetch(`/api/device/${device.id}/adms-serial`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ adms_sn: admsSn }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message || 'Failed to save ADMS serial');
+      }
+      const json = await res.json();
+      const updated = json.data;
+      setDevices((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      setAdmsInputs((prev) => ({ ...prev, [device.id]: updated.adms_sn || '' }));
+      setToast({ type: 'success', message: 'ADMS serial saved.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to save ADMS serial' });
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -410,6 +446,34 @@ export default function DevicesPage() {
                       </div>
                       <p className="mt-1 text-[10px] text-slate-500">
                         Use this short token for device cloud/webhook setup.
+                      </p>
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-slate-700">ADMS serial (SN)</p>
+                      <div className="mt-0.5 flex items-center gap-2">
+                        <input
+                          value={admsInputs[device.id] ?? device.adms_sn ?? ''}
+                          onChange={(e) =>
+                            setAdmsInputs((prev) => ({
+                              ...prev,
+                              [device.id]: e.target.value.toUpperCase(),
+                            }))
+                          }
+                          placeholder="e.g. AAE123456"
+                          className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-mono text-slate-800"
+                        />
+                        <button
+                          type="button"
+                          disabled={busyId === device.id}
+                          onClick={() => handleSaveAdmsSerial(device)}
+                          className="rounded border border-slate-300 bg-slate-50 px-2 py-1 text-[9px] text-slate-700 disabled:opacity-50"
+                        >
+                          Save
+                        </button>
+                      </div>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        For ADMS devices, set this to the device SN shown in system info.
                       </p>
                     </div>
 

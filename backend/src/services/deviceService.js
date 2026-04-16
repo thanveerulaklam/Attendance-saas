@@ -35,6 +35,21 @@ async function findActiveDeviceByCloudToken(cloudToken) {
   return result.rows[0];
 }
 
+async function findActiveDeviceByAdmsSn(admsSn) {
+  const result = await pool.query(
+    `SELECT id, company_id, name, branch_id
+     FROM devices
+     WHERE adms_sn = $1 AND is_active = TRUE`,
+    [admsSn]
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Unknown or inactive ADMS serial number', 401);
+  }
+
+  return result.rows[0];
+}
+
 function generateApiKey() {
   return crypto.randomBytes(32).toString('hex');
 }
@@ -145,7 +160,7 @@ async function createDevice(companyId, { name, branch_id: branchIdRaw }, branchC
   const result = await pool.query(
     `INSERT INTO devices (company_id, branch_id, name, api_key, cloud_token)
      VALUES ($1, $2, $3, $4, $5)
-     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
     [companyId, branchId, trimmedName, apiKey, cloudToken]
   );
 
@@ -170,7 +185,7 @@ async function listDevices(companyId, { page = 1, limit = 50 } = {}, allowedBran
   const total = Number(countResult.rows[0]?.total || 0);
 
   const result = await pool.query(
-    `SELECT id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at
+    `SELECT id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at
      FROM devices
      ${where}
      ORDER BY created_at ASC
@@ -199,14 +214,14 @@ async function updateDevice(companyId, id, { name, branch_id: branchIdRaw }, bra
         `UPDATE devices
          SET name = $3, branch_id = $4
          WHERE company_id = $1 AND id = $2
-         RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+         RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
         [companyId, id, trimmedName, branchId]
       )
     : await pool.query(
         `UPDATE devices
          SET name = $3
          WHERE company_id = $1 AND id = $2
-         RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+         RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
         [companyId, id, trimmedName]
       );
 
@@ -224,7 +239,7 @@ async function toggleDeviceActive(companyId, id, isActive, branchContext = {}) {
     `UPDATE devices
      SET is_active = $3
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
     [companyId, id, Boolean(isActive)]
   );
 
@@ -244,7 +259,7 @@ async function regenerateApiKey(companyId, id, branchContext = {}) {
     `UPDATE devices
      SET api_key = $3
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
     [companyId, id, apiKey]
   );
 
@@ -262,9 +277,32 @@ async function regenerateCloudToken(companyId, id, branchContext = {}) {
     `UPDATE devices
      SET cloud_token = $3
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
     [companyId, id, cloudToken]
   );
+  if (result.rowCount === 0) {
+    throw new AppError('Device not found for this company', 404);
+  }
+  return result.rows[0];
+}
+
+async function updateAdmsSerial(companyId, id, admsSnRaw, branchContext = {}) {
+  await assertDeviceVisibleToHr(companyId, id, branchContext);
+  const admsSn = String(admsSnRaw || '').trim();
+  const normalized = admsSn.length > 0 ? admsSn.toUpperCase() : null;
+
+  if (normalized && normalized.length > 64) {
+    throw new AppError('ADMS serial number is too long', 400);
+  }
+
+  const result = await pool.query(
+    `UPDATE devices
+     SET adms_sn = $3
+     WHERE company_id = $1 AND id = $2
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at`,
+    [companyId, id, normalized]
+  );
+
   if (result.rowCount === 0) {
     throw new AppError('Device not found for this company', 404);
   }
@@ -309,9 +347,14 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
     throw new AppError('logs must be a non-empty array', 400);
   }
 
-  const device = authMode === 'cloud_token'
-    ? await findActiveDeviceByCloudToken(deviceAuthToken)
-    : await findActiveDeviceByApiKey(deviceAuthToken);
+  let device;
+  if (authMode === 'cloud_token') {
+    device = await findActiveDeviceByCloudToken(deviceAuthToken);
+  } else if (authMode === 'adms_sn') {
+    device = await findActiveDeviceByAdmsSn(deviceAuthToken);
+  } else {
+    device = await findActiveDeviceByApiKey(deviceAuthToken);
+  }
   const companyId = device.company_id;
   const deviceBranchId = Number(device.branch_id);
 
@@ -430,11 +473,13 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
 module.exports = {
   findActiveDeviceByApiKey,
   findActiveDeviceByCloudToken,
+  findActiveDeviceByAdmsSn,
   createDevice,
   listDevices,
   updateDevice,
   toggleDeviceActive,
   regenerateApiKey,
   regenerateCloudToken,
+  updateAdmsSerial,
   processDeviceLogs,
 };

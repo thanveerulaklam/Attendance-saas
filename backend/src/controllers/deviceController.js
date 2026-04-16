@@ -7,6 +7,7 @@ const {
   toggleDeviceActive,
   regenerateApiKey,
   regenerateCloudToken,
+  updateAdmsSerial,
   processDeviceLogs,
 } = require('../services/deviceService');
 const auditService = require('../services/auditService');
@@ -214,6 +215,40 @@ async function regenerateCloudTokenHandler(req, res, next) {
 }
 
 /**
+ * PATCH /api/device/:id/adms-serial
+ * Auth: admin or hr
+ * Body: { adms_sn }
+ */
+async function updateAdmsSerialHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const id = Number(req.params.id);
+
+    if (!companyId || !id) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and valid device id are required',
+      });
+    }
+
+    const device = await updateAdmsSerial(companyId, id, req.body?.adms_sn, branchContext(req));
+    auditService
+      .log(companyId, req.user?.user_id, 'device.update_adms_serial', 'device', id, { adms_sn: device.adms_sn })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      data: device,
+    });
+  } catch (err) {
+    if (err && err.code === '23505') {
+      return next(new AppError('ADMS serial is already assigned to another device', 409));
+    }
+    next(err);
+  }
+}
+
+/**
  * POST /api/device/push
  * Connector (on-site agent) format.
  * Headers: x-device-key: <API_KEY>  (or body.api_key as fallback)
@@ -394,6 +429,93 @@ function devicePing(req, res) {
   res.set('Content-Type', 'text/plain').status(200).send('OK');
 }
 
+function parseAdmsBody(rawBody) {
+  if (!rawBody || typeof rawBody !== 'string') return [];
+  const lines = rawBody
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const logs = [];
+  for (const line of lines) {
+    if (line.includes('=')) {
+      // ADMS key-value style line:
+      // PIN=1001\tDateTime=2026-04-16 10:14:00\tStatus=0
+      const fields = {};
+      line.split('\t').forEach((pair) => {
+        const idx = pair.indexOf('=');
+        if (idx <= 0) return;
+        const k = pair.slice(0, idx).trim();
+        const v = pair.slice(idx + 1).trim();
+        fields[k] = v;
+      });
+
+      const code = String(fields.PIN || fields.UserID || fields.userId || '').trim();
+      const timeStr = fields.DateTime || fields.Time || fields.AttTime;
+      const punchTime = new Date(timeStr);
+      if (!code || !timeStr || Number.isNaN(punchTime.getTime())) continue;
+      const st = String(fields.Status || fields.Verify || '0');
+      const punchType = st === '1' ? 'out' : 'in';
+      logs.push({ employeeCode: code, punchTime, punchType });
+      continue;
+    }
+
+    if (line.includes('\t')) {
+      const parts = line.split('\t');
+      if (parts.length < 2) continue;
+      const code = String(parts[0] || '').trim();
+      const punchTime = new Date(parts[1]);
+      if (!code || Number.isNaN(punchTime.getTime())) continue;
+      const state = parts[2];
+      const punchType = state === '1' ? 'out' : 'in';
+      logs.push({ employeeCode: code, punchTime, punchType });
+      continue;
+    }
+  }
+  return logs;
+}
+
+/**
+ * ADMS endpoints used by many ZKTeco/eSSL devices
+ * GET/POST /iclock/getrequest?SN=...
+ * GET/POST /iclock/cdata?SN=...&table=ATTLOG
+ */
+async function admsGetRequest(req, res) {
+  // No command queue for now.
+  res.set('Content-Type', 'text/plain').status(200).send('OK');
+}
+
+async function admsCdata(req, res, next) {
+  try {
+    const admsSn = String(req.query?.SN || req.query?.sn || '').trim().toUpperCase();
+    if (!admsSn) {
+      throw new AppError('SN is required', 400);
+    }
+
+    const table = String(req.query?.table || '').trim().toUpperCase();
+    // Devices can call cdata for non-attendance tables; acknowledge without failing.
+    if (table && table !== 'ATTLOG') {
+      return res.set('Content-Type', 'text/plain').status(200).send('OK');
+    }
+
+    const rawBody = typeof req.body === 'string'
+      ? req.body
+      : (req.body && typeof req.body === 'object' && req.body.data ? String(req.body.data) : '');
+    const logs = parseAdmsBody(rawBody);
+
+    if (logs.length > 0) {
+      await processDeviceLogs(admsSn, logs, 'adms_sn');
+    }
+
+    return res.set('Content-Type', 'text/plain').status(200).send('OK');
+  } catch (err) {
+    // ADMS devices can aggressively retry on non-200 responses.
+    // Log and acknowledge to avoid device-side queue lockups.
+    console.error('ADMS cdata error:', err?.message || err);
+    return res.set('Content-Type', 'text/plain').status(200).send('OK');
+  }
+}
+
 module.exports = {
   getDevices,
   createDeviceHandler,
@@ -401,8 +523,11 @@ module.exports = {
   toggleDeviceActiveHandler,
   regenerateApiKeyHandler,
   regenerateCloudTokenHandler,
+  updateAdmsSerialHandler,
   pushLogs,
   deviceWebhook,
   devicePing,
+  admsGetRequest,
+  admsCdata,
 };
 
