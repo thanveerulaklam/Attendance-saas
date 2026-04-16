@@ -2,6 +2,9 @@
 
 Runs on the client's PC. Syncs biometric device to your cloud. **Install once → runs automatically when the PC starts.**
 
+- `index.js` = ZKTeco connector (port 4370 protocol)
+- `hikvision-connector.js` = Hikvision ISAPI pull connector
+
 ---
 
 ## For You (Building & Distributing)
@@ -13,6 +16,8 @@ cd connector
 npm install   # applies patches/zk-attendance-sdk+2.1.0.patch (SDK bugfixes + longer device read timeout)
 npm run build:win   # → dist/connector.exe (run on Windows or use cross-compile)
 npm run build:mac   # → dist/connector-mac (run on Mac)
+npm run build:hik:win   # → dist/connector-hik.exe
+npm run build:hik:mac   # → dist/connector-hik-mac
 ```
 
 Build on a **Windows PC** to create `.exe`; build on a **Mac** to create the Mac binary. (Or use CI to build both.)
@@ -58,3 +63,32 @@ The connector starts automatically when the PC starts. No need to run anything m
 - Log file: `connector.log` in the same folder
 - Windows: To stop, open Task Scheduler → disable "AttendanceConnector"
 - Mac: `launchctl unload ~/Library/LaunchAgents/com.attendancesaas.connector.plist`
+
+---
+
+## Hikvision mode (DS-K1T series, etc.)
+
+Use this when the device does not support ZKTeco 4370 protocol and only provides Hikvision network modes.
+
+1. Copy `config.example.hikvision.json` to `config.hikvision.json`
+2. Fill:
+   - `deviceIp`
+   - `hikUsername` / `hikPassword` (device admin login)
+   - `deviceApiKey` (from your app Devices page)
+   - `backendUrl`
+3. Run:
+
+```bash
+cd connector
+npm install
+npm run start:hik
+```
+
+One-time sync test:
+
+```bash
+npm run start:hik -- --once
+```
+
+State file: `hikvision.state.json` (stores the last pulled event position).
+Log file: `connector-hik.log`.

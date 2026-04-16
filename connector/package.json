@@ -6,10 +6,13 @@
   "bin": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:hik": "node hikvision-connector.js",
     "postinstall": "patch-package",
     "build": "pkg . --targets node18-win-x64,node18-macos-x64 --output dist/connector",
     "build:win": "pkg . --targets node18-win-x64 --output dist/connector.exe",
-    "build:mac": "pkg . --targets node18-macos-x64 --output dist/connector-mac"
+    "build:mac": "pkg . --targets node18-macos-x64 --output dist/connector-mac",
+    "build:hik:win": "pkg hikvision-connector.js --targets node18-win-x64 --output dist/connector-hik.exe",
+    "build:hik:mac": "pkg hikvision-connector.js --targets node18-macos-x64 --output dist/connector-hik-mac"
   },
   "pkg": {
     "scripts": "index.js",
@@ -17,6 +20,7 @@
     "outputPath": "dist"
   },
   "dependencies": {
+    "digest-fetch": "^3.1.1",
     "zk-attendance-sdk": "^2.1.0"
   },
   "devDependencies": {

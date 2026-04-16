@@ -6,6 +6,7 @@ const {
   updateDevice,
   toggleDeviceActive,
   regenerateApiKey,
+  regenerateCloudToken,
   processDeviceLogs,
 } = require('../services/deviceService');
 const auditService = require('../services/auditService');
@@ -183,6 +184,36 @@ async function regenerateApiKeyHandler(req, res, next) {
 }
 
 /**
+ * POST /api/device/:id/regenerate-cloud-token
+ * Auth: admin or hr
+ */
+async function regenerateCloudTokenHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const id = Number(req.params.id);
+
+    if (!companyId || !id) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and valid device id are required',
+      });
+    }
+
+    const device = await regenerateCloudToken(companyId, id, branchContext(req));
+    auditService
+      .log(companyId, req.user?.user_id, 'device.regenerate_cloud_token', 'device', id, { name: device.name })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      data: device,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/device/push
  * Connector (on-site agent) format.
  * Headers: x-device-key: <API_KEY>  (or body.api_key as fallback)
@@ -317,15 +348,24 @@ function parseWebhookBody(body, contentType, rawBody) {
  */
 async function deviceWebhook(req, res, next) {
   const headerKey = req.headers['x-device-key'];
+  const headerCloudToken = req.headers['x-device-cloud-token'];
   const authHeader = req.headers.authorization;
   const bearerKey = authHeader && authHeader.startsWith('Bearer ')
     ? authHeader.slice(7)
     : null;
+  const queryToken = req.query?.t || req.query?.token;
+  const bodyCloudToken = req.body?.cloud_token;
   const apiKey = headerKey || bearerKey;
+  const cloudToken = headerCloudToken || queryToken || bodyCloudToken;
+  const authToken = apiKey || cloudToken;
+  const authMode = apiKey ? 'api_key' : 'cloud_token';
 
   try {
-    if (!apiKey) {
-      throw new AppError('Device API key is required (use x-device-key header or Authorization: Bearer <API_KEY>)', 401);
+    if (!authToken) {
+      throw new AppError(
+        'Device auth required (use x-device-key, Authorization Bearer, x-device-cloud-token, or ?t=...)',
+        401
+      );
     }
 
     const contentType = req.headers['content-type'] || '';
@@ -336,7 +376,7 @@ async function deviceWebhook(req, res, next) {
       return res.status(400).json({ success: false, message: 'No valid punch data in body' });
     }
 
-    const result = await processDeviceLogs(apiKey, logs);
+    const result = await processDeviceLogs(authToken, logs, authMode);
     return res.status(201).json({
       success: true,
       data: { inserted: result.inserted, ...(result.skipped_unknown_codes && { skipped_unknown_codes: result.skipped_unknown_codes }) },
@@ -360,6 +400,7 @@ module.exports = {
   updateDeviceHandler,
   toggleDeviceActiveHandler,
   regenerateApiKeyHandler,
+  regenerateCloudTokenHandler,
   pushLogs,
   deviceWebhook,
   devicePing,

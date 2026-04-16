@@ -173,6 +173,37 @@ export default function DevicesPage() {
     }
   };
 
+  const handleRegenerateCloudToken = async (device) => {
+    const confirmed = window.confirm(
+      `Regenerate Cloud token for "${device.name}"?\n\nAny device push setup using the old token must be updated.`
+    );
+    if (!confirmed) return;
+    try {
+      setBusyId(device.id);
+      const res = await authFetch(`/api/device/${device.id}/regenerate-cloud-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        throw new Error('Failed to regenerate cloud token');
+      }
+      const json = await res.json();
+      const updated = json.data;
+      setDevices((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      setToast({
+        type: 'success',
+        message: 'Cloud token regenerated. Update the token on your device.',
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to regenerate cloud token',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const handleCopyKey = async (device) => {
     try {
       await navigator.clipboard.writeText(device.api_key);
@@ -182,6 +213,22 @@ export default function DevicesPage() {
       setToast({
         type: 'error',
         message: 'Unable to copy API key. Please copy it manually.',
+      });
+    }
+  };
+
+  const handleCopyCloudToken = async (device) => {
+    if (!device.cloud_token) {
+      setToast({ type: 'error', message: 'Cloud token not available for this device yet.' });
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(device.cloud_token);
+      setToast({ type: 'success', message: 'Cloud token copied to clipboard' });
+    } catch {
+      setToast({
+        type: 'error',
+        message: 'Unable to copy cloud token. Please copy it manually.',
       });
     }
   };
@@ -347,6 +394,25 @@ export default function DevicesPage() {
                       </div>
                     </div>
 
+                    <div>
+                      <p className="font-medium text-slate-700">Cloud token</p>
+                      <div className="mt-0.5 flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] text-slate-700">
+                        <span className="truncate font-mono">
+                          {device.cloud_token || 'Not issued yet'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyCloudToken(device)}
+                          className="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-[9px] text-slate-700"
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        Use this short token for device cloud/webhook setup.
+                      </p>
+                    </div>
+
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Last sync</span>
                       <span className="font-medium text-slate-800">
@@ -355,7 +421,7 @@ export default function DevicesPage() {
                     </div>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-2">
                     <button
                       type="button"
                       disabled={busyId === device.id}
@@ -371,6 +437,14 @@ export default function DevicesPage() {
                       className="text-[11px] font-medium text-primary-700 hover:text-primary-800 disabled:opacity-50"
                     >
                       Regenerate key
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busyId === device.id}
+                      onClick={() => handleRegenerateCloudToken(device)}
+                      className="text-[11px] font-medium text-blue-700 hover:text-blue-800 disabled:opacity-50"
+                    >
+                      Regenerate token
                     </button>
                   </div>
                 </article>

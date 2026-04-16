@@ -20,8 +20,45 @@ async function findActiveDeviceByApiKey(apiKey) {
   return result.rows[0];
 }
 
+async function findActiveDeviceByCloudToken(cloudToken) {
+  const result = await pool.query(
+    `SELECT id, company_id, name, branch_id
+     FROM devices
+     WHERE cloud_token = $1 AND is_active = TRUE`,
+    [cloudToken]
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Invalid device cloud token', 401);
+  }
+
+  return result.rows[0];
+}
+
 function generateApiKey() {
   return crypto.randomBytes(32).toString('hex');
+}
+
+function generateCloudToken() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let token = 'PP-';
+  for (let i = 0; i < 8; i += 1) {
+    token += alphabet[Math.floor(Math.random() * alphabet.length)];
+    if (i === 3) token += '-';
+  }
+  return token;
+}
+
+async function issueUniqueCloudToken() {
+  for (let i = 0; i < 8; i += 1) {
+    const token = generateCloudToken();
+    const existing = await pool.query(
+      `SELECT 1 FROM devices WHERE cloud_token = $1 LIMIT 1`,
+      [token]
+    );
+    if (existing.rowCount === 0) return token;
+  }
+  throw new AppError('Unable to generate unique cloud token. Please retry.', 500);
 }
 
 function deviceBranchFilter(allowedBranchIds, paramIndex) {
@@ -103,12 +140,13 @@ async function createDevice(companyId, { name, branch_id: branchIdRaw }, branchC
 
   const branchId = await resolveBranchIdForDevice(companyId, branchIdRaw, branchContext);
   const apiKey = generateApiKey();
+  const cloudToken = await issueUniqueCloudToken();
 
   const result = await pool.query(
-    `INSERT INTO devices (company_id, branch_id, name, api_key)
-     VALUES ($1, $2, $3, $4)
-     RETURNING id, company_id, branch_id, name, api_key, is_active, last_seen_at, created_at`,
-    [companyId, branchId, trimmedName, apiKey]
+    `INSERT INTO devices (company_id, branch_id, name, api_key, cloud_token)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+    [companyId, branchId, trimmedName, apiKey, cloudToken]
   );
 
   return result.rows[0];
@@ -132,7 +170,7 @@ async function listDevices(companyId, { page = 1, limit = 50 } = {}, allowedBran
   const total = Number(countResult.rows[0]?.total || 0);
 
   const result = await pool.query(
-    `SELECT id, company_id, branch_id, name, api_key, is_active, last_seen_at, created_at
+    `SELECT id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at
      FROM devices
      ${where}
      ORDER BY created_at ASC
@@ -161,14 +199,14 @@ async function updateDevice(companyId, id, { name, branch_id: branchIdRaw }, bra
         `UPDATE devices
          SET name = $3, branch_id = $4
          WHERE company_id = $1 AND id = $2
-         RETURNING id, company_id, branch_id, name, api_key, is_active, last_seen_at, created_at`,
+         RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
         [companyId, id, trimmedName, branchId]
       )
     : await pool.query(
         `UPDATE devices
          SET name = $3
          WHERE company_id = $1 AND id = $2
-         RETURNING id, company_id, branch_id, name, api_key, is_active, last_seen_at, created_at`,
+         RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
         [companyId, id, trimmedName]
       );
 
@@ -186,7 +224,7 @@ async function toggleDeviceActive(companyId, id, isActive, branchContext = {}) {
     `UPDATE devices
      SET is_active = $3
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, branch_id, name, api_key, is_active, last_seen_at, created_at`,
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
     [companyId, id, Boolean(isActive)]
   );
 
@@ -206,7 +244,7 @@ async function regenerateApiKey(companyId, id, branchContext = {}) {
     `UPDATE devices
      SET api_key = $3
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, branch_id, name, api_key, is_active, last_seen_at, created_at`,
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
     [companyId, id, apiKey]
   );
 
@@ -214,6 +252,22 @@ async function regenerateApiKey(companyId, id, branchContext = {}) {
     throw new AppError('Device not found for this company', 404);
   }
 
+  return result.rows[0];
+}
+
+async function regenerateCloudToken(companyId, id, branchContext = {}) {
+  await assertDeviceVisibleToHr(companyId, id, branchContext);
+  const cloudToken = await issueUniqueCloudToken();
+  const result = await pool.query(
+    `UPDATE devices
+     SET cloud_token = $3
+     WHERE company_id = $1 AND id = $2
+     RETURNING id, company_id, branch_id, name, api_key, cloud_token, is_active, last_seen_at, created_at`,
+    [companyId, id, cloudToken]
+  );
+  if (result.rowCount === 0) {
+    throw new AppError('Device not found for this company', 404);
+  }
   return result.rows[0];
 }
 
@@ -250,12 +304,14 @@ function inferPunchTypesFromSequence(validLogs, employeeMap, existingRows) {
 /**
  * Process attendance logs (shared by connector push and direct device webhook).
  */
-async function processDeviceLogs(apiKey, logs) {
+async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
   if (!logs || logs.length === 0) {
     throw new AppError('logs must be a non-empty array', 400);
   }
 
-  const device = await findActiveDeviceByApiKey(apiKey);
+  const device = authMode === 'cloud_token'
+    ? await findActiveDeviceByCloudToken(deviceAuthToken)
+    : await findActiveDeviceByApiKey(deviceAuthToken);
   const companyId = device.company_id;
   const deviceBranchId = Number(device.branch_id);
 
@@ -373,10 +429,12 @@ async function processDeviceLogs(apiKey, logs) {
 
 module.exports = {
   findActiveDeviceByApiKey,
+  findActiveDeviceByCloudToken,
   createDevice,
   listDevices,
   updateDevice,
   toggleDeviceActive,
   regenerateApiKey,
+  regenerateCloudToken,
   processDeviceLogs,
 };
