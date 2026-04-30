@@ -1,0 +1,43 @@
+Perfect — for **ZKTeco/eSSL only**, use this **no-connector** method:
+
+## ZKTeco/eSSL Cloud Setup (No PC Connector)
+
+1. **Create device in your app**
+- Go to `Devices` and add device.
+- Save branch/location.
+- Generate/copy:
+  - `Cloud Token`
+  - `ADMS Serial (adms_sn)` field value (keep this ready).
+
+2. **Get device serial number**
+- On biometric machine: Menu → System Info (or Device Info) → note **Serial Number**.
+- Put that exact SN into app `adms_sn` (must match exactly).
+
+3. **Configure ADMS/Cloud on device**
+In device network/cloud menu (names vary: ADMS, Push, Cloud Server, Web Server):
+- **Enable ADMS/Cloud**: ON
+- **Server Address**: your domain only, e.g. `punchpay.in`
+- **Port**: `80` (recommended first; many deployments are HTTP for iclock)
+- **URL/Path**: `/iclock/cdata`
+  - If firmware forces `.aspx`, use `/iclock/cdata.aspx` (supported).
+- **Comm Key / Cloud Key**: paste your app `Cloud Token`
+- Save + restart device (if required).
+
+4. **Server/proxy requirements**
+- `/iclock/*` must route to backend Node app (not frontend static files).
+- Keep HTTP `:80` accessible for `/iclock` posts.
+- If you enforce HTTPS redirect, exclude `/iclock/` from forced redirect unless device supports HTTPS push.
+
+5. **Test**
+- Do one punch on device.
+- Wait 10–60 seconds.
+- Check app attendance logs/device logs.
+
+6. **If not coming**
+- Recheck exact SN match (`device serial` == `adms_sn` in app).
+- Recheck token (no spaces, no old token).
+- Recheck domain/port/path exactly.
+- Check nginx access/error logs for `/iclock`.
+- Try `/iclock/cdata.aspx` if your model prefers that format.
+
+If you want, I can now give you a **copy-paste client handover checklist** (very short, technician-friendly) specifically for ZKTeco/eSSL installs.

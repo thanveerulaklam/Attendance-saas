@@ -161,6 +161,7 @@ export default function PayslipModal({
   const dayDetails = Array.isArray(breakdown?.attendance?.dayDetails)
     ? breakdown.attendance.dayDetails
     : [];
+  const hasDayDetails = dayDetails.length > 0;
   const fallbackAbsentDates = useMemo(
     () => dayDetails.filter((d) => d?.status === 'absent').map((d) => d.date).filter(Boolean),
     [dayDetails]
@@ -179,23 +180,32 @@ export default function PayslipModal({
   );
   const payrollAsOfYmd = (breakdown?.attendance?.workingDaysUpToDate || '').slice(0, 10);
   const rawAbsentDates = useMemo(() => {
+    if (hasDayDetails && fallbackAbsentDates.length > 0) {
+      return fallbackAbsentDates;
+    }
     if (Array.isArray(attendanceDetails?.absentDates) && attendanceDetails.absentDates.length > 0) {
       return attendanceDetails.absentDates;
     }
     return fallbackAbsentDates;
-  }, [attendanceDetails?.absentDates, fallbackAbsentDates]);
+  }, [attendanceDetails?.absentDates, fallbackAbsentDates, hasDayDetails]);
   const rawHalfDayDates = useMemo(() => {
+    if (hasDayDetails && fallbackHalfDayDates.length > 0) {
+      return fallbackHalfDayDates;
+    }
     if (Array.isArray(attendanceDetails?.halfDayDates) && attendanceDetails.halfDayDates.length > 0) {
       return attendanceDetails.halfDayDates;
     }
     return fallbackHalfDayDates;
-  }, [attendanceDetails?.halfDayDates, fallbackHalfDayDates]);
+  }, [attendanceDetails?.halfDayDates, fallbackHalfDayDates, hasDayDetails]);
   const rawLateDetails = useMemo(() => {
+    if (hasDayDetails && fallbackLateDetails.length > 0) {
+      return fallbackLateDetails;
+    }
     if (Array.isArray(attendanceDetails?.lateDetails) && attendanceDetails.lateDetails.length > 0) {
       return attendanceDetails.lateDetails;
     }
     return fallbackLateDetails;
-  }, [attendanceDetails?.lateDetails, fallbackLateDetails]);
+  }, [attendanceDetails?.lateDetails, fallbackLateDetails, hasDayDetails]);
   const effectiveAbsentDates = useMemo(
     () => filterYmdOnOrBefore(payrollAsOfYmd, rawAbsentDates),
     [payrollAsOfYmd, rawAbsentDates]
@@ -244,6 +254,17 @@ export default function PayslipModal({
     absentDaysNum > 0 && absentDeductNum > 0
       ? `${formatHours(absentDaysNum)} days x Rs ${formatMoneyPrecise(absentPerDayRate)}/day = Rs ${formatMoneyPrecise(absentDeductNum)}`
       : null;
+  const fullAbsentDaysCount = effectiveAbsentDates.length;
+  const halfDayCountFromDates = effectiveHalfDayDates.length;
+  const halfDayCountForDisplay = hasDayDetails
+    ? halfDayCountFromDates
+    : (breakdown.attendance?.halfDayDays ?? attendanceDetails?.halfDayCount ?? '—');
+  const equivalentAbsenceFromDates = fullAbsentDaysCount + (halfDayCountFromDates * 0.5);
+  const showAbsenceMismatchNote =
+    !isHoursBasedPayroll &&
+    hasDayDetails &&
+    Number.isFinite(absentDaysNum) &&
+    Math.abs(absentDaysNum - equivalentAbsenceFromDates) >= 0.01;
   const isCompletePeriod =
     b.isMonthComplete != null ? Boolean(b.isMonthComplete) : (b.isWeekComplete != null ? Boolean(b.isWeekComplete) : true);
 
@@ -356,7 +377,7 @@ export default function PayslipModal({
     doc.text(payrollAbsentHelp, labelX, y);
     y += payrollAbsentHelp.length * 8;
     doc.setFontSize(9);
-    writeKv('Late', `${attendanceDetails?.lateCount ?? '—'} times`, [180, 83, 9]);
+    writeKv('Late', `${effectiveLateDetails.length} times`, [180, 83, 9]);
     writeKv('Overtime', `${formatHours(att.overtimeHours)} hrs`, [5, 150, 105]);
     writeKv('Unused Paid Leave', `${formatHours(b.unusedPaidLeaveDays)} days`, [22, 101, 52]);
     y += 4;
@@ -435,7 +456,7 @@ Employee: ${payrollRow.employee_name} (${payrollRow.employee_code})
 ATTENDANCE
 Present: ${att?.presentDays ?? '—'} days
 Absent: ${att?.absenceDays ?? '—'} days
-Late: ${attendanceDetails?.lateCount ?? '—'} times
+Late: ${effectiveLateDetails.length} times
 Overtime: ${overtimeHours === '—' ? '—' : `${overtimeHours} hrs`}
 
 SALARY
@@ -573,12 +594,12 @@ punchpay.in
               </div>
               <div className="flex justify-between">
                 <span>Full Absent Days</span>
-                <span className="font-medium text-rose-600">{effectiveAbsentDates.length}</span>
+                <span className="font-medium text-rose-600">{fullAbsentDaysCount}</span>
               </div>
               <div className="flex justify-between">
                 <span>{isHoursBasedPayroll ? 'Partial Days' : 'Half Days'}</span>
                 <span className="font-medium text-amber-600">
-                  {breakdown.attendance?.halfDayDays ?? attendanceDetails?.halfDayCount ?? '—'}
+                  {halfDayCountForDisplay}
                 </span>
               </div>
               <div className="flex justify-between">
@@ -598,8 +619,15 @@ punchpay.in
               </div>
             </div>
             <p className="mt-2 text-[10px] text-slate-500">
-              Salary deduction absence = full absent days + (half days x 0.5).
+              {isHoursBasedPayroll
+                ? 'Salary deduction absence is computed from worked-hours shortfall against required hours.'
+                : 'Salary deduction absence = full absent days + (half days x 0.5).'}
             </p>
+            {showAbsenceMismatchNote && (
+              <p className="mt-1 text-[10px] text-amber-600">
+                Attendance buckets and payroll absence differ slightly due to payroll rules (leave/rounding/policy overrides).
+              </p>
+            )}
             <div className="mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
               {payrollAsOfYmd && (

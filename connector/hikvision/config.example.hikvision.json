@@ -1,5 +1,8 @@
 {
   "deviceIp": "192.168.0.100",
+  "deviceScheme": "http",
+  "tryHttps": false,
+  "devicePort": null,
   "hikUsername": "admin",
   "hikPassword": "replace-with-device-admin-password",
   "deviceApiKey": "paste-your-device-api-key-from-the-app",
@@ -8,8 +11,9 @@
   "maxResultsPerPoll": 100,
   "initialPosition": 0,
   "startTime": "2020-01-01T00:00:00+05:30",
-  "majorCode": 0,
+  "majorCode": 5,
   "minorCode": 0,
+  "eventAttribute": "attendance",
   "exitMinorCodes": [
     76,
     77

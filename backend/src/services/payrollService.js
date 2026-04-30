@@ -665,6 +665,45 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     const lateMinutes = totalLateMs / (60 * 1000);
     const lunchOverMinutes = totalLunchOverMs / (60 * 1000);
 
+    // Build day-level statuses from the same rules used for payroll math,
+    // so payslip "Absent/Half-day/Late dates" stay consistent with deductions.
+    const dayDetails = [];
+    for (let d = 1; d <= daysInMonth; d += 1) {
+      const dayKey = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      if (dayKey > lastDateToConsider) break;
+      const isHoliday = holidaySet.has(dayKey);
+      const dayLogs = logsByDay.get(dayKey) || [];
+
+      if (!dayLogs.length) {
+        dayDetails.push({
+          date: dayKey,
+          firstInTime: null,
+          totalHoursInside: null,
+          late: false,
+          minutesLate: 0,
+          status: isHoliday ? 'weekly_off' : 'absent',
+        });
+        continue;
+      }
+
+      const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+      const logsForStatus = sorted.map((l) => ({
+        punch_time: l.punchTime.toISOString(),
+        punch_type: l.punchType,
+      }));
+      const status = computeDayStatus(logsForStatus, shift, dayKey);
+      const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
+
+      dayDetails.push({
+        date: dayKey,
+        firstInTime: firstInTime ? firstInTime.toISOString() : null,
+        totalHoursInside: null,
+        late: Boolean(status.late && !isHoliday),
+        minutesLate: !isHoliday ? Number(status.minutesLate || 0) : 0,
+        status: isHoliday ? 'weekly_off' : status.present ? (status.halfDay ? 'half_day' : 'present') : 'absent',
+      });
+    }
+
     return {
       daysInMonth,
       workingDaysUpToDate: lastDateToConsider,
@@ -692,7 +731,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       absenceDays,
       attendanceMode: shift.attendanceMode || 'day_based',
       requiredHoursPerDay: shift.requiredHoursPerDay || 8,
-      dayDetails: null,
+      dayDetails,
     };
   } finally {
     client.release();

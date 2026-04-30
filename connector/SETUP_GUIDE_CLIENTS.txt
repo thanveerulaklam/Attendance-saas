@@ -237,11 +237,10 @@ LOGS
 - It records each sync (Connected, Pushed, errors)
 - Share this file with your provider if you need support
 
-For Hikvision mode:
-- Use connector-hik.exe (Windows) or connector-hik-mac (Mac) if provided by your provider.
-- Rename config.example.hikvision.json to config.hikvision.json.
-- Fill deviceIp, hikUsername, hikPassword, deviceApiKey, backendUrl.
-- Hik logs are written to connector-hik.log in the same folder.
+For Hikvision terminals (not ZK):
+- Use the separate folder package: connector/hikvision/ in the project, or the zip your
+  provider gives you (connector-hik.exe + install-windows.bat + config.example.hikvision.json).
+- Full steps: connector/hikvision/SETUP_GUIDE_CLIENTS.txt
 
 
 ================================================================================
