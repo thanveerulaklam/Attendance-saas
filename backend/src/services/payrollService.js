@@ -32,6 +32,19 @@ async function assertEmployeePayrollScope(companyId, employeeId, allowedBranchId
 }
 const TZ_OFFSETS = { 'Asia/Kolkata': '+05:30', 'Asia/Calcutta': '+05:30', UTC: 'Z', 'Etc/UTC': 'Z' };
 
+/**
+ * Normalize punch direction by chronological order (IN, OUT, IN, OUT...).
+ * Payroll must mirror attendance report behavior for non-standard device punch types.
+ */
+function normalizePayrollDayLogs(dayLogs) {
+  if (!Array.isArray(dayLogs) || dayLogs.length === 0) return [];
+  const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+  return sorted.map((log, idx) => ({
+    ...log,
+    punchType: idx % 2 === 0 ? 'in' : 'out',
+  }));
+}
+
 function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
   const offset = TZ_OFFSETS[COMPANY_TZ] ?? '+05:30';
   const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}:00${offset === 'Z' ? 'Z' : offset}`;
@@ -410,7 +423,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           continue;
         }
 
-        const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+        const sorted = normalizePayrollDayLogs(dayLogs);
         const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
         const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
@@ -568,7 +581,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     for (const [dayKey, dayLogs] of logsByDay.entries()) {
       if (!dayLogs.length || dayKey > lastDateToConsider) continue;
 
-      const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+      const sorted = normalizePayrollDayLogs(dayLogs);
       const logsForStatus = sorted.map((l) => ({
         punch_time: l.punchTime.toISOString(),
         punch_type: l.punchType,
@@ -693,7 +706,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         continue;
       }
 
-      const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+      const sorted = normalizePayrollDayLogs(dayLogs);
       const logsForStatus = sorted.map((l) => ({
         punch_time: l.punchTime.toISOString(),
         punch_type: l.punchType,
@@ -916,7 +929,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           continue;
         }
 
-        const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+        const sorted = normalizePayrollDayLogs(dayLogs);
         const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
         const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
@@ -993,7 +1006,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           continue;
         }
 
-        const sorted = [...dayLogs].sort((a, b) => a.punchTime - b.punchTime);
+        const sorted = normalizePayrollDayLogs(dayLogs);
         const logsForStatus = sorted.map((l) => ({
           punch_time: l.punchTime.toISOString(),
           punch_type: l.punchType,
