@@ -46,6 +46,12 @@ function formatHours(value) {
   return num.toFixed(2).replace(/\.?0+$/, '');
 }
 
+function formatDayCount(value) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  const num = Number(value);
+  return num.toFixed(2).replace(/\.?0+$/, '');
+}
+
 function formatMoneyPrecise(n) {
   if (n == null || Number.isNaN(Number(n))) return '—';
   return new Intl.NumberFormat('en-IN', {
@@ -365,8 +371,8 @@ export default function PayslipModal({
     }
     doc.setFontSize(9);
     writeKv('Working Days', String(att.workingDays ?? '—'));
-    writeKv('Present', `${att.presentDays ?? '—'} days`);
-    writeKv('Salary Deduction Absence', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
+    writeKv('Present', `${formatDayCount(att.presentDays)} days`);
+    writeKv('Salary Deduction Absence', `${formatDayCount(att.absenceDays)} days`, [190, 24, 93]);
     doc.setFontSize(8);
     doc.setFont(undefined, 'normal');
     doc.setTextColor(100, 116, 139);
@@ -454,8 +460,8 @@ ${company?.name || ''}
 Employee: ${payrollRow.employee_name} (${payrollRow.employee_code})
 ─────────────────────
 ATTENDANCE
-Present: ${att?.presentDays ?? '—'} days
-Absent: ${att?.absenceDays ?? '—'} days
+Present: ${formatDayCount(att?.presentDays)} days
+Absent: ${formatDayCount(att?.absenceDays)} days
 Late: ${effectiveLateDetails.length} times
 Overtime: ${overtimeHours === '—' ? '—' : `${overtimeHours} hrs`}
 
@@ -584,12 +590,12 @@ punchpay.in
               </div>
               <div className="flex justify-between">
                 <span>Days Present</span>
-                <span className="font-medium">{breakdown.attendance?.presentDays ?? '—'}</span>
+                <span className="font-medium">{formatDayCount(breakdown.attendance?.presentDays)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Salary Deduction Absence</span>
                 <span className="font-medium text-rose-600">
-                  {breakdown.attendance?.absenceDays ?? '—'}
+                  {formatDayCount(breakdown.attendance?.absenceDays)}
                 </span>
               </div>
               <div className="flex justify-between">
