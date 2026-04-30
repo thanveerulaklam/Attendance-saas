@@ -574,7 +574,14 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         punch_type: l.punchType,
       }));
 
-      const status = computeDayStatus(logsForStatus, shift, dayKey);
+      const isCurrentDateForStatus = dayKey === todayIstYmd();
+      const status = computeDayStatus(
+        logsForStatus,
+        shift,
+        dayKey,
+        isCurrentDateForStatus,
+        Date.now()
+      );
 
       if (!status.present) {
         continue;
@@ -691,7 +698,14 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         punch_time: l.punchTime.toISOString(),
         punch_type: l.punchType,
       }));
-      const status = computeDayStatus(logsForStatus, shift, dayKey);
+      const isCurrentDateForStatus = dayKey === todayIstYmd();
+      const status = computeDayStatus(
+        logsForStatus,
+        shift,
+        dayKey,
+        isCurrentDateForStatus,
+        Date.now()
+      );
       const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
 
       dayDetails.push({
