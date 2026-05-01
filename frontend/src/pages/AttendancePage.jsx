@@ -595,17 +595,24 @@ export default function AttendancePage() {
                 <tbody>
                   {dailyData.map((row) => {
                     const punches = row.punches || [];
-                    const timingsStr = punches.length
-                      ? punches
-                          .map((p) => {
-                            const timeStr = formatIstTime(p.punch_time);
-                            const isAuto =
-                              (p.device_id || '').toLowerCase() === 'auto_out' &&
-                              (p.punch_type || '').toLowerCase() === 'out';
-                            const suffix = isAuto ? ' OUT (Auto — shift end)' : ` ${(p.punch_type || '').toUpperCase()}`;
-                            return `${timeStr}${suffix}`;
-                          })
-                          .join(', ')
+                    const timingsContent = punches.length
+                      ? punches.map((p, idx) => {
+                          const timeStr = formatIstTime(p.punch_time);
+                          const punchType = (p.punch_type || '').toLowerCase();
+                          const deviceId = (p.device_id || '').toLowerCase();
+                          const isAuto = deviceId === 'auto_out' && punchType === 'out';
+                          const isManual = deviceId === 'manual';
+                          const suffix = isAuto ? ' OUT (Auto — shift end)' : ` ${punchType.toUpperCase()}`;
+                          return (
+                            <span
+                              key={p.id || `${row.employee_id}-${idx}-${p.punch_time}`}
+                              className={isManual ? 'text-orange-600 font-medium' : undefined}
+                            >
+                              {`${timeStr}${suffix}`}
+                              {idx < punches.length - 1 ? ', ' : ''}
+                            </span>
+                          );
+                        })
                       : '—';
                     const isHoursBased = row.attendance_mode === 'hours_based';
                     let dayStatus = 'Absent';
@@ -673,7 +680,7 @@ export default function AttendancePage() {
                       <tr key={row.employee_id} className="border-t border-slate-100 hover:bg-slate-50/50">
                         <td className="py-1.5 px-2 font-medium text-slate-800">{row.name}</td>
                         <td className="py-1.5 px-2 text-slate-600">{row.employee_code || '—'}</td>
-                        <td className="py-1.5 px-2 text-slate-600">{timingsStr}</td>
+                        <td className="py-1.5 px-2 text-slate-600">{timingsContent}</td>
                         <td className={`py-1.5 px-2 font-medium ${statusCls}`}>
                           <div className="flex flex-col gap-0.5">
                             <span>{dayStatus}</span>
