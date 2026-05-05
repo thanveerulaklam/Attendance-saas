@@ -881,14 +881,18 @@ export default function PayrollPage() {
       const data = await getMonthlyBreakdown(row);
       const details = Array.isArray(data?.attendance?.dayDetails) ? data.attendance.dayDetails : [];
       const absentRows = details
-        .filter((d) => d?.status === 'absent')
-        .map((d) => [formatDateShort(d?.date)]);
+        .filter((d) => d?.status === 'absent' || d?.status === 'half_day')
+        .map((d) => [
+          formatDateShort(d?.date),
+          d?.status === 'half_day' ? 'Half day' : 'Full absent',
+          d?.status === 'half_day' ? '0.5 day' : '1 day',
+        ]);
       if (!absentRows.length) return;
       setMetricModal({
         open: true,
         title: 'Absent Day Details',
         subtitle: `${row.employee_name} (${row.employee_code}) — ${periodLabel}`,
-        headers: ['Date'],
+        headers: ['Date', 'Type', 'Counts As'],
         rows: absentRows,
       });
     } catch {
