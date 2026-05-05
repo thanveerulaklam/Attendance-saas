@@ -52,6 +52,20 @@ function formatPermissionUsedHours(minutes) {
   return Number.isInteger(hours) ? String(hours) : hours.toFixed(2);
 }
 
+function formatDateShort(ymd) {
+  if (!ymd) return '—';
+  const d = new Date(`${String(ymd).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return String(ymd).slice(0, 10);
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatTimeAmPm(isoLike) {
+  if (!isoLike) return '—';
+  const d = new Date(isoLike);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
 function buildWeeklyOffDateSet(year, month, weeklyOffDays) {
   const y = Number(year);
   const m = Number(month);
@@ -566,6 +580,14 @@ export default function PayrollPage() {
   const columnMenuRef = useRef(null);
   const [columnMenuOpen, setColumnMenuOpen] = useState(false);
   const [lateCountByEmployeeId, setLateCountByEmployeeId] = useState({});
+  const [lateDetailsByEmployeeId, setLateDetailsByEmployeeId] = useState({});
+  const [lateModal, setLateModal] = useState({
+    open: false,
+    employeeName: '',
+    employeeCode: '',
+    periodLabel: '',
+    rows: [],
+  });
   const [visibleColumns, setVisibleColumns] = useState(() => {
     try {
       const raw = window.localStorage.getItem(PAYROLL_COLUMN_STORAGE_KEY);
@@ -665,6 +687,7 @@ export default function PayrollPage() {
   useEffect(() => {
     if (payrollMode !== 'monthly' || !month) {
       setLateCountByEmployeeId({});
+      setLateDetailsByEmployeeId({});
       return;
     }
 
@@ -683,14 +706,26 @@ export default function PayrollPage() {
         if (!isMounted) return;
         const employeesData = Array.isArray(json?.data?.employees) ? json.data.employees : [];
         const nextMap = {};
+        const nextDetails = {};
         for (const emp of employeesData) {
           const days = Array.isArray(emp?.days) ? emp.days : [];
-          nextMap[emp.employee_id] = days.filter((d) => d?.late === true).length;
+          const lateRows = days
+            .filter((d) => d?.late === true)
+            .map((d) => ({
+              date: d?.date || null,
+              firstInTime: d?.first_in_time || null,
+            }));
+          nextMap[emp.employee_id] = lateRows.length;
+          nextDetails[emp.employee_id] = lateRows;
         }
         setLateCountByEmployeeId(nextMap);
+        setLateDetailsByEmployeeId(nextDetails);
       })
       .catch(() => {
-        if (isMounted) setLateCountByEmployeeId({});
+        if (isMounted) {
+          setLateCountByEmployeeId({});
+          setLateDetailsByEmployeeId({});
+        }
       });
 
     return () => {
@@ -745,6 +780,33 @@ export default function PayrollPage() {
       ...prev,
       [key]: !currentlyVisible,
     }));
+  };
+
+  const openLateArrivalsModal = (row) => {
+    if (payrollMode !== 'monthly') return;
+    const lateRows = lateDetailsByEmployeeId[row.employee_id] || [];
+    if (!lateRows.length) return;
+    const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+      month: 'long',
+      year: 'numeric',
+    });
+    setLateModal({
+      open: true,
+      employeeName: row.employee_name || 'Employee',
+      employeeCode: row.employee_code || '—',
+      periodLabel,
+      rows: lateRows,
+    });
+  };
+
+  const closeLateArrivalsModal = () => {
+    setLateModal({
+      open: false,
+      employeeName: '',
+      employeeCode: '',
+      periodLabel: '',
+      rows: [],
+    });
   };
 
   async function fetchAllPayrollRecordsForExport() {
@@ -1796,9 +1858,24 @@ export default function PayrollPage() {
                       )}
                       {isColumnVisible('lateArrivals') && (
                         <td className="py-3 pr-3 text-right text-slate-700">
-                          {Number.isFinite(Number(lateCountByEmployeeId[row.employee_id]))
-                            ? String(lateCountByEmployeeId[row.employee_id])
-                            : '—'}
+                          {(() => {
+                            const lateCount = Number(lateCountByEmployeeId[row.employee_id]);
+                            if (!Number.isFinite(lateCount)) return '—';
+                            if (lateCount <= 0) return '0';
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openLateArrivalsModal(row);
+                                }}
+                                className="font-semibold text-amber-700 underline decoration-dotted underline-offset-2 hover:text-amber-800"
+                                title="View late arrival dates"
+                              >
+                                {lateCount}
+                              </button>
+                            );
+                          })()}
                         </td>
                       )}
                       {isColumnVisible('overtime') && (
@@ -2145,6 +2222,48 @@ export default function PayrollPage() {
               <button
                 type="button"
                 onClick={() => setFailureModalOpen(false)}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lateModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
+          <div className="w-full max-w-lg rounded-xl bg-white p-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Late Arrival Details</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {lateModal.employeeName} ({lateModal.employeeCode}) — {lateModal.periodLabel}
+            </p>
+            <div className="mt-3 max-h-[360px] overflow-y-auto rounded-lg border border-slate-200">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="text-left text-slate-600">
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">First IN</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lateModal.rows.map((item, idx) => (
+                    <tr key={`${item.date || 'date'}-${idx}`} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-medium text-slate-800">
+                        {formatDateShort(item.date)}
+                      </td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {formatTimeAmPm(item.firstInTime)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={closeLateArrivalsModal}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
               >
                 Close
