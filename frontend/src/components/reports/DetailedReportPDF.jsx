@@ -19,6 +19,10 @@ function formatMonthLabel(year, month) {
   return d.toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
+function todayIstYmd() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
 function formatPunchTimings(punches) {
   const list = Array.isArray(punches) ? punches : [];
   if (list.length === 0) return '';
@@ -135,6 +139,13 @@ export async function generateDetailedAttendancePdf({
   const periodLabel = fromDate && toDate
     ? `${fromDate} to ${toDate}`
     : formatMonthLabel(year, month);
+  const isCurrentMonthView = (() => {
+    const now = new Date();
+    const nowYear = Number(now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric' }));
+    const nowMonth = Number(now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata', month: '2-digit' }));
+    return Number(year) === nowYear && Number(month) === nowMonth;
+  })();
+  const todayCapYmd = todayIstYmd();
 
   const doc = createPdf();
   const startY = addReportHeader(doc, {
@@ -148,12 +159,24 @@ export async function generateDetailedAttendancePdf({
   });
 
   const summaryBody = filteredMonthlyEmployees.map((emp) => {
+    const visibleDays = (emp.days || []).filter((d) => {
+      const date = d?.date;
+      if (!date) return false;
+      if (fromDate && date < fromDate) return false;
+      if (toDate && date > toDate) return false;
+      if (isCurrentMonthView && date > todayCapYmd) return false;
+      return true;
+    });
     const totalDays = monthly.daysInMonth || 0;
     const present = emp.summary?.presentDays ?? 0;
     const absent = emp.summary?.absenceDays ?? 0;
     const overtime = emp.summary?.overtimeHours ?? 0;
-    const halfDays = (emp.days || []).filter((d) => d.half_day).length;
-    const lateCount = (emp.days || []).filter((d) => d.late).length;
+    const halfDays = visibleDays.filter((d) => d.half_day).length;
+    const lateCount = visibleDays.filter((d) => d.late).length;
+    const totalPunches = visibleDays.reduce(
+      (sum, d) => sum + (Array.isArray(d.punches) ? d.punches.length : 0),
+      0
+    );
     const attendancePercent = totalDays > 0 ? ((present / totalDays) * 100).toFixed(1) : '0.0';
     return [
       emp.employee_code || '',
@@ -164,13 +187,14 @@ export async function generateDetailedAttendancePdf({
       String(halfDays),
       String(lateCount),
       String(overtime),
+      String(totalPunches),
       `${attendancePercent}%`,
     ];
   });
 
   addAutoTable(
     doc,
-    [['Emp Code', 'Name', 'Total Days', 'Present', 'Absent', 'Half Days', 'Late Count', 'Overtime Hours', 'Attendance %']],
+    [['Emp Code', 'Name', 'Total Days', 'Present', 'Absent', 'Half Days', 'Late Count', 'Overtime Hours', 'Total Punches', 'Attendance %']],
     summaryBody,
     {
       startY,
@@ -207,6 +231,7 @@ export async function generateDetailedAttendancePdf({
       if (!date) return;
       if (fromDate && date < fromDate) return;
       if (toDate && date > toDate) return;
+      if (isCurrentMonthView && date > todayCapYmd) return;
 
       const jsDate = new Date(date);
       const weekday = jsDate.toLocaleString('default', { weekday: 'short' });
@@ -238,7 +263,7 @@ export async function generateDetailedAttendancePdf({
         weekday,
         day.first_in_time ? formatIstTime(day.first_in_time) : '',
         day.last_out_time ? formatIstTime(day.last_out_time) : '',
-        String((day.punches || []).length),
+        String(Array.isArray(day.punches) ? day.punches.length : 0),
         formatPunchTimings(day.punches),
         formatTotalHoursForPdf(day),
         status,
