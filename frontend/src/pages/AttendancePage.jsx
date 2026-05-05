@@ -55,6 +55,20 @@ function isLeftAtLunchStatus(row) {
   return Boolean(row?.present && row?.left_during_lunch && !row?.full_day);
 }
 
+function isOnBreakStatus(row, isTodaySelected) {
+  if (!isTodaySelected) return false;
+  if (String(row?.attendance_mode || '') !== 'hours_based') return false;
+  if (!row?.present || row?.full_day || row?.left_during_lunch) return false;
+  const punches = Array.isArray(row?.punches) ? row.punches : [];
+  if (!punches.length) return false;
+  const hasAnyInPunch = punches.some(
+    (p) => String(p?.punch_type || '').toLowerCase() === 'in'
+  );
+  if (!hasAnyInPunch) return false;
+  const lastPunchType = String(punches[punches.length - 1]?.punch_type || '').toLowerCase();
+  return lastPunchType === 'out';
+}
+
 export default function AttendancePage() {
   const [monthYear, setMonthYear] = useState(() => getMonthYear(0));
   const [employeeId, setEmployeeId] = useState('');
@@ -64,6 +78,7 @@ export default function AttendancePage() {
   const [employees, setEmployees] = useState([]);
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
+  const [company, setCompany] = useState(null);
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dailyLoading, setDailyLoading] = useState(false);
@@ -97,6 +112,7 @@ export default function AttendancePage() {
   const { year, month } = monthYear;
   const dateStr = selectedDate;
   const isTodaySelected = dateStr === todayStr();
+  const isTharagaiReadymades = String(company?.name || '').toLowerCase().includes('tharagai readymades');
 
   const refreshAfterManual = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -119,6 +135,21 @@ export default function AttendancePage() {
     };
     fetchEmployees();
     return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (isMounted) setCompany(json?.data || null);
+      })
+      .catch(() => {
+        if (isMounted) setCompany(null);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -269,21 +300,23 @@ export default function AttendancePage() {
 
   const todaySummary = useMemo(() => {
     if (!dailyData || dailyData.length === 0) {
-      return { present: 0, absent: 0, late: 0, fullDay: 0, leftDuringLunch: 0, total: 0 };
+      return { present: 0, absent: 0, late: 0, fullDay: 0, leftDuringLunch: 0, onBreak: 0, total: 0 };
     }
     const present = dailyData.filter((r) => r.present).length;
     const late = dailyData.filter((r) => r.late).length;
     const fullDay = dailyData.filter((r) => r.full_day).length;
     const leftDuringLunch = dailyData.filter((r) => isLeftAtLunchStatus(r)).length;
+    const onBreak = dailyData.filter((r) => isOnBreakStatus(r, isTodaySelected)).length;
     return {
       present,
       absent: dailyData.length - present,
       late,
       fullDay,
       leftDuringLunch,
+      onBreak,
       total: dailyData.length,
     };
-  }, [dailyData]);
+  }, [dailyData, isTodaySelected]);
 
   const calendarGrid = useMemo(() => {
     if (!monthlyData || !monthlyData.daysInMonth) return null;
@@ -560,16 +593,23 @@ export default function AttendancePage() {
             </button>
             <button
               type="button"
-              onClick={() => todaySummary.leftDuringLunch > 0 && setLeftLunchModalOpen(true)}
+              onClick={() =>
+                (isTharagaiReadymades ? todaySummary.onBreak : todaySummary.leftDuringLunch) > 0 &&
+                setLeftLunchModalOpen(true)
+              }
               className={`rounded-lg border px-3 py-2 text-left transition-colors ${
-                todaySummary.leftDuringLunch > 0
+                (isTharagaiReadymades ? todaySummary.onBreak : todaySummary.leftDuringLunch) > 0
                   ? 'bg-rose-50 border-rose-100 hover:bg-rose-100/60 cursor-pointer'
                   : 'bg-rose-50 border-rose-100 cursor-default'
               }`}
-              disabled={todaySummary.leftDuringLunch === 0}
+              disabled={(isTharagaiReadymades ? todaySummary.onBreak : todaySummary.leftDuringLunch) === 0}
             >
-              <p className="text-[10px] font-medium text-rose-700">Left at lunch</p>
-              <p className="text-lg font-semibold text-rose-800">{todaySummary.leftDuringLunch}</p>
+              <p className="text-[10px] font-medium text-rose-700">
+                {isTharagaiReadymades ? 'On break' : 'Left at lunch'}
+              </p>
+              <p className="text-lg font-semibold text-rose-800">
+                {isTharagaiReadymades ? todaySummary.onBreak : todaySummary.leftDuringLunch}
+              </p>
             </button>
           </div>
         )}
@@ -620,20 +660,7 @@ export default function AttendancePage() {
                         })
                       : '—';
                     const isHoursBased = row.attendance_mode === 'hours_based';
-                    const lastPunchType = String(
-                      punches.length ? punches[punches.length - 1]?.punch_type || '' : ''
-                    ).toLowerCase();
-                    const hasAnyInPunch = punches.some(
-                      (p) => String(p?.punch_type || '').toLowerCase() === 'in'
-                    );
-                    const onBreakNow =
-                      isTodaySelected &&
-                      isHoursBased &&
-                      row.present &&
-                      hasAnyInPunch &&
-                      lastPunchType === 'out' &&
-                      !row.full_day &&
-                      !row.left_during_lunch;
+                    const onBreakNow = isOnBreakStatus(row, isTodaySelected);
                     let dayStatus = 'Absent';
                     if (row.present) {
                       if (row.full_day) dayStatus = 'Full day';
@@ -1016,21 +1043,7 @@ export default function AttendancePage() {
                 {(dailyData || [])
                   .filter((r) => r.present)
                   .map((row) => {
-                    const punches = row.punches || [];
-                    const isHoursBased = row.attendance_mode === 'hours_based';
-                    const lastPunchType = String(
-                      punches.length ? punches[punches.length - 1]?.punch_type || '' : ''
-                    ).toLowerCase();
-                    const hasAnyInPunch = punches.some(
-                      (p) => String(p?.punch_type || '').toLowerCase() === 'in'
-                    );
-                    const onBreakNow =
-                      isTodaySelected &&
-                      isHoursBased &&
-                      hasAnyInPunch &&
-                      lastPunchType === 'out' &&
-                      !row.full_day &&
-                      !row.left_during_lunch;
+                    const onBreakNow = isOnBreakStatus(row, isTodaySelected);
                     const status = row.full_day
                       ? 'Full day'
                       : onBreakNow
@@ -1130,7 +1143,7 @@ export default function AttendancePage() {
         </div>
       )}
 
-      {/* Left at lunch staff modal */}
+      {/* Left at lunch / On break staff modal */}
       {leftLunchModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
@@ -1141,15 +1154,23 @@ export default function AttendancePage() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="shrink-0 border-b border-slate-100 px-5 py-4">
-              <h3 className="text-sm font-semibold text-slate-900">Staff left at lunch</h3>
+              <h3 className="text-sm font-semibold text-slate-900">
+                {isTharagaiReadymades ? 'Staff on break' : 'Staff left at lunch'}
+              </h3>
               <p className="mt-1 text-[11px] text-slate-500">
-                {dateStr} — {todaySummary.leftDuringLunch} left during lunch
+                {isTharagaiReadymades
+                  ? `${dateStr} — ${todaySummary.onBreak} currently on break`
+                  : `${dateStr} — ${todaySummary.leftDuringLunch} left during lunch`}
               </p>
             </div>
             <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
               <ul className="space-y-2">
                 {(dailyData || [])
-                  .filter((r) => isLeftAtLunchStatus(r))
+                  .filter((r) =>
+                    isTharagaiReadymades
+                      ? isOnBreakStatus(r, isTodaySelected)
+                      : isLeftAtLunchStatus(r)
+                  )
                   .map((row) => {
                     const punches = row.punches || [];
                     const firstIn = punches
@@ -1164,6 +1185,7 @@ export default function AttendancePage() {
                           ? `${row.lunch_minutes}m (+${row.lunch_over_minutes} over)`
                           : `${row.lunch_minutes}m`
                         : '—';
+                    const trailingLabel = isTharagaiReadymades ? 'On break' : lunchLabel;
                     return (
                       <li
                         key={row.employee_id}
@@ -1176,7 +1198,7 @@ export default function AttendancePage() {
                           ) : null}
                         </span>
                         <span className="text-[11px] text-rose-700 font-medium">
-                          {firstIn ? formatIstTime(firstIn.punch_time) : '—'} / {lastOut ? formatIstTime(lastOut.punch_time) : '—'} • {lunchLabel}
+                          {firstIn ? formatIstTime(firstIn.punch_time) : '—'} / {lastOut ? formatIstTime(lastOut.punch_time) : '—'} • {trailingLabel}
                         </span>
                       </li>
                     );
