@@ -23,6 +23,13 @@ function todayIstYmd() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
+function toYearMonthFromYmd(value) {
+  const ymd = String(value || '').slice(0, 10);
+  const [y, m] = ymd.split('-').map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) return null;
+  return { year: y, month: m };
+}
+
 function formatPunchTimings(punches) {
   const list = Array.isArray(punches) ? punches : [];
   if (list.length === 0) return '';
@@ -66,12 +73,18 @@ export async function generateDetailedAttendancePdf({
   department,
   employeeIds,
 }) {
+  const fromYm = toYearMonthFromYmd(fromDate);
+  const toYm = toYearMonthFromYmd(toDate);
+  const rangeMonthMatch = fromYm && toYm && fromYm.year === toYm.year && fromYm.month === toYm.month;
+  const effectiveYear = rangeMonthMatch ? fromYm.year : Number(year);
+  const effectiveMonth = rangeMonthMatch ? fromYm.month : Number(month);
+
   const selectedEmployeeIds = Array.isArray(employeeIds)
     ? employeeIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0)
     : [];
   const monthlyQuery = new URLSearchParams({
-    year,
-    month,
+    year: String(effectiveYear),
+    month: String(effectiveMonth),
     ...(department ? { department } : {}),
   }).toString();
 
@@ -81,7 +94,7 @@ export async function generateDetailedAttendancePdf({
     authFetch(`/api/attendance/monthly?${monthlyQuery}`, {
       headers: { 'Content-Type': 'application/json' },
     }),
-    authFetch(`/api/holidays?${new URLSearchParams({ year, month }).toString()}`, {
+    authFetch(`/api/holidays?${new URLSearchParams({ year: String(effectiveYear), month: String(effectiveMonth) }).toString()}`, {
       headers: { 'Content-Type': 'application/json' },
     }),
     authFetch('/api/holidays/weekly-off', { headers: { 'Content-Type': 'application/json' } }),
@@ -138,12 +151,12 @@ export async function generateDetailedAttendancePdf({
 
   const periodLabel = fromDate && toDate
     ? `${fromDate} to ${toDate}`
-    : formatMonthLabel(year, month);
+    : formatMonthLabel(effectiveYear, effectiveMonth);
   const isCurrentMonthView = (() => {
     const now = new Date();
     const nowYear = Number(now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric' }));
     const nowMonth = Number(now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata', month: '2-digit' }));
-    return Number(year) === nowYear && Number(month) === nowMonth;
+    return Number(effectiveYear) === nowYear && Number(effectiveMonth) === nowMonth;
   })();
   const todayCapYmd = todayIstYmd();
 
@@ -160,10 +173,10 @@ export async function generateDetailedAttendancePdf({
 
   const summaryBody = filteredMonthlyEmployees.map((emp) => {
     const visibleDays = (emp.days || []).filter((d) => {
-      const date = d?.date;
+      const date = String(d?.date || '').slice(0, 10);
       if (!date) return false;
-      if (fromDate && date < fromDate) return false;
-      if (toDate && date > toDate) return false;
+      if (fromDate && date < String(fromDate).slice(0, 10)) return false;
+      if (toDate && date > String(toDate).slice(0, 10)) return false;
       if (isCurrentMonthView && date > todayCapYmd) return false;
       return true;
     });
@@ -227,10 +240,10 @@ export async function generateDetailedAttendancePdf({
 
     const bodyRows = [];
     (emp.days || []).forEach((day) => {
-      const date = day.date;
+      const date = String(day.date || '').slice(0, 10);
       if (!date) return;
-      if (fromDate && date < fromDate) return;
-      if (toDate && date > toDate) return;
+      if (fromDate && date < String(fromDate).slice(0, 10)) return;
+      if (toDate && date > String(toDate).slice(0, 10)) return;
       if (isCurrentMonthView && date > todayCapYmd) return;
 
       const jsDate = new Date(date);
@@ -311,8 +324,8 @@ export async function generateDetailedAttendancePdf({
   });
 
   const safeCompany = (company.name || 'Company').replace(/\s+/g, '');
-  const monthLabel = formatMonthLabel(year, month).replace(/\s+/g, '');
-  const filename = `PunchPay_Attendance_${safeCompany}_${monthLabel || `${year}${String(month).padStart(2, '0')}`}.pdf`;
+  const monthLabel = formatMonthLabel(effectiveYear, effectiveMonth).replace(/\s+/g, '');
+  const filename = `PunchPay_Attendance_${safeCompany}_${monthLabel || `${effectiveYear}${String(effectiveMonth).padStart(2, '0')}`}.pdf`;
   savePdf(doc, filename);
 }
 
