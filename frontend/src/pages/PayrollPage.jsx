@@ -1858,7 +1858,9 @@ export default function PayrollPage() {
                     className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
                   />
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    Added to staff present all working days. Applies only when the month is complete (run at month-end).
+                    Enter exact rupees here (defaults to ₹0 when left blank).
+                    Applies when the calendar month is complete and there are no unpaid absence days after shift paid leave.
+                    If the shift&apos;s policy already sets no-leave incentive, that amount overrides this field.
                   </p>
                 </div>
               ) : (

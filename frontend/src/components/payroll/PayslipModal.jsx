@@ -577,6 +577,20 @@ punchpay.in
             <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">
               ATTENDANCE SUMMARY
             </h3>
+            {breakdown.attendance?.payrollFrozenToRecord === true && breakdown.attendance?.liveAttendanceNote && (
+              <p className="mb-2 rounded-md border border-amber-100 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
+                {breakdown.attendance.liveAttendanceNote}
+                {breakdown.attendance?.payrollGeneratedAt && (
+                  <span className="mt-0.5 block text-[9px] text-amber-800/90">
+                    Payroll run:{' '}
+                    {new Date(breakdown.attendance.payrollGeneratedAt).toLocaleString('en-IN', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}
+                  </span>
+                )}
+              </p>
+            )}
             {isHoursBasedPayroll && (
               <p className="mb-2 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] text-blue-800">
                 Hours-based payroll mode: salary is prorated by hours worked (worked hours / required hours per day).

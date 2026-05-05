@@ -1975,10 +1975,11 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
     const globalIncentive = Number(noLeaveIncentive) || 0;
     const effectiveNoLeaveIncentive = shiftIncentive > 0 ? shiftIncentive : globalIncentive;
+    /** No unpaid absence days after applying shift paid leave (fractional-safe). */
     const noLeaveIncentiveAmount =
       effectiveNoLeaveIncentive > 0 &&
       isMonthComplete &&
-      Number(summary.rawAbsenceDays || 0) <= paidLeaveDaysAllowed
+      Number(absenceDaysForPayroll || 0) <= 1e-6
         ? effectiveNoLeaveIncentive
         : 0;
     const netSalary = grossSalary - deductions - salaryAdvance + noLeaveIncentiveAmount;
@@ -2091,6 +2092,14 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   const existingPayrollResult = await pool.query(
     `SELECT
+       id,
+       gross_salary,
+       deductions,
+       net_salary,
+       total_days,
+       present_days,
+       absence_days,
+       overtime_hours,
        treat_holiday_adjacent_absence_as_working,
        salary_advance,
        no_leave_incentive,
@@ -2098,14 +2107,17 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
        permission_minutes_used,
        permission_offset_amount,
        unused_paid_leave_days,
-       paid_leave_encashment_amount
+       paid_leave_encashment_amount,
+       generated_at
      FROM payroll_records
      WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
     [companyId, employeeId, year, month]
   );
+  const payrollRecordSnap =
+    existingPayrollResult.rowCount > 0 ? existingPayrollResult.rows[0] : null;
   const persistedTreatHoliday =
-    existingPayrollResult.rowCount > 0
-      ? Boolean(existingPayrollResult.rows[0].treat_holiday_adjacent_absence_as_working)
+    payrollRecordSnap
+      ? Boolean(payrollRecordSnap.treat_holiday_adjacent_absence_as_working)
       : false;
   const effectiveTreatHolidayAdjacentAbsenceAsWorking =
     options.treatHolidayAdjacentAbsenceAsWorking === true || persistedTreatHoliday;
@@ -2257,34 +2269,31 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const permissionHoursAllocated =
     !isMonthComplete
       ? 0
-      : existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].permission_hours_allocated || 0)
+      : payrollRecordSnap != null
+      ? Number(payrollRecordSnap.permission_hours_allocated || 0)
       : permissionOffsetComputed.allocatedHours;
   const permissionMinutesUsed =
     !isMonthComplete
       ? 0
-      : existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].permission_minutes_used || 0)
+      : payrollRecordSnap != null
+      ? Number(payrollRecordSnap.permission_minutes_used || 0)
       : permissionOffsetComputed.usedMinutes;
   const permissionOffsetAmount =
     !isMonthComplete
       ? 0
-      : existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].permission_offset_amount || 0)
+      : payrollRecordSnap != null
+      ? Number(payrollRecordSnap.permission_offset_amount || 0)
       : permissionOffsetComputed.offsetAmount;
   const unusedPaidLeaveDays =
-    existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].unused_paid_leave_days || 0)
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.unused_paid_leave_days || 0)
       : unusedPaidLeaveDaysComputed;
   const paidLeaveEncashmentAmount =
-    existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].paid_leave_encashment_amount || 0)
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.paid_leave_encashment_amount || 0)
       : paidLeaveEncashmentComputed;
-  const grossSalary =
-    existingPayrollResult.rowCount > 0
-      ? grossSalaryComputed - paidLeaveEncashmentComputed + paidLeaveEncashmentAmount
-      : grossSalaryComputed;
-  const totalDeductions = deductionsBeforePermission - permissionOffsetAmount;
+  let grossSalary = grossSalaryComputed;
+  let totalDeductions = deductionsBeforePermission - permissionOffsetAmount;
   const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
   const advanceRepaymentsResult = await pool.query(
     `SELECT
@@ -2315,12 +2324,12 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const newSalaryAdvance = advanceRepayments.reduce((sum, row) => sum + Number(row.this_month_deduction || 0), 0);
   const computedSalaryAdvance = oldSalaryAdvance + newSalaryAdvance;
   const salaryAdvance =
-    existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].salary_advance || 0)
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.salary_advance || 0)
       : computedSalaryAdvance;
   const noLeaveIncentive =
-    existingPayrollResult.rowCount > 0
-      ? Number(existingPayrollResult.rows[0].no_leave_incentive || 0)
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.no_leave_incentive || 0)
       : 0;
   const pendingAdvanceBalanceResult = await pool.query(
     `SELECT COALESCE(SUM(outstanding_balance), 0) AS balance
@@ -2331,7 +2340,61 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     [companyId, employeeId]
   );
   const pendingAdvanceBalance = Number(pendingAdvanceBalanceResult.rows[0]?.balance || 0);
-  const netSalary = grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
+  /** When this month already has payroll_records, freeze numbers to match table + payout (live attendance only for illustration). */
+  let payrollGeneratedAtIso = null;
+  if (payrollRecordSnap != null) {
+    payrollGeneratedAtIso = payrollRecordSnap.generated_at
+      ? new Date(payrollRecordSnap.generated_at).toISOString()
+      : null;
+
+    grossSalary = Number(payrollRecordSnap.gross_salary ?? grossSalary);
+    totalDeductions = Number(payrollRecordSnap.deductions ?? totalDeductions);
+
+    const nonAbsentFixedDeductions =
+      lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
+    absenceDeduction = Math.max(
+      0,
+      totalDeductions - nonAbsentFixedDeductions + permissionOffsetAmount
+    );
+
+    const recomputedDeductionsTotal =
+      absenceDeduction + nonAbsentFixedDeductions - permissionOffsetAmount;
+    const deductionsDrift = totalDeductions - recomputedDeductionsTotal;
+    if (Math.abs(deductionsDrift) > 0.02) {
+      absenceDeduction = Math.max(0, absenceDeduction + deductionsDrift);
+      totalDeductions =
+        absenceDeduction + nonAbsentFixedDeductions - permissionOffsetAmount;
+      const fixDrift = Number(payrollRecordSnap.deductions ?? 0) - totalDeductions;
+      if (Math.abs(fixDrift) > 0.02) {
+        totalDeductions = Number(payrollRecordSnap.deductions);
+        absenceDeduction = Math.max(
+          0,
+          totalDeductions - nonAbsentFixedDeductions + permissionOffsetAmount
+        );
+      }
+    }
+  }
+
+  const netSalary =
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.net_salary ?? grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive)
+      : grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
+
+  /** Attendance numbers shown on payslip: match payroll run when snapshot exists. */
+  const presentDaysForDisplay =
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.present_days ?? summary.presentDays)
+      : summary.presentDays;
+  const absenceDaysForDisplay =
+    payrollRecordSnap != null
+      ? Number(payrollRecordSnap.absence_days ?? summary.absenceDays)
+      : summary.absenceDays;
+  let overtimeBillableDisplay = overtimeHoursBillable;
+  if (payrollRecordSnap != null) {
+    overtimeBillableDisplay = allowOvertime
+      ? Number(payrollRecordSnap.overtime_hours || 0)
+      : 0;
+  }
 
   return {
     employee: {
@@ -2345,10 +2408,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       workingDaysUpToDate: summary.workingDaysUpToDate,
       workingDays: summary.workingDays,
       daysInMonth: summary.daysInMonth,
-      presentDays: summary.presentDays,
+      presentDays: presentDaysForDisplay,
       presentWorkingDays: summary.presentWorkingDays,
-      absenceDays: summary.absenceDays,
-      overtimeHours: overtimeHoursBillable,
+      absenceDays: absenceDaysForDisplay,
+      overtimeHours: overtimeBillableDisplay,
       overtimeHoursRaw: Number(summary.overtimeHours || 0),
       allowOvertime,
       lateMinutes: summary.lateMinutes,
@@ -2360,6 +2423,12 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       requiredHoursPerDay: summary.requiredHoursPerDay,
       treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,
       dayDetails: summary.dayDetails,
+      payrollFrozenToRecord: payrollRecordSnap != null,
+      payrollGeneratedAt: payrollGeneratedAtIso,
+      liveAttendanceNote:
+        payrollRecordSnap != null
+          ? 'Day-by-day punches reflect current attendance. Totals below match payroll run.'
+          : null,
     },
     breakdown: {
       isMonthComplete,
