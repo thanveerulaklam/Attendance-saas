@@ -67,7 +67,13 @@ async function generate(req, res, next) {
     const month = Number(monthRaw);
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
-    const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
+    const hasNoLeaveIncentiveInput =
+      noLeaveIncentiveRaw !== undefined &&
+      noLeaveIncentiveRaw !== null &&
+      String(noLeaveIncentiveRaw).trim() !== '';
+    const noLeaveIncentive = hasNoLeaveIncentiveInput
+      ? Math.max(0, Number(noLeaveIncentiveRaw) || 0)
+      : undefined;
     const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw === true;
 
     if (!companyId || !employeeId || !year || !month) {
@@ -119,7 +125,13 @@ async function generateAll(req, res, next) {
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
     const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
-    const noLeaveIncentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
+    const hasNoLeaveIncentiveInput =
+      noLeaveIncentiveRaw !== undefined &&
+      noLeaveIncentiveRaw !== null &&
+      String(noLeaveIncentiveRaw).trim() !== '';
+    const noLeaveIncentive = hasNoLeaveIncentiveInput
+      ? Math.max(0, Number(noLeaveIncentiveRaw) || 0)
+      : undefined;
     const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw === true;
 
     if (!companyId || !year || !month || month < 1 || month > 12) {

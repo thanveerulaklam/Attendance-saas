@@ -1190,22 +1190,24 @@ export default function PayrollPage() {
       try {
         setGenerating(true);
         setToast(null);
+        const noLeaveIncentiveRaw = String(generateForm.noLeaveIncentive ?? '').trim();
+        const payload = {
+          year: Number(y),
+          month: Number(m),
+          include_overtime: generateForm.includeOvertime !== false,
+          treat_holiday_adjacent_absence_as_working:
+            generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
+          encash_unused_paid_leave: generateForm.encashUnusedPaidLeave === true,
+          apply_advance_repayments: generateForm.applyAdvanceRepayments === true,
+        };
+        if (noLeaveIncentiveRaw !== '') {
+          payload.no_leave_incentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
+        }
+
         const res = await authFetch('/api/payroll/generate-all', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            year: Number(y),
-            month: Number(m),
-            include_overtime: generateForm.includeOvertime !== false,
-            treat_holiday_adjacent_absence_as_working:
-              generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
-            encash_unused_paid_leave: generateForm.encashUnusedPaidLeave === true,
-            no_leave_incentive: Math.max(
-              0,
-              Number(generateForm.noLeaveIncentive) || 0
-            ),
-            apply_advance_repayments: generateForm.applyAdvanceRepayments === true,
-          }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -1858,9 +1860,8 @@ export default function PayrollPage() {
                     className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
                   />
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    Enter exact rupees here (defaults to ₹0 when left blank).
-                    Applies when the calendar month is complete and there are no unpaid absence days after shift paid leave.
-                    If the shift&apos;s policy already sets no-leave incentive, that amount overrides this field.
+                    Blank = use shift policy. 0 = disable incentive. Any other value = manual override in rupees.
+                    Applies when month is complete and there are no unpaid absence days after shift paid leave.
                   </p>
                 </div>
               ) : (

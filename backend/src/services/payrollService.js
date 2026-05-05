@@ -1791,7 +1791,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     includeOvertime = true,
     treatHolidayAdjacentAbsenceAsWorking = false,
     apply_advance_repayments: applyAdvanceRepaymentsRaw = true,
-    noLeaveIncentive = 0,
+    noLeaveIncentive = undefined,
     encashUnusedPaidLeave = false,
     allowedBranchIds = null,
   } = payrollOptions;
@@ -1973,8 +1973,15 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const monthRepaymentAdvance = repaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
     const salaryAdvance = oldSalaryAdvance + monthRepaymentAdvance;
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
-    const globalIncentive = Number(noLeaveIncentive) || 0;
-    const effectiveNoLeaveIncentive = shiftIncentive > 0 ? shiftIncentive : globalIncentive;
+    const hasManualNoLeaveIncentive =
+      noLeaveIncentive !== undefined && noLeaveIncentive !== null;
+    const manualNoLeaveIncentive = hasManualNoLeaveIncentive
+      ? Math.max(0, Number(noLeaveIncentive) || 0)
+      : 0;
+    // Explicit manual value (including 0) overrides shift policy.
+    const effectiveNoLeaveIncentive = hasManualNoLeaveIncentive
+      ? manualNoLeaveIncentive
+      : shiftIncentive;
     /** No unpaid absence days after applying shift paid leave (fractional-safe). */
     const noLeaveIncentiveAmount =
       effectiveNoLeaveIncentive > 0 &&
