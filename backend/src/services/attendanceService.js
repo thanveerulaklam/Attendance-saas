@@ -930,7 +930,7 @@ async function getMonthlyAttendance(
       : monthLastStr;
 
     const logsResult = await client.query(
-      `SELECT employee_id, punch_time, punch_type
+      `SELECT employee_id, punch_time, punch_type, device_id
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
@@ -963,7 +963,11 @@ async function getMonthlyAttendance(
       }
       const byDay = logsByEmployeeAndDay.get(eid);
       if (!byDay.has(key)) byDay.set(key, []);
-      byDay.get(key).push({ punch_time: row.punch_time, punch_type: row.punch_type });
+      byDay.get(key).push({
+        punch_time: row.punch_time,
+        punch_type: row.punch_type,
+        device_id: row.device_id || null,
+      });
     }
 
     const employeesWithDays = [];
@@ -1017,6 +1021,11 @@ async function getMonthlyAttendance(
           total_hours_from_shift_start,
           first_in_time: status.firstInTime ? status.firstInTime.toISOString() : null,
           last_out_time: status.lastOutTime ? status.lastOutTime.toISOString() : null,
+          punches: dayLogs.map((l) => ({
+            punch_time: l.punch_time,
+            punch_type: (l.punch_type || '').toLowerCase(),
+            device_id: l.device_id || null,
+          })),
         });
       }
       const presentDays = days.filter((d) => d.present).length;

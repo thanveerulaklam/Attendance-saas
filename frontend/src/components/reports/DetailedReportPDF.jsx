@@ -19,6 +19,20 @@ function formatMonthLabel(year, month) {
   return d.toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
+function formatPunchTimings(punches) {
+  const list = Array.isArray(punches) ? punches : [];
+  if (list.length === 0) return '';
+  return list
+    .map((p) => {
+      const timeLabel = p?.punch_time ? formatIstTime(p.punch_time) : '';
+      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+      if (!timeLabel) return '';
+      return `${timeLabel} (${typeLabel})`;
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
 /** Day of week 0=Sun..6=Sat for a calendar YYYY-MM-DD (local date parts). */
 function dayOfWeekFromYmd(ymd) {
   const parts = String(ymd || '').slice(0, 10).split('-').map(Number);
@@ -165,11 +179,15 @@ export async function generateDetailedAttendancePdf({
     }
   );
 
-  filteredMonthlyEmployees.forEach((emp, idx) => {
-    if (idx > 0) {
+  filteredMonthlyEmployees.forEach((emp) => {
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const prevTableEndY = doc.lastAutoTable?.finalY || startY;
+    let titleY = Math.max(prevTableEndY + 18, 32);
+    // Keep heading + metadata together; create a new page only when no room.
+    if (titleY > pageHeight - 60) {
       doc.addPage();
+      titleY = 32;
     }
-    const titleY = 32;
     doc.setFontSize(11);
     doc.setFont(undefined, 'bold');
     doc.text(`Employee: ${emp.employee_code || ''} ${emp.name || ''}`, 32, titleY);
@@ -220,6 +238,8 @@ export async function generateDetailedAttendancePdf({
         weekday,
         day.first_in_time ? formatIstTime(day.first_in_time) : '',
         day.last_out_time ? formatIstTime(day.last_out_time) : '',
+        String((day.punches || []).length),
+        formatPunchTimings(day.punches),
         formatTotalHoursForPdf(day),
         status,
         day.late ? 'Yes' : 'No',
@@ -229,12 +249,31 @@ export async function generateDetailedAttendancePdf({
 
     addAutoTable(
       doc,
-      [['Date', 'Day', 'First IN', 'Last OUT', 'Total Hours', 'Status', 'Late', 'Notes']],
+      [['Date', 'Day', 'First IN', 'Last OUT', 'Punches', 'Punch Timings', 'Total Hours', 'Status', 'Late', 'Notes']],
       bodyRows,
       {
         startY: titleY + 26,
         margin: { left: 32, right: 32 },
-        styles: { fontSize: 8 },
+        styles: {
+          fontSize: 7,
+          cellPadding: 2.5,
+          overflow: 'linebreak',
+          valign: 'middle',
+        },
+        headStyles: {
+          fontSize: 7,
+        },
+        columnStyles: {
+          0: { cellWidth: 56 },
+          1: { cellWidth: 24 },
+          2: { cellWidth: 44 },
+          3: { cellWidth: 44 },
+          4: { cellWidth: 34, halign: 'center' },
+          5: { cellWidth: 136 },
+          6: { cellWidth: 46, halign: 'right' },
+          7: { cellWidth: 42 },
+          8: { cellWidth: 26, halign: 'center' },
+        },
       }
     );
   });
