@@ -648,11 +648,12 @@ function getHoursBasedDailyPresence(dayLogs, computedStatus, isCurrentDate) {
   if (computedStatus?.present) {
     return true;
   }
-  const sorted = [...dayLogs].sort(
-    (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
+  // Provisional rule for today's hours-based board:
+  // if employee has at least one IN punch today, they are considered present-in-progress
+  // even when currently OUT (e.g. lunch break / short exit) until final day closure.
+  return dayLogs.some(
+    (l) => String(l?.punch_type || '').toLowerCase() === 'in'
   );
-  const lastPunch = sorted[sorted.length - 1];
-  return String(lastPunch?.punch_type || '').toLowerCase() === 'in';
 }
 
 /**
@@ -997,10 +998,14 @@ async function getMonthlyAttendance(
         const total_hours_from_shift_start = Math.round(
           (workedMsFromShiftStart / (60 * 60 * 1000)) * 100
         ) / 100;
+        const presentForDay =
+          shiftConfig.attendanceMode === 'hours_based'
+            ? getHoursBasedDailyPresence(dayLogs, status, isCurrentDate)
+            : status.present;
         days.push({
           date: key,
           day: d,
-          present: status.present,
+          present: presentForDay,
           late: status.late,
           overtime_hours: Math.round(status.overtimeHours * 100) / 100,
           full_day: status.fullDay,

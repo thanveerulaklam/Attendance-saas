@@ -92,6 +92,7 @@ export default function AttendancePage() {
 
   const { year, month } = monthYear;
   const dateStr = selectedDate;
+  const isTodaySelected = dateStr === todayStr();
 
   const refreshAfterManual = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -615,9 +616,24 @@ export default function AttendancePage() {
                         })
                       : '—';
                     const isHoursBased = row.attendance_mode === 'hours_based';
+                    const lastPunchType = String(
+                      punches.length ? punches[punches.length - 1]?.punch_type || '' : ''
+                    ).toLowerCase();
+                    const hasAnyInPunch = punches.some(
+                      (p) => String(p?.punch_type || '').toLowerCase() === 'in'
+                    );
+                    const onBreakNow =
+                      isTodaySelected &&
+                      isHoursBased &&
+                      row.present &&
+                      hasAnyInPunch &&
+                      lastPunchType === 'out' &&
+                      !row.full_day &&
+                      !row.left_during_lunch;
                     let dayStatus = 'Absent';
                     if (row.present) {
                       if (row.full_day) dayStatus = 'Full day';
+                      else if (onBreakNow) dayStatus = 'On break';
                       else if (row.left_during_lunch) dayStatus = 'Left at lunch';
                       else dayStatus = 'Present';
                     }
@@ -627,6 +643,8 @@ export default function AttendancePage() {
                     const statusCls =
                       dayStatus.startsWith('Full day')
                         ? 'text-blue-600'
+                        : dayStatus.startsWith('On break')
+                          ? 'text-violet-600'
                         : dayStatus.startsWith('Left')
                           ? 'text-rose-600'
                         : row.present
@@ -994,8 +1012,25 @@ export default function AttendancePage() {
                 {(dailyData || [])
                   .filter((r) => r.present)
                   .map((row) => {
+                    const punches = row.punches || [];
+                    const isHoursBased = row.attendance_mode === 'hours_based';
+                    const lastPunchType = String(
+                      punches.length ? punches[punches.length - 1]?.punch_type || '' : ''
+                    ).toLowerCase();
+                    const hasAnyInPunch = punches.some(
+                      (p) => String(p?.punch_type || '').toLowerCase() === 'in'
+                    );
+                    const onBreakNow =
+                      isTodaySelected &&
+                      isHoursBased &&
+                      hasAnyInPunch &&
+                      lastPunchType === 'out' &&
+                      !row.full_day &&
+                      !row.left_during_lunch;
                     const status = row.full_day
                       ? 'Full day'
+                      : onBreakNow
+                        ? 'On break'
                       : row.left_during_lunch
                         ? 'Left at lunch'
                         : 'Present';
