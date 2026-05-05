@@ -4,7 +4,25 @@ import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 50;
+const PAYROLL_COLUMN_STORAGE_KEY = 'payroll.visibleColumns.v1';
+const PAYROLL_COLUMNS = [
+  { key: 'employee', label: 'Employee' },
+  { key: 'period', label: 'Period' },
+  { key: 'present', label: 'Present' },
+  { key: 'overtime', label: 'Overtime (hrs)' },
+  { key: 'absent', label: 'Absent days' },
+  { key: 'deductions', label: 'Deductions' },
+  { key: 'permissionUsed', label: 'Permission used' },
+  { key: 'permissionOffset', label: 'Permission offset' },
+  { key: 'advance', label: 'Advance' },
+  { key: 'incentive', label: 'Incentive' },
+  { key: 'netSalary', label: 'Net salary' },
+];
+const DEFAULT_VISIBLE_COLUMNS = PAYROLL_COLUMNS.reduce((acc, col) => {
+  acc[col.key] = true;
+  return acc;
+}, {});
 const MONTHS = [
   { value: '', label: 'All months' },
   ...Array.from({ length: 12 }, (_, i) => ({
@@ -544,6 +562,22 @@ export default function PayrollPage() {
   const [exporting, setExporting] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
+  const columnMenuRef = useRef(null);
+  const [columnMenuOpen, setColumnMenuOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(PAYROLL_COLUMN_STORAGE_KEY);
+      if (!raw) return DEFAULT_VISIBLE_COLUMNS;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return DEFAULT_VISIBLE_COLUMNS;
+      return PAYROLL_COLUMNS.reduce((acc, col) => {
+        acc[col.key] = parsed[col.key] !== false;
+        return acc;
+      }, {});
+    } catch {
+      return DEFAULT_VISIBLE_COLUMNS;
+    }
+  });
 
   const subscription = getSubscriptionStatus(company);
   const subscriptionAllowed = subscription.allowed;
@@ -636,6 +670,44 @@ export default function PayrollPage() {
       el.indeterminate = someOnPageSelected && !allOnPageSelected;
     }
   }, [someOnPageSelected, allOnPageSelected, records]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PAYROLL_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns));
+    } catch {
+      // Ignore storage errors (private mode, quota limits, etc.)
+    }
+  }, [visibleColumns]);
+
+  useEffect(() => {
+    if (!columnMenuOpen) return undefined;
+    const handleOutsideClick = (event) => {
+      if (columnMenuRef.current && !columnMenuRef.current.contains(event.target)) {
+        setColumnMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+    };
+  }, [columnMenuOpen]);
+
+  const isColumnVisible = (key) => visibleColumns[key] !== false;
+
+  const toggleColumnVisibility = (key) => {
+    const currentlyVisible = isColumnVisible(key);
+    if (currentlyVisible) {
+      const visibleCount = PAYROLL_COLUMNS.reduce(
+        (count, col) => count + (isColumnVisible(col.key) ? 1 : 0),
+        0
+      );
+      if (visibleCount <= 1) return;
+    }
+    setVisibleColumns((prev) => ({
+      ...prev,
+      [key]: !currentlyVisible,
+    }));
+  };
 
   async function fetchAllPayrollRecordsForExport() {
     const all = [];
@@ -1462,6 +1534,38 @@ export default function PayrollPage() {
               ))}
             </select>
           </div>
+          <div className="relative ml-auto" ref={columnMenuRef}>
+            <button
+              type="button"
+              onClick={() => setColumnMenuOpen((v) => !v)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Columns
+            </button>
+            {columnMenuOpen && (
+              <div className="absolute right-0 z-20 mt-2 w-52 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                <p className="px-2 pb-1 text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                  Show Columns
+                </p>
+                <div className="max-h-64 overflow-y-auto">
+                  {PAYROLL_COLUMNS.map((col) => (
+                    <label
+                      key={col.key}
+                      className="flex items-center gap-2 rounded px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isColumnVisible(col.key)}
+                        onChange={() => toggleColumnVisibility(col.key)}
+                        className="rounded border-slate-300 text-blue-600"
+                      />
+                      <span>{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -1574,17 +1678,39 @@ export default function PayrollPage() {
                         aria-label="Select all on this page"
                       />
                     </th>
-                    <th className="pb-2 pr-3 font-medium">Employee</th>
-                    <th className="pb-2 pr-3 font-medium">Period</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Present</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Overtime (hrs)</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Absent days</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Deductions</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Permission used</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Permission offset</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Advance</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Incentive</th>
-                    <th className="pb-2 pr-3 font-medium text-right">Net salary</th>
+                    {isColumnVisible('employee') && (
+                      <th className="pb-2 pr-3 font-medium">Employee</th>
+                    )}
+                    {isColumnVisible('period') && (
+                      <th className="pb-2 pr-3 font-medium">Period</th>
+                    )}
+                    {isColumnVisible('present') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Present</th>
+                    )}
+                    {isColumnVisible('overtime') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Overtime (hrs)</th>
+                    )}
+                    {isColumnVisible('absent') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Absent days</th>
+                    )}
+                    {isColumnVisible('deductions') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Deductions</th>
+                    )}
+                    {isColumnVisible('permissionUsed') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Permission used</th>
+                    )}
+                    {isColumnVisible('permissionOffset') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Permission offset</th>
+                    )}
+                    {isColumnVisible('advance') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Advance</th>
+                    )}
+                    {isColumnVisible('incentive') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Incentive</th>
+                    )}
+                    {isColumnVisible('netSalary') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Net salary</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -1606,56 +1732,78 @@ export default function PayrollPage() {
                           aria-label={`Select ${row.employee_name || 'row'}`}
                         />
                       </td>
-                      <td className="py-3 pr-3">
-                        <span className="font-medium text-slate-900">{row.employee_name}</span>
-                        <span className="ml-1 text-slate-500">({row.employee_code})</span>
-                      </td>
-                      <td className="py-3 pr-3 text-slate-700">
-                        {payrollMode === 'monthly'
-                          ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
-                              month: 'short',
-                              year: 'numeric',
-                            })
-                          : formatWeekLabel(row.week_start_date, row.week_end_date)}
-                      </td>
-                      <td className="py-3 pr-3 text-right text-slate-700">
-                        {row.present_days} / {row.total_days}
-                      </td>
-                      <td className="py-3 pr-3 text-right">
-                        <span className={Number(row.overtime_hours) > 0 ? 'text-emerald-600 font-medium' : 'text-slate-600'}>
-                          {Number(row.overtime_hours) > 0 ? `+${row.overtime_hours}` : row.overtime_hours}
-                        </span>
-                      </td>
-                      <td className="py-3 pr-3 text-right text-slate-800">
-                        {(() => {
-                          const absentDaysRaw = row.absence_days;
-                          const fallback = Math.max(
-                            0,
-                            Number(row.total_days || 0) - Number(row.present_days || 0)
-                          );
-                          const value = absentDaysRaw != null ? Number(absentDaysRaw) : fallback;
-                          if (!Number.isFinite(value)) return '0';
-                          return Number.isInteger(value) ? String(value) : value.toFixed(2);
-                        })()}
-                      </td>
-                      <td className="py-3 pr-3 text-right text-amber-700 font-medium">
-                        −{formatMoney(row.deductions)}
-                      </td>
-                      <td className="py-3 pr-3 text-right text-slate-700">
-                        {formatPermissionUsedHours(row.permission_minutes_used)}h
-                      </td>
-                      <td className="py-3 pr-3 text-right text-emerald-700 font-medium">
-                        −{formatMoney(row.permission_offset_amount)}
-                      </td>
-                      <td className="py-3 pr-3 text-right text-amber-700 font-medium">
-                        −{formatMoney(row.salary_advance)}
-                      </td>
-                      <td className="py-3 pr-3 text-right text-emerald-600 font-medium">
-                        +{formatMoney(row.no_leave_incentive)}
-                      </td>
-                      <td className="py-3 pr-3 text-right font-semibold text-slate-900">
-                        {formatMoney(row.net_salary)}
-                      </td>
+                      {isColumnVisible('employee') && (
+                        <td className="py-3 pr-3">
+                          <span className="font-medium text-slate-900">{row.employee_name}</span>
+                          <span className="ml-1 text-slate-500">({row.employee_code})</span>
+                        </td>
+                      )}
+                      {isColumnVisible('period') && (
+                        <td className="py-3 pr-3 text-slate-700">
+                          {payrollMode === 'monthly'
+                            ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+                                month: 'short',
+                                year: 'numeric',
+                              })
+                            : formatWeekLabel(row.week_start_date, row.week_end_date)}
+                        </td>
+                      )}
+                      {isColumnVisible('present') && (
+                        <td className="py-3 pr-3 text-right text-slate-700">
+                          {row.present_days} / {row.total_days}
+                        </td>
+                      )}
+                      {isColumnVisible('overtime') && (
+                        <td className="py-3 pr-3 text-right">
+                          <span className={Number(row.overtime_hours) > 0 ? 'text-emerald-600 font-medium' : 'text-slate-600'}>
+                            {Number(row.overtime_hours) > 0 ? `+${row.overtime_hours}` : row.overtime_hours}
+                          </span>
+                        </td>
+                      )}
+                      {isColumnVisible('absent') && (
+                        <td className="py-3 pr-3 text-right text-slate-800">
+                          {(() => {
+                            const absentDaysRaw = row.absence_days;
+                            const fallback = Math.max(
+                              0,
+                              Number(row.total_days || 0) - Number(row.present_days || 0)
+                            );
+                            const value = absentDaysRaw != null ? Number(absentDaysRaw) : fallback;
+                            if (!Number.isFinite(value)) return '0';
+                            return Number.isInteger(value) ? String(value) : value.toFixed(2);
+                          })()}
+                        </td>
+                      )}
+                      {isColumnVisible('deductions') && (
+                        <td className="py-3 pr-3 text-right text-amber-700 font-medium">
+                          −{formatMoney(row.deductions)}
+                        </td>
+                      )}
+                      {isColumnVisible('permissionUsed') && (
+                        <td className="py-3 pr-3 text-right text-slate-700">
+                          {formatPermissionUsedHours(row.permission_minutes_used)}h
+                        </td>
+                      )}
+                      {isColumnVisible('permissionOffset') && (
+                        <td className="py-3 pr-3 text-right text-emerald-700 font-medium">
+                          −{formatMoney(row.permission_offset_amount)}
+                        </td>
+                      )}
+                      {isColumnVisible('advance') && (
+                        <td className="py-3 pr-3 text-right text-amber-700 font-medium">
+                          −{formatMoney(row.salary_advance)}
+                        </td>
+                      )}
+                      {isColumnVisible('incentive') && (
+                        <td className="py-3 pr-3 text-right text-emerald-600 font-medium">
+                          +{formatMoney(row.no_leave_incentive)}
+                        </td>
+                      )}
+                      {isColumnVisible('netSalary') && (
+                        <td className="py-3 pr-3 text-right font-semibold text-slate-900">
+                          {formatMoney(row.net_salary)}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
