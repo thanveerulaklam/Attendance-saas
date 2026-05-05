@@ -581,11 +581,20 @@ export default function PayrollPage() {
   const [columnMenuOpen, setColumnMenuOpen] = useState(false);
   const [lateCountByEmployeeId, setLateCountByEmployeeId] = useState({});
   const [lateDetailsByEmployeeId, setLateDetailsByEmployeeId] = useState({});
+  const [monthlyDaysByEmployeeId, setMonthlyDaysByEmployeeId] = useState({});
+  const [breakdownCache, setBreakdownCache] = useState({});
   const [lateModal, setLateModal] = useState({
     open: false,
     employeeName: '',
     employeeCode: '',
     periodLabel: '',
+    rows: [],
+  });
+  const [metricModal, setMetricModal] = useState({
+    open: false,
+    title: '',
+    subtitle: '',
+    headers: [],
     rows: [],
   });
   const [visibleColumns, setVisibleColumns] = useState(() => {
@@ -688,6 +697,7 @@ export default function PayrollPage() {
     if (payrollMode !== 'monthly' || !month) {
       setLateCountByEmployeeId({});
       setLateDetailsByEmployeeId({});
+      setMonthlyDaysByEmployeeId({});
       return;
     }
 
@@ -707,8 +717,10 @@ export default function PayrollPage() {
         const employeesData = Array.isArray(json?.data?.employees) ? json.data.employees : [];
         const nextMap = {};
         const nextDetails = {};
+        const nextDayMap = {};
         for (const emp of employeesData) {
           const days = Array.isArray(emp?.days) ? emp.days : [];
+          nextDayMap[emp.employee_id] = days;
           const lateRows = days
             .filter((d) => d?.late === true)
             .map((d) => ({
@@ -720,11 +732,13 @@ export default function PayrollPage() {
         }
         setLateCountByEmployeeId(nextMap);
         setLateDetailsByEmployeeId(nextDetails);
+        setMonthlyDaysByEmployeeId(nextDayMap);
       })
       .catch(() => {
         if (isMounted) {
           setLateCountByEmployeeId({});
           setLateDetailsByEmployeeId({});
+          setMonthlyDaysByEmployeeId({});
         }
       });
 
@@ -807,6 +821,133 @@ export default function PayrollPage() {
       periodLabel: '',
       rows: [],
     });
+  };
+
+  const closeMetricModal = () => {
+    setMetricModal({
+      open: false,
+      title: '',
+      subtitle: '',
+      headers: [],
+      rows: [],
+    });
+  };
+
+  const getMonthlyBreakdown = async (row) => {
+    const cacheKey = `${row.employee_id}-${row.year}-${row.month}`;
+    if (breakdownCache[cacheKey]) return breakdownCache[cacheKey];
+    const params = new URLSearchParams({
+      employee_id: String(row.employee_id),
+      year: String(row.year),
+      month: String(row.month),
+    });
+    const res = await authFetch(`/api/payroll/breakdown?${params}`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error('Failed to load payroll details');
+    const json = await res.json();
+    const data = json?.data || null;
+    setBreakdownCache((prev) => ({ ...prev, [cacheKey]: data }));
+    return data;
+  };
+
+  const openOvertimeModal = (row) => {
+    const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+      month: 'long',
+      year: 'numeric',
+    });
+    const dayRows = Array.isArray(monthlyDaysByEmployeeId[row.employee_id])
+      ? monthlyDaysByEmployeeId[row.employee_id]
+      : [];
+    const overtimeRows = dayRows
+      .filter((d) => Number(d?.overtime_hours || 0) > 0)
+      .map((d) => [formatDateShort(d?.date), `${Number(d?.overtime_hours || 0).toFixed(2)} hrs`]);
+    if (!overtimeRows.length) return;
+    setMetricModal({
+      open: true,
+      title: 'Overtime Details',
+      subtitle: `${row.employee_name} (${row.employee_code}) — ${periodLabel}`,
+      headers: ['Date', 'Overtime'],
+      rows: overtimeRows,
+    });
+  };
+
+  const openAbsentModal = async (row) => {
+    try {
+      const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+        month: 'long',
+        year: 'numeric',
+      });
+      const data = await getMonthlyBreakdown(row);
+      const details = Array.isArray(data?.attendance?.dayDetails) ? data.attendance.dayDetails : [];
+      const absentRows = details
+        .filter((d) => d?.status === 'absent')
+        .map((d) => [formatDateShort(d?.date)]);
+      if (!absentRows.length) return;
+      setMetricModal({
+        open: true,
+        title: 'Absent Day Details',
+        subtitle: `${row.employee_name} (${row.employee_code}) — ${periodLabel}`,
+        headers: ['Date'],
+        rows: absentRows,
+      });
+    } catch {
+      setToast({ type: 'error', message: 'Failed to load absent day details' });
+    }
+  };
+
+  const openDeductionsModal = async (row) => {
+    try {
+      const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+        month: 'long',
+        year: 'numeric',
+      });
+      const data = await getMonthlyBreakdown(row);
+      const b = data?.breakdown || {};
+      const deductionRows = [
+        ['Absent Deduction', formatMoney(b.absenceDeduction)],
+        ['Late Deduction', formatMoney(b.lateDeduction)],
+        ['Lunch Deduction', formatMoney(b.lunchOverDeduction)],
+        ['ESI Deduction', formatMoney(b.esiDeduction)],
+        ['PF Deduction', formatMoney(b.pfDeduction)],
+        ['Permission Offset', `-${formatMoney(b.permissionOffsetAmount)}`],
+        ['Total Deductions', formatMoney(b.totalDeductions)],
+      ];
+      setMetricModal({
+        open: true,
+        title: 'Deductions Breakdown',
+        subtitle: `${row.employee_name} (${row.employee_code}) — ${periodLabel}`,
+        headers: ['Component', 'Amount'],
+        rows: deductionRows,
+      });
+    } catch {
+      setToast({ type: 'error', message: 'Failed to load deductions details' });
+    }
+  };
+
+  const openPermissionModal = async (row) => {
+    try {
+      const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+        month: 'long',
+        year: 'numeric',
+      });
+      const data = await getMonthlyBreakdown(row);
+      const b = data?.breakdown || {};
+      const permissionRows = [
+        ['Allocated', `${formatPermissionUsedHours(Number(b.permissionHoursAllocated || 0) * 60)} hrs`],
+        ['Used', `${formatPermissionUsedHours(b.permissionMinutesUsed)} hrs`],
+        ['Offset Amount', formatMoney(b.permissionOffsetAmount)],
+      ];
+      setMetricModal({
+        open: true,
+        title: 'Permission Usage',
+        subtitle: `${row.employee_name} (${row.employee_code}) — ${periodLabel}`,
+        headers: ['Metric', 'Value'],
+        rows: permissionRows,
+      });
+    } catch {
+      setToast({ type: 'error', message: 'Failed to load permission details' });
+    }
   };
 
   async function fetchAllPayrollRecordsForExport() {
@@ -1880,9 +2021,21 @@ export default function PayrollPage() {
                       )}
                       {isColumnVisible('overtime') && (
                         <td className="py-3 pr-3 text-right">
-                          <span className={Number(row.overtime_hours) > 0 ? 'text-emerald-600 font-medium' : 'text-slate-600'}>
-                            {Number(row.overtime_hours) > 0 ? `+${row.overtime_hours}` : row.overtime_hours}
-                          </span>
+                          {Number(row.overtime_hours) > 0 ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openOvertimeModal(row);
+                              }}
+                              className="font-semibold text-emerald-700 underline decoration-dotted underline-offset-2 hover:text-emerald-800"
+                              title="View overtime details"
+                            >
+                              +{row.overtime_hours}
+                            </button>
+                          ) : (
+                            <span className="text-slate-600">{row.overtime_hours}</span>
+                          )}
                         </td>
                       )}
                       {isColumnVisible('absent') && (
@@ -1895,18 +2048,60 @@ export default function PayrollPage() {
                             );
                             const value = absentDaysRaw != null ? Number(absentDaysRaw) : fallback;
                             if (!Number.isFinite(value)) return '0';
-                            return Number.isInteger(value) ? String(value) : value.toFixed(2);
+                            const display = Number.isInteger(value) ? String(value) : value.toFixed(2);
+                            if (value <= 0) return display;
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void openAbsentModal(row);
+                                }}
+                                className="font-semibold text-rose-700 underline decoration-dotted underline-offset-2 hover:text-rose-800"
+                                title="View absent day details"
+                              >
+                                {display}
+                              </button>
+                            );
                           })()}
                         </td>
                       )}
                       {isColumnVisible('deductions') && (
                         <td className="py-3 pr-3 text-right text-amber-700 font-medium">
-                          −{formatMoney(row.deductions)}
+                          {Number(row.deductions) > 0 ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openDeductionsModal(row);
+                              }}
+                              className="font-semibold text-amber-700 underline decoration-dotted underline-offset-2 hover:text-amber-800"
+                              title="View deductions breakdown"
+                            >
+                              −{formatMoney(row.deductions)}
+                            </button>
+                          ) : (
+                            <span>−{formatMoney(row.deductions)}</span>
+                          )}
                         </td>
                       )}
                       {isColumnVisible('permissionUsed') && (
                         <td className="py-3 pr-3 text-right text-slate-700">
-                          {formatPermissionUsedHours(row.permission_minutes_used)}h
+                          {Number(row.permission_minutes_used || 0) > 0 ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openPermissionModal(row);
+                              }}
+                              className="font-semibold text-blue-700 underline decoration-dotted underline-offset-2 hover:text-blue-800"
+                              title="View permission details"
+                            >
+                              {formatPermissionUsedHours(row.permission_minutes_used)}h
+                            </button>
+                          ) : (
+                            <span>{formatPermissionUsedHours(row.permission_minutes_used)}h</span>
+                          )}
                         </td>
                       )}
                       {isColumnVisible('permissionOffset') && (
@@ -2264,6 +2459,49 @@ export default function PayrollPage() {
               <button
                 type="button"
                 onClick={closeLateArrivalsModal}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {metricModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
+          <div className="w-full max-w-lg rounded-xl bg-white p-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">{metricModal.title}</h2>
+            <p className="mt-1 text-xs text-slate-600">{metricModal.subtitle}</p>
+            <div className="mt-3 max-h-[360px] overflow-y-auto rounded-lg border border-slate-200">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="text-left text-slate-600">
+                    {metricModal.headers.map((h) => (
+                      <th key={h} className="px-3 py-2">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {metricModal.rows.map((row, idx) => (
+                    <tr key={`metric-row-${idx}`} className="border-t border-slate-100">
+                      {row.map((cell, cellIdx) => (
+                        <td
+                          key={`metric-cell-${idx}-${cellIdx}`}
+                          className={`px-3 py-2 ${cellIdx === 0 ? 'font-medium text-slate-800' : 'text-slate-700'}`}
+                        >
+                          {cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={closeMetricModal}
                 className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
               >
                 Close
