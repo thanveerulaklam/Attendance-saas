@@ -10,6 +10,7 @@ const PAYROLL_COLUMNS = [
   { key: 'employee', label: 'Employee' },
   { key: 'period', label: 'Period' },
   { key: 'present', label: 'Present' },
+  { key: 'lateArrivals', label: 'Late arrivals' },
   { key: 'overtime', label: 'Overtime (hrs)' },
   { key: 'absent', label: 'Absent days' },
   { key: 'deductions', label: 'Deductions' },
@@ -564,6 +565,7 @@ export default function PayrollPage() {
   const selectAllHeaderRef = useRef(null);
   const columnMenuRef = useRef(null);
   const [columnMenuOpen, setColumnMenuOpen] = useState(false);
+  const [lateCountByEmployeeId, setLateCountByEmployeeId] = useState({});
   const [visibleColumns, setVisibleColumns] = useState(() => {
     try {
       const raw = window.localStorage.getItem(PAYROLL_COLUMN_STORAGE_KEY);
@@ -659,6 +661,42 @@ export default function PayrollPage() {
   useEffect(() => {
     setSelectedPayroll(new Map());
   }, [payrollMode, year, month, weekStartDate, employeeId]);
+
+  useEffect(() => {
+    if (payrollMode !== 'monthly' || !month) {
+      setLateCountByEmployeeId({});
+      return;
+    }
+
+    let isMounted = true;
+    const params = new URLSearchParams({
+      year: String(year),
+      month: String(month),
+    });
+    if (employeeId) params.set('employee_id', String(employeeId));
+
+    authFetch(`/api/attendance/monthly?${params}`, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load attendance summary'))))
+      .then((json) => {
+        if (!isMounted) return;
+        const employeesData = Array.isArray(json?.data?.employees) ? json.data.employees : [];
+        const nextMap = {};
+        for (const emp of employeesData) {
+          const days = Array.isArray(emp?.days) ? emp.days : [];
+          nextMap[emp.employee_id] = days.filter((d) => d?.late === true).length;
+        }
+        setLateCountByEmployeeId(nextMap);
+      })
+      .catch(() => {
+        if (isMounted) setLateCountByEmployeeId({});
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [payrollMode, year, month, employeeId, reloadKey]);
 
   const allOnPageSelected =
     records.length > 0 && records.every((r) => selectedPayroll.has(r.id));
@@ -1687,6 +1725,9 @@ export default function PayrollPage() {
                     {isColumnVisible('present') && (
                       <th className="pb-2 pr-3 font-medium text-right">Present</th>
                     )}
+                    {isColumnVisible('lateArrivals') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Late arrivals</th>
+                    )}
                     {isColumnVisible('overtime') && (
                       <th className="pb-2 pr-3 font-medium text-right">Overtime (hrs)</th>
                     )}
@@ -1751,6 +1792,13 @@ export default function PayrollPage() {
                       {isColumnVisible('present') && (
                         <td className="py-3 pr-3 text-right text-slate-700">
                           {row.present_days} / {row.total_days}
+                        </td>
+                      )}
+                      {isColumnVisible('lateArrivals') && (
+                        <td className="py-3 pr-3 text-right text-slate-700">
+                          {Number.isFinite(Number(lateCountByEmployeeId[row.employee_id]))
+                            ? String(lateCountByEmployeeId[row.employee_id])
+                            : '—'}
                         </td>
                       )}
                       {isColumnVisible('overtime') && (
