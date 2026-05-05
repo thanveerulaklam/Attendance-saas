@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
@@ -547,6 +547,8 @@ export default function PayrollPage() {
   const [weekStartDate, setWeekStartDate] = useState(getSundayYmd(new Date()));
   const [employeeId, setEmployeeId] = useState('');
   const [employees, setEmployees] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [branchFilter, setBranchFilter] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -616,6 +618,12 @@ export default function PayrollPage() {
   const subscriptionAllowed = subscription.allowed;
   const monthlyOnlyPayroll = company?.shifts_compact_ui === true;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const employeesForBranch = useMemo(() => {
+    if (!branchFilter) return employees;
+    const bid = Number(branchFilter);
+    if (!Number.isFinite(bid)) return employees;
+    return (employees || []).filter((e) => Number(e.branch_id) === bid);
+  }, [employees, branchFilter]);
 
   useEffect(() => {
     if (monthlyOnlyPayroll && payrollMode !== 'monthly') {
@@ -650,6 +658,32 @@ export default function PayrollPage() {
 
   useEffect(() => {
     let isMounted = true;
+    authFetch('/api/company/branches', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Failed to load branches');
+        const json = await res.json();
+        if (!isMounted) return;
+        setBranches(Array.isArray(json.data) ? json.data : []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setBranches([]);
+      });
+    return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!branchFilter || !employeeId) return;
+    const bid = Number(branchFilter);
+    const eid = Number(employeeId);
+    const stillValid = employeesForBranch.some((e) => e.id === eid && Number(e.branch_id) === bid);
+    if (!stillValid) setEmployeeId('');
+  }, [branchFilter, employeeId, employeesForBranch]);
+
+  useEffect(() => {
+    let isMounted = true;
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
@@ -662,6 +696,7 @@ export default function PayrollPage() {
     params.set('page', String(page));
     params.set('limit', String(PAGE_SIZE));
     if (employeeId) params.set('employee_id', employeeId);
+    if (branchFilter) params.set('branch_id', branchFilter);
 
     const url = payrollMode === 'monthly' ? `/api/payroll?${params}` : `/api/payroll/weekly?${params}`;
     authFetch(url, {
@@ -687,11 +722,11 @@ export default function PayrollPage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [payrollMode, year, month, weekStartDate, page, employeeId, reloadKey]);
+  }, [payrollMode, year, month, weekStartDate, page, employeeId, branchFilter, reloadKey]);
 
   useEffect(() => {
     setSelectedPayroll(new Map());
-  }, [payrollMode, year, month, weekStartDate, employeeId]);
+  }, [payrollMode, year, month, weekStartDate, employeeId, branchFilter]);
 
   useEffect(() => {
     if (payrollMode !== 'monthly' || !month) {
@@ -707,6 +742,7 @@ export default function PayrollPage() {
       month: String(month),
     });
     if (employeeId) params.set('employee_id', String(employeeId));
+    if (branchFilter) params.set('branch_id', String(branchFilter));
 
     authFetch(`/api/attendance/monthly?${params}`, {
       headers: { 'Content-Type': 'application/json' },
@@ -745,7 +781,7 @@ export default function PayrollPage() {
     return () => {
       isMounted = false;
     };
-  }, [payrollMode, year, month, employeeId, reloadKey]);
+  }, [payrollMode, year, month, employeeId, branchFilter, reloadKey]);
 
   const allOnPageSelected =
     records.length > 0 && records.every((r) => selectedPayroll.has(r.id));
@@ -970,6 +1006,7 @@ export default function PayrollPage() {
       params.set('page', String(pageNum));
       params.set('limit', String(limit));
       if (employeeId) params.set('employee_id', employeeId);
+      if (branchFilter) params.set('branch_id', branchFilter);
 
       const url = payrollMode === 'monthly' ? `/api/payroll?${params}` : `/api/payroll/weekly?${params}`;
       const res = await authFetch(url, { headers: { 'Content-Type': 'application/json' } });
@@ -1774,8 +1811,26 @@ export default function PayrollPage() {
               className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 min-w-[140px]"
             >
               <option value="">All employees</option>
-              {employees.map((emp) => (
+              {employeesForBranch.map((emp) => (
                 <option key={emp.id} value={emp.id}>{emp.name} ({emp.employee_code})</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex w-full sm:w-auto items-center gap-2">
+            <label className="text-[11px] font-medium text-slate-600">Branch</label>
+            <select
+              value={branchFilter}
+              onChange={(e) => {
+                setBranchFilter(e.target.value);
+                setPage(1);
+              }}
+              className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 min-w-[140px]"
+            >
+              <option value="">All branches</option>
+              {(branches || []).map((b) => (
+                <option key={String(b.id)} value={String(b.id)}>
+                  {b.name || `Branch #${b.id}`}
+                </option>
               ))}
             </select>
           </div>
@@ -1811,6 +1866,62 @@ export default function PayrollPage() {
               </div>
             )}
           </div>
+        </div>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium text-slate-500">Active filters:</span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+            Mode: {payrollMode === 'monthly' ? 'Monthly' : 'Weekly'}
+          </span>
+          {payrollMode === 'monthly' ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+              Period:{' '}
+              {month
+                ? `${new Date(2000, Number(month) - 1, 1).toLocaleString('default', { month: 'long' })} ${year}`
+                : `Year ${year} (all months)`}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+              Week: {weekStartDate}
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+            Branch:{' '}
+            {branchFilter
+              ? branches.find((b) => String(b.id) === String(branchFilter))?.name || `#${branchFilter}`
+              : 'All'}
+            {branchFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBranchFilter('');
+                  setPage(1);
+                }}
+                className="ml-1 text-slate-400 hover:text-slate-700"
+                title="Clear branch filter"
+              >
+                ×
+              </button>
+            )}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
+            Employee:{' '}
+            {employeeId
+              ? `${employees.find((e) => String(e.id) === String(employeeId))?.name || employeeId}`
+              : 'All'}
+            {employeeId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEmployeeId('');
+                  setPage(1);
+                }}
+                className="ml-1 text-slate-400 hover:text-slate-700"
+                title="Clear employee filter"
+              >
+                ×
+              </button>
+            )}
+          </span>
         </div>
 
         {error && (

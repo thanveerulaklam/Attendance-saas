@@ -1490,6 +1490,7 @@ async function listWeeklyPayrollRecords(
     page = 1,
     limit = 20,
     employee_id: employeeId,
+    branch_id: branchId,
     allowedBranchIds = null,
   } = {}
 ) {
@@ -1514,6 +1515,11 @@ async function listWeeklyPayrollRecords(
   if (employeeId != null && employeeId !== '') {
     conditions.push(`w.employee_id = $${paramIndex}`);
     params.push(Number(employeeId));
+    paramIndex += 1;
+  }
+  if (branchId != null && branchId !== '') {
+    conditions.push(`e.branch_id = $${paramIndex}`);
+    params.push(Number(branchId));
     paramIndex += 1;
   }
 
@@ -2471,7 +2477,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
  */
 async function listPayrollRecords(
   companyId,
-  { year, month, page = 1, limit = 20, employee_id: employeeId, allowedBranchIds = null } = {}
+  {
+    year,
+    month,
+    page = 1,
+    limit = 20,
+    employee_id: employeeId,
+    branch_id: branchId,
+    allowedBranchIds = null,
+  } = {}
 ) {
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -2505,6 +2519,11 @@ async function listPayrollRecords(
     params.push(Number(employeeId));
     paramIndex += 1;
   }
+  if (branchId != null && branchId !== '') {
+    conditions.push(`e.branch_id = $${paramIndex}`);
+    params.push(Number(branchId));
+    paramIndex += 1;
+  }
   if (allowedBranchIds != null) {
     conditions.push(`e.branch_id = ANY($${paramIndex}::bigint[])`);
     params.push(allowedBranchIds);
@@ -2516,6 +2535,7 @@ async function listPayrollRecords(
   const countResult = await pool.query(
     `SELECT COUNT(*) AS total
      FROM payroll_records p
+     INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
      WHERE ${whereClause}`,
     params
   );

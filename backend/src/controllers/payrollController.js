@@ -17,7 +17,7 @@ const auditService = require('../services/auditService');
 async function list(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { year, month, page, limit, employee_id: employeeId } = req.query || {};
+    const { year, month, page, limit, employee_id: employeeId, branch_id: branchId } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -32,6 +32,7 @@ async function list(req, res, next) {
       page,
       limit,
       employee_id: employeeId,
+      branch_id: branchId,
       allowedBranchIds: req.allowedBranchIds,
     });
 
@@ -207,7 +208,7 @@ async function breakdown(req, res, next) {
 async function listWeekly(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { week_start_date: weekStartDate, page, limit, employee_id: employeeId } = req.query || {};
+    const { week_start_date: weekStartDate, page, limit, employee_id: employeeId, branch_id: branchId } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -221,6 +222,7 @@ async function listWeekly(req, res, next) {
       page,
       limit,
       employee_id: employeeId,
+      branch_id: branchId,
       allowedBranchIds: req.allowedBranchIds,
     });
 
