@@ -51,6 +51,10 @@ function getMonthYear(offset = 0) {
   return { year: d.getFullYear(), month: d.getMonth() + 1 };
 }
 
+function isLeftAtLunchStatus(row) {
+  return Boolean(row?.present && row?.left_during_lunch && !row?.full_day);
+}
+
 export default function AttendancePage() {
   const [monthYear, setMonthYear] = useState(() => getMonthYear(0));
   const [employeeId, setEmployeeId] = useState('');
@@ -270,7 +274,7 @@ export default function AttendancePage() {
     const present = dailyData.filter((r) => r.present).length;
     const late = dailyData.filter((r) => r.late).length;
     const fullDay = dailyData.filter((r) => r.full_day).length;
-    const leftDuringLunch = dailyData.filter((r) => r.left_during_lunch).length;
+    const leftDuringLunch = dailyData.filter((r) => isLeftAtLunchStatus(r)).length;
     return {
       present,
       absent: dailyData.length - present,
@@ -634,7 +638,7 @@ export default function AttendancePage() {
                     if (row.present) {
                       if (row.full_day) dayStatus = 'Full day';
                       else if (onBreakNow) dayStatus = 'On break';
-                      else if (row.left_during_lunch) dayStatus = 'Left at lunch';
+                      else if (isLeftAtLunchStatus(row)) dayStatus = 'Left at lunch';
                       else dayStatus = 'Present';
                     }
                     if (row.late && (dayStatus === 'Present' || dayStatus === 'Full day')) {
@@ -1145,7 +1149,7 @@ export default function AttendancePage() {
             <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
               <ul className="space-y-2">
                 {(dailyData || [])
-                  .filter((r) => r.present && r.left_during_lunch)
+                  .filter((r) => isLeftAtLunchStatus(r))
                   .map((row) => {
                     const punches = row.punches || [];
                     const firstIn = punches
