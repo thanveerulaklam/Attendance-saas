@@ -8,6 +8,7 @@ const {
   regenerateApiKey,
   regenerateCloudToken,
   updateAdmsSerial,
+  deleteDevice,
   processDeviceLogs,
 } = require('../services/deviceService');
 const auditService = require('../services/auditService');
@@ -244,6 +245,37 @@ async function updateAdmsSerialHandler(req, res, next) {
     if (err && err.code === '23505') {
       return next(new AppError('ADMS serial is already assigned to another device', 409));
     }
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/device/:id
+ * Auth: admin or hr
+ */
+async function deleteDeviceHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const id = Number(req.params.id);
+
+    if (!companyId || !id) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and valid device id are required',
+      });
+    }
+
+    const deleted = await deleteDevice(companyId, id, branchContext(req));
+    auditService
+      .log(companyId, req.user?.user_id, 'device.delete', 'device', id, { name: deleted.name })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      message: 'Device deleted successfully',
+      data: deleted,
+    });
+  } catch (err) {
     next(err);
   }
 }
@@ -524,6 +556,7 @@ module.exports = {
   regenerateApiKeyHandler,
   regenerateCloudTokenHandler,
   updateAdmsSerialHandler,
+  deleteDeviceHandler,
   pushLogs,
   deviceWebhook,
   devicePing,

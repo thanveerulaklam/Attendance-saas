@@ -16,6 +16,14 @@ function formatLastSeen(lastSeenAt) {
   return date.toLocaleString();
 }
 
+function isRecentlyOnline(lastSeenAt) {
+  if (!lastSeenAt) return false;
+  const seenAt = new Date(lastSeenAt);
+  if (Number.isNaN(seenAt.getTime())) return false;
+  const ONLINE_WINDOW_MS = 60 * 60 * 1000; // 60 minutes
+  return Date.now() - seenAt.getTime() <= ONLINE_WINDOW_MS;
+}
+
 export default function DevicesPage() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -29,6 +37,9 @@ export default function DevicesPage() {
   const [branches, setBranches] = useState([]);
   const [newBranchId, setNewBranchId] = useState('');
   const [admsInputs, setAdmsInputs] = useState({});
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteStep, setDeleteStep] = useState(1);
+  const [deleteTypedName, setDeleteTypedName] = useState('');
 
   const branchNameById = useMemo(() => {
     const m = {};
@@ -269,6 +280,62 @@ export default function DevicesPage() {
     }
   };
 
+  const handleDeleteDevice = async (device) => {
+    if (!device) return;
+    if (deleteTypedName.trim() !== device.name) {
+      setToast({
+        type: 'error',
+        message: 'Device name did not match. Delete cancelled.',
+      });
+      return;
+    }
+
+    try {
+      setBusyId(device.id);
+      const res = await authFetch(`/api/device/${device.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.message || 'Failed to delete device');
+      }
+      setDevices((prev) => prev.filter((d) => d.id !== device.id));
+      setAdmsInputs((prev) => {
+        const next = { ...prev };
+        delete next[device.id];
+        return next;
+      });
+      if (showFullKeyId === device.id) {
+        setShowFullKeyId(null);
+      }
+      setDeleteTarget(null);
+      setDeleteStep(1);
+      setDeleteTypedName('');
+      setToast({ type: 'success', message: 'Device deleted successfully' });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to delete device',
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openDeleteModal = (device) => {
+    setDeleteTarget(device);
+    setDeleteStep(1);
+    setDeleteTypedName('');
+  };
+
+  const closeDeleteModal = () => {
+    if (deleteTarget && busyId === deleteTarget.id) return;
+    setDeleteTarget(null);
+    setDeleteStep(1);
+    setDeleteTypedName('');
+  };
+
   const closeToast = () => setToast(null);
 
   return (
@@ -355,7 +422,7 @@ export default function DevicesPage() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {devices.map((device) => {
-              const online = Boolean(device.last_seen_at);
+              const online = isRecentlyOnline(device.last_seen_at);
               const showingFull = showFullKeyId === device.id;
               const displayKey = showingFull
                 ? device.api_key
@@ -510,6 +577,14 @@ export default function DevicesPage() {
                     >
                       Regenerate token
                     </button>
+                    <button
+                      type="button"
+                      disabled={busyId === device.id}
+                      onClick={() => openDeleteModal(device)}
+                      className="text-[11px] font-medium text-rose-700 hover:text-rose-800 disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </article>
               );
@@ -593,6 +668,107 @@ export default function DevicesPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-3">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Delete device</h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Step {deleteStep} of 3
+            </p>
+
+            {deleteStep === 1 && (
+              <div className="mt-3 space-y-3">
+                <p className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+                  Delete <span className="font-semibold">&quot;{deleteTarget.name}&quot;</span>?
+                  This stops all future sync from this device.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={closeDeleteModal}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(2)}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-rose-700"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {deleteStep === 2 && (
+              <div className="mt-3 space-y-3">
+                <p className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                  Are you absolutely sure? You will need to register this device again if you want
+                  to reconnect it later.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(1)}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(3)}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-rose-700"
+                  >
+                    I understand
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {deleteStep === 3 && (
+              <div className="mt-3 space-y-3">
+                <p className="text-[11px] text-slate-600">
+                  Final check: type{' '}
+                  <span className="rounded bg-slate-100 px-1 font-mono text-slate-900">
+                    {deleteTarget.name}
+                  </span>{' '}
+                  to confirm deletion.
+                </p>
+                <input
+                  value={deleteTypedName}
+                  onChange={(e) => setDeleteTypedName(e.target.value)}
+                  disabled={busyId === deleteTarget.id}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-300"
+                  placeholder="Type exact device name"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteStep(2)}
+                    disabled={busyId === deleteTarget.id}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300 disabled:opacity-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      busyId === deleteTarget.id ||
+                      deleteTypedName.trim() !== deleteTarget.name
+                    }
+                    onClick={() => handleDeleteDevice(deleteTarget)}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {busyId === deleteTarget.id ? 'Deleting…' : 'Delete permanently'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

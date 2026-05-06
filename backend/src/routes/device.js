@@ -7,6 +7,7 @@ const {
   regenerateApiKeyHandler,
   regenerateCloudTokenHandler,
   updateAdmsSerialHandler,
+  deleteDeviceHandler,
   pushLogs,
   deviceWebhook,
   devicePing,
@@ -38,6 +39,7 @@ router.patch('/:id/deactivate', withDeviceAuth, requireHrBranchForMutation, togg
 router.post('/:id/regenerate-key', withDeviceAuth, requireHrBranchForMutation, regenerateApiKeyHandler);
 router.post('/:id/regenerate-cloud-token', withDeviceAuth, requireHrBranchForMutation, regenerateCloudTokenHandler);
 router.patch('/:id/adms-serial', withDeviceAuth, requireHrBranchForMutation, updateAdmsSerialHandler);
+router.delete('/:id', withDeviceAuth, requireHrBranchForMutation, deleteDeviceHandler);
 
 // Connector (on-site agent) push
 router.post('/push', devicePushLimiter, pushLogs);

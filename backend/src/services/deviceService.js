@@ -309,6 +309,23 @@ async function updateAdmsSerial(companyId, id, admsSnRaw, branchContext = {}) {
   return result.rows[0];
 }
 
+async function deleteDevice(companyId, id, branchContext = {}) {
+  await assertDeviceVisibleToHr(companyId, id, branchContext);
+
+  const result = await pool.query(
+    `DELETE FROM devices
+     WHERE company_id = $1 AND id = $2
+     RETURNING id, company_id, branch_id, name`,
+    [companyId, id]
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Device not found for this company', 404);
+  }
+
+  return result.rows[0];
+}
+
 /**
  * Infer punch_type from order: first punch of day = IN, second = OUT, etc.
  */
@@ -481,5 +498,6 @@ module.exports = {
   regenerateApiKey,
   regenerateCloudToken,
   updateAdmsSerial,
+  deleteDevice,
   processDeviceLogs,
 };

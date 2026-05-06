@@ -3,7 +3,7 @@
 Runs on the client's PC. Syncs biometric device to your cloud. **Install once → runs automatically when the PC starts.**
 
 - `index.js` = ZKTeco connector (port 4370 protocol)
-- **`hikvision/`** = Hikvision ISAPI connector (separate package, own `npm run build:win`)
+- `hikvision-connector.js` = Hikvision ISAPI pull connector
 
 ---
 
@@ -16,18 +16,9 @@ cd connector
 npm install   # applies patches/zk-attendance-sdk+2.1.0.patch (SDK bugfixes + longer device read timeout)
 npm run build:win   # → dist/connector.exe (run on Windows or use cross-compile)
 npm run build:mac   # → dist/connector-mac (run on Mac)
+npm run build:hik:win   # → dist/connector-hik.exe
+npm run build:hik:mac   # → dist/connector-hik-mac
 ```
-
-### Hikvision connector (separate folder)
-
-```bash
-cd connector/hikvision
-npm install
-npm run build:win   # → dist/connector-hik.exe
-npm run build:mac   # → dist/connector-hik-mac
-```
-
-See **`connector/hikvision/README.md`** and **`connector/hikvision/SETUP_GUIDE_CLIENTS.txt`** for client zip contents and install steps (same pattern as ZK: `install-windows.bat`, `config.hikvision.json`).
 
 Build on a **Windows PC** to create `.exe`; build on a **Mac** to create the Mac binary. (Or use CI to build both.)
 
@@ -77,5 +68,27 @@ The connector starts automatically when the PC starts. No need to run anything m
 
 ## Hikvision mode (DS-K1T series, etc.)
 
-Use the **`connector/hikvision/`** package: build `connector-hik.exe`, ship with `install-windows.bat` and `config.example.hikvision.json` → client renames to `config.hikvision.json`.  
-Details: **`hikvision/README.md`**.
+Use this when the device does not support ZKTeco 4370 protocol and only provides Hikvision network modes.
+
+1. Copy `config.example.hikvision.json` to `config.hikvision.json`
+2. Fill:
+   - `deviceIp`
+   - `hikUsername` / `hikPassword` (device admin login)
+   - `deviceApiKey` (from your app Devices page)
+   - `backendUrl`
+3. Run:
+
+```bash
+cd connector
+npm install
+npm run start:hik
+```
+
+One-time sync test:
+
+```bash
+npm run start:hik -- --once
+```
+
+State file: `hikvision.state.json` (stores the last pulled event position).
+Log file: `connector-hik.log`.
