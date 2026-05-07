@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { Fragment, useEffect, useState, useMemo, useCallback } from 'react';
 import { authFetch } from '../utils/api';
 import { formatIstTime, IST } from '../utils/istDisplay';
 
@@ -317,6 +317,19 @@ export default function AttendancePage() {
       total: dailyData.length,
     };
   }, [dailyData, isTodaySelected]);
+
+  const punchTimingBranchGroups = useMemo(() => {
+    if (!Array.isArray(dailyData) || dailyData.length === 0) return [];
+    const groups = new Map();
+    dailyData.forEach((row) => {
+      const branchName = String(row?.branch_name || '').trim() || 'Unassigned branch';
+      if (!groups.has(branchName)) groups.set(branchName, []);
+      groups.get(branchName).push(row);
+    });
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([branchName, rows]) => ({ branchName, rows }));
+  }, [dailyData]);
 
   const calendarGrid = useMemo(() => {
     if (!monthlyData || !monthlyData.daysInMonth) return null;
@@ -638,7 +651,17 @@ export default function AttendancePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {dailyData.map((row) => {
+                  {punchTimingBranchGroups.map((group) => (
+                    <Fragment key={group.branchName}>
+                      <tr className="border-t border-slate-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-violet-50">
+                        <td
+                          colSpan={7}
+                          className="px-2 py-2.5 text-xs font-bold tracking-wide text-indigo-700"
+                        >
+                          {group.branchName}
+                        </td>
+                      </tr>
+                      {group.rows.map((row) => {
                     const punches = row.punches || [];
                     const timingsContent = punches.length
                       ? punches.map((p, idx) => {
@@ -782,7 +805,9 @@ export default function AttendancePage() {
                         </td>
                       </tr>
                     );
-                  })}
+                      })}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
