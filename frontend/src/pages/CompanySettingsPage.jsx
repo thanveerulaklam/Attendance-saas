@@ -50,6 +50,13 @@ export default function CompanySettingsPage() {
   const [newBranchAddress, setNewBranchAddress] = useState('');
   const [branchSaving, setBranchSaving] = useState(false);
   const [branchError, setBranchError] = useState(null);
+  const [branchSuccess, setBranchSuccess] = useState(null);
+  const [editingBranchId, setEditingBranchId] = useState(null);
+  const [editBranchName, setEditBranchName] = useState('');
+  const [editBranchAddress, setEditBranchAddress] = useState('');
+  const [deleteBranchTarget, setDeleteBranchTarget] = useState(null);
+  const [deleteBranchStep, setDeleteBranchStep] = useState(1);
+  const [deleteBranchTypedName, setDeleteBranchTypedName] = useState('');
 
   const loadBranches = async () => {
     if (!isAdmin) return;
@@ -219,6 +226,7 @@ export default function CompanySettingsPage() {
     try {
       setBranchSaving(true);
       setBranchError(null);
+      setBranchSuccess(null);
       const res = await authFetch('/api/company/branches', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,8 +242,94 @@ export default function CompanySettingsPage() {
       setNewBranchName('');
       setNewBranchAddress('');
       await loadBranches();
+      setBranchSuccess('Branch added successfully.');
     } catch (err) {
       setBranchError(err.message || 'Failed to create branch');
+    } finally {
+      setBranchSaving(false);
+    }
+  };
+
+  const startEditBranch = (branch) => {
+    setBranchError(null);
+    setBranchSuccess(null);
+    setEditingBranchId(branch.id);
+    setEditBranchName(branch.name || '');
+    setEditBranchAddress(branch.address || '');
+  };
+
+  const cancelEditBranch = () => {
+    if (branchSaving) return;
+    setEditingBranchId(null);
+    setEditBranchName('');
+    setEditBranchAddress('');
+  };
+
+  const handleUpdateBranch = async (branchId) => {
+    if (!editBranchName.trim() || branchSaving) return;
+    try {
+      setBranchSaving(true);
+      setBranchError(null);
+      setBranchSuccess(null);
+      const res = await authFetch(`/api/company/branches/${branchId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editBranchName.trim(),
+          address: editBranchAddress.trim() || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to update branch');
+      }
+      await loadBranches();
+      setEditingBranchId(null);
+      setEditBranchName('');
+      setEditBranchAddress('');
+      setBranchSuccess('Branch details updated.');
+    } catch (err) {
+      setBranchError(err.message || 'Failed to update branch');
+    } finally {
+      setBranchSaving(false);
+    }
+  };
+
+  const openDeleteBranchModal = (branch) => {
+    setBranchError(null);
+    setBranchSuccess(null);
+    setDeleteBranchTarget(branch);
+    setDeleteBranchStep(1);
+    setDeleteBranchTypedName('');
+  };
+
+  const closeDeleteBranchModal = () => {
+    if (branchSaving) return;
+    setDeleteBranchTarget(null);
+    setDeleteBranchStep(1);
+    setDeleteBranchTypedName('');
+  };
+
+  const handleDeleteBranch = async () => {
+    if (!deleteBranchTarget || branchSaving) return;
+    if (deleteBranchTypedName.trim() !== deleteBranchTarget.name) return;
+    try {
+      setBranchSaving(true);
+      setBranchError(null);
+      setBranchSuccess(null);
+      const res = await authFetch(`/api/company/branches/${deleteBranchTarget.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to delete branch');
+      }
+      await loadBranches();
+      closeDeleteBranchModal();
+      setBranchSuccess('Branch deleted successfully.');
+    } catch (err) {
+      setBranchError(err.message || 'Failed to delete branch');
     } finally {
       setBranchSaving(false);
     }
@@ -323,15 +417,78 @@ export default function CompanySettingsPage() {
               {branchError}
             </div>
           )}
+          {branchSuccess && (
+            <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+              {branchSuccess}
+            </div>
+          )}
           {branches.length > 0 && (
             <ul className="mt-3 space-y-1 text-sm text-slate-700">
               {branches.map((b) => (
-                <li key={b.id} className="flex flex-wrap gap-2 border-b border-slate-100 py-2 last:border-0">
-                  <span className="font-medium text-slate-900">{b.name}</span>
-                  {b.address && (
-                    <span className="text-xs text-slate-500">{b.address}</span>
+                <li key={b.id} className="border-b border-slate-100 py-2 last:border-0">
+                  {editingBranchId === b.id ? (
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <input
+                          value={editBranchName}
+                          onChange={(e) => setEditBranchName(e.target.value)}
+                          disabled={branchSaving}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                          placeholder="Branch name"
+                        />
+                        <input
+                          value={editBranchAddress}
+                          onChange={(e) => setEditBranchAddress(e.target.value)}
+                          disabled={branchSaving}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                          placeholder="Address (optional)"
+                        />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] text-slate-400">ID {b.id}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateBranch(b.id)}
+                          disabled={branchSaving || !editBranchName.trim()}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {branchSaving ? 'Saving…' : 'Save'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={cancelEditBranch}
+                          disabled={branchSaving}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-slate-900">{b.name}</span>
+                      {b.address && (
+                        <span className="text-xs text-slate-500">{b.address}</span>
+                      )}
+                      <span className="text-[10px] text-slate-400">ID {b.id}</span>
+                      <button
+                        type="button"
+                        onClick={() => startEditBranch(b)}
+                        disabled={branchSaving}
+                        className="ml-auto text-[11px] font-medium text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openDeleteBranchModal(b)}
+                        disabled={branchSaving}
+                        className="text-[11px] font-medium text-rose-700 hover:text-rose-800 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
                   )}
-                  <span className="text-[10px] text-slate-400">ID {b.id}</span>
                 </li>
               ))}
             </ul>
@@ -368,6 +525,103 @@ export default function CompanySettingsPage() {
             </button>
           </form>
         </section>
+      )}
+
+      {deleteBranchTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-3">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Delete branch</h2>
+            <p className="mt-1 text-[11px] text-slate-500">
+              Step {deleteBranchStep} of 3
+            </p>
+
+            {deleteBranchStep === 1 && (
+              <div className="mt-3 space-y-3">
+                <p className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+                  Delete <span className="font-semibold">&quot;{deleteBranchTarget.name}&quot;</span>?
+                  Employees and devices linked to this branch can break if you remove the location.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={closeDeleteBranchModal}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteBranchStep(2)}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-rose-700"
+                  >
+                    Continue
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {deleteBranchStep === 2 && (
+              <div className="mt-3 space-y-3">
+                <p className="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+                  Are you absolutely sure? This should only be used for duplicate or invalid branches.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteBranchStep(1)}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteBranchStep(3)}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-rose-700"
+                  >
+                    I understand
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {deleteBranchStep === 3 && (
+              <div className="mt-3 space-y-3">
+                <p className="text-[11px] text-slate-600">
+                  Final check: type{' '}
+                  <span className="rounded bg-slate-100 px-1 font-mono text-slate-900">
+                    {deleteBranchTarget.name}
+                  </span>{' '}
+                  to confirm deletion.
+                </p>
+                <input
+                  value={deleteBranchTypedName}
+                  onChange={(e) => setDeleteBranchTypedName(e.target.value)}
+                  disabled={branchSaving}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-rose-300 focus:outline-none focus:ring-1 focus:ring-rose-300"
+                  placeholder="Type exact branch name"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteBranchStep(2)}
+                    disabled={branchSaving}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:border-slate-300 disabled:opacity-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeleteBranch}
+                    disabled={branchSaving || deleteBranchTypedName.trim() !== deleteBranchTarget.name}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    {branchSaving ? 'Deleting…' : 'Delete permanently'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {isAdmin && (

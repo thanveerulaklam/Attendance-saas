@@ -78,7 +78,78 @@ async function createBranch(companyId, { name, address }) {
   return result.rows[0];
 }
 
+async function updateBranch(companyId, branchId, { name, address }) {
+  const id = Number(branchId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError('Invalid branch id', 400);
+  }
+
+  const trimmed = String(name || '').trim();
+  if (!trimmed) {
+    throw new AppError('Branch name is required', 400);
+  }
+  const addr = address != null && String(address).trim() !== '' ? String(address).trim() : null;
+
+  const result = await pool.query(
+    `UPDATE branches
+     SET name = $3, address = $4
+     WHERE company_id = $1 AND id = $2
+     RETURNING id, company_id, name, address, created_at`,
+    [companyId, id, trimmed, addr]
+  );
+  if (result.rowCount === 0) {
+    throw new AppError('Branch not found', 404);
+  }
+  return result.rows[0];
+}
+
+async function deleteBranch(companyId, branchId) {
+  const id = Number(branchId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError('Invalid branch id', 400);
+  }
+
+  const branchRes = await pool.query(
+    `SELECT id, name FROM branches WHERE company_id = $1 AND id = $2`,
+    [companyId, id]
+  );
+  if (branchRes.rowCount === 0) {
+    throw new AppError('Branch not found', 404);
+  }
+
+  const countRes = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM branches WHERE company_id = $1`,
+    [companyId]
+  );
+  if (Number(countRes.rows[0]?.total || 0) <= 1) {
+    throw new AppError('At least one branch is required. You cannot delete the last branch.', 400);
+  }
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM branches
+       WHERE company_id = $1 AND id = $2
+       RETURNING id, company_id, name, address, created_at`,
+      [companyId, id]
+    );
+    if (result.rowCount === 0) {
+      throw new AppError('Branch not found', 404);
+    }
+    return result.rows[0];
+  } catch (err) {
+    if (err?.code === '23503') {
+      throw new AppError(
+        'Cannot delete this branch because employees, devices, attendance logs, or user assignments are linked to it.',
+        400
+      );
+    }
+    throw err;
+  }
+}
+
 module.exports = {
   listBranches,
   createBranch,
+  updateBranch,
+  deleteBranch,
 };

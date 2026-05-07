@@ -186,11 +186,67 @@ async function createBranchHandler(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/company/branches/:id
+ * Admin only. Body: { name, address? }
+ */
+async function updateBranchHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const updated = await branchService.updateBranch(companyId, req.params.id, {
+      name: req.body?.name,
+      address: req.body?.address,
+    });
+
+    return res.json({
+      success: true,
+      data: updated,
+      message: 'Branch updated',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/company/branches/:id
+ * Admin only.
+ */
+async function deleteBranchHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const deleted = await branchService.deleteBranch(companyId, req.params.id);
+    return res.json({
+      success: true,
+      data: deleted,
+      message: 'Branch deleted',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getCurrentCompany,
   updateCurrentCompany,
   updateSubscriptionHandler,
   listBranchesHandler,
   createBranchHandler,
+  updateBranchHandler,
+  deleteBranchHandler,
 };
 
