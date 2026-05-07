@@ -637,7 +637,7 @@ export default function AttendancePage() {
               Punch timings for{' '}
               {formatDateDisplayFromYMD(dateStr)}
             </h3>
-            <div className="max-h-80 overflow-auto rounded-lg border border-slate-100">
+            <div className="max-h-[44rem] overflow-auto rounded-lg border border-slate-100">
               <table className="w-full min-w-[720px] text-[11px]">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr>
