@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import EmployeeFormModal from '../components/employees/EmployeeFormModal';
+import EmployeeBulkImportModal from '../components/employees/EmployeeBulkImportModal';
 import EmployeeFilters from '../components/employees/EmployeeFilters';
 
 const PAGE_SIZE = 15;
@@ -29,6 +30,7 @@ export default function EmployeesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(openFromOnboarding);
+  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [toast, setToast] = useState(null);
   const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
@@ -153,6 +155,23 @@ export default function EmployeesPage() {
     setShowModal(true);
   };
 
+  const handleBulkImportComplete = (summary) => {
+    setPage(1);
+    fetchEmployees();
+    const failCount = summary?.failed?.length ?? 0;
+    if (failCount === 0) {
+      setToast({
+        type: 'success',
+        message: `Import finished: ${summary.created} added, ${summary.skipped} skipped (already in the system).`,
+      });
+    } else {
+      setToast({
+        type: 'error',
+        message: `Import finished: ${summary.created} added, ${summary.skipped} skipped, ${failCount} row(s) failed. See the import dialog for details.`,
+      });
+    }
+  };
+
   const handleEmployeeDeleted = (employee) => {
     setShowModal(false);
     setEditingEmployee(null);
@@ -242,17 +261,26 @@ export default function EmployeesPage() {
             Manage your workforce—view all details and options in one place.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setEditingEmployee(null);
-            setShowModal(true);
-          }}
-          className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50"
-        >
-          <span className="mr-1 text-base">＋</span>
-          Add employee
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowBulkImportModal(true)}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          >
+            Bulk import
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditingEmployee(null);
+              setShowModal(true);
+            }}
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50"
+          >
+            <span className="mr-1 text-base">＋</span>
+            Add employee
+          </button>
+        </div>
       </div>
 
       {/* Filters row */}
@@ -465,6 +493,14 @@ export default function EmployeesPage() {
           onCreated={handleEmployeeCreated}
           onDeleted={handleEmployeeDeleted}
           departmentSuggestions={departmentSuggestions}
+        />
+      )}
+
+      {showBulkImportModal && (
+        <EmployeeBulkImportModal
+          open={showBulkImportModal}
+          onClose={() => setShowBulkImportModal(false)}
+          onComplete={handleBulkImportComplete}
         />
       )}
     </div>
