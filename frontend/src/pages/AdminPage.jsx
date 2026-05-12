@@ -1366,7 +1366,7 @@ export default function AdminPage() {
                               onClick={() => openResetModal(c)}
                               className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800"
                             >
-                              Pwd
+                              Reset password
                             </button>
                           </div>
                         </td>
@@ -1595,6 +1595,13 @@ export default function AdminPage() {
                   <div className="flex flex-shrink-0 flex-wrap gap-2">
                     <button
                       type="button"
+                      onClick={() => openResetModal(detailsCompany)}
+                      className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+                    >
+                      Reset tenant admin password
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setDetailsCompany(null)}
                       className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
@@ -1629,6 +1636,21 @@ export default function AdminPage() {
                     )}
                   </div>
                 </div>
+
+                <section className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 shadow-sm">
+                  <h3 className="text-sm font-semibold text-slate-900">Tenant admin password</h3>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    Set a new password for this company’s admin login (role admin). Enter their admin email or user ID
+                    in the next step, then choose a new password and share it securely with the client.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => openResetModal(detailsCompany)}
+                    className="mt-3 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+                  >
+                    Reset admin password…
+                  </button>
+                </section>
 
                 {/* Billing — same API as former billing modal */}
                 <section className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4 shadow-sm">
@@ -1923,7 +1945,7 @@ export default function AdminPage() {
         )}
 
         {resetModalCompany && (
-          <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-900/40">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40">
             <div className="w-full max-w-lg rounded-2xl bg-white shadow-xl border border-slate-200 p-6">
               <h2 className="text-base font-semibold text-slate-900 mb-1">
                 Reset admin password – {resetModalCompany.name || `Company #${resetModalCompany.id}`}
