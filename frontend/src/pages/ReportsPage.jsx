@@ -56,6 +56,13 @@ function getDayTotalHours(row) {
   return '—';
 }
 
+function getFirstInTime(row) {
+  const firstIn = (row.punches || []).find(
+    (p) => String(p.punch_type || '').toLowerCase() === 'in'
+  );
+  return firstIn?.punch_time ? formatIstTime(firstIn.punch_time) : '—';
+}
+
 function formatMoney(n) {
   if (n == null || Number.isNaN(Number(n))) return '0';
   return new Intl.NumberFormat('en-IN', {
@@ -303,6 +310,16 @@ export default function ReportsPage() {
       overtimeHours: Math.round(overtimeHours * 100) / 100,
     };
   }, [dayReportData]);
+
+  const dayReportAbsentees = useMemo(
+    () => (dayReportData || []).filter((r) => !r.present),
+    [dayReportData]
+  );
+
+  const dayReportLateComers = useMemo(
+    () => (dayReportData || []).filter((r) => r.late),
+    [dayReportData]
+  );
 
   const handleDayReportDownload = async () => {
     const params = new URLSearchParams({ date: dayReportDate });
@@ -604,41 +621,171 @@ export default function ReportsPage() {
         </div>
 
         {dayReportLoading ? (
-          <div className="mt-4 h-24 rounded-lg bg-slate-50 animate-pulse" />
+          <div className="mt-4 space-y-4">
+            <div className="h-24 rounded-lg bg-slate-50 animate-pulse" />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="h-40 rounded-lg bg-slate-50 animate-pulse" />
+              <div className="h-40 rounded-lg bg-slate-50 animate-pulse" />
+            </div>
+          </div>
         ) : (
           <>
             <p className="mt-3 text-[11px] font-medium text-slate-700">
               {formatDateLongIstYmd(dayReportDate)}
               {dayReportDepartment ? ` · ${dayReportDepartment}` : ''}
             </p>
-            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-600">Total</p>
-                <p className="text-lg font-semibold text-slate-900">{dayReportSummary.total}</p>
+
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {[
+                {
+                  key: 'total',
+                  label: 'Total employees',
+                  value: dayReportSummary.total,
+                  card: 'border-slate-200 bg-white',
+                  labelCls: 'text-slate-500',
+                  valueCls: 'text-slate-900',
+                },
+                {
+                  key: 'present',
+                  label: 'Present',
+                  value: dayReportSummary.present,
+                  card: 'border-emerald-100 bg-emerald-50',
+                  labelCls: 'text-emerald-700',
+                  valueCls: 'text-emerald-800',
+                },
+                {
+                  key: 'absent',
+                  label: 'Absent',
+                  value: dayReportSummary.absent,
+                  card: 'border-slate-200 bg-slate-50',
+                  labelCls: 'text-slate-600',
+                  valueCls: 'text-slate-800',
+                },
+                {
+                  key: 'late',
+                  label: 'Late',
+                  value: dayReportSummary.late,
+                  card: 'border-amber-100 bg-amber-50',
+                  labelCls: 'text-amber-700',
+                  valueCls: 'text-amber-800',
+                },
+                {
+                  key: 'fullDay',
+                  label: 'Full day',
+                  value: dayReportSummary.fullDay,
+                  card: 'border-blue-100 bg-blue-50',
+                  labelCls: 'text-blue-700',
+                  valueCls: 'text-blue-800',
+                },
+                {
+                  key: 'overtime',
+                  label: 'Overtime (total)',
+                  value: `${dayReportSummary.overtimeHours} h`,
+                  card: 'border-violet-100 bg-violet-50',
+                  labelCls: 'text-violet-700',
+                  valueCls: 'text-violet-800',
+                },
+              ].map(({ key, label, value, card, labelCls, valueCls }) => (
+                <div
+                  key={key}
+                  className={`rounded-lg border px-3 py-3 shadow-sm ${card}`}
+                >
+                  <p className={`text-[10px] font-medium uppercase tracking-wide ${labelCls}`}>
+                    {label}
+                  </p>
+                  <p className={`mt-1 text-2xl font-semibold ${valueCls}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-100 px-3 py-2.5">
+                  <h3 className="text-xs font-semibold text-slate-900">Absentees</h3>
+                  <p className="text-[10px] text-slate-500">
+                    {dayReportAbsentees.length}{' '}
+                    {dayReportAbsentees.length === 1 ? 'employee' : 'employees'} did not mark attendance
+                  </p>
+                </div>
+                <div className="max-h-56 overflow-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Employee</th>
+                        <th className="px-3 py-2 text-left font-medium">Code</th>
+                        <th className="px-3 py-2 text-left font-medium">Branch</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayReportAbsentees.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="px-3 py-4 text-center text-slate-500">
+                            No absentees for this day.
+                          </td>
+                        </tr>
+                      ) : (
+                        dayReportAbsentees.map((row) => (
+                          <tr key={row.employee_id} className="border-t border-slate-100">
+                            <td className="px-3 py-2 font-medium text-slate-800">{row.name || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700">{row.employee_code || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700">{row.branch_name || '—'}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-                <p className="text-[10px] font-medium text-emerald-700">Present</p>
-                <p className="text-lg font-semibold text-emerald-800">{dayReportSummary.present}</p>
-              </div>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[10px] font-medium text-slate-600">Absent</p>
-                <p className="text-lg font-semibold text-slate-800">{dayReportSummary.absent}</p>
-              </div>
-              <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
-                <p className="text-[10px] font-medium text-amber-700">Late</p>
-                <p className="text-lg font-semibold text-amber-800">{dayReportSummary.late}</p>
-              </div>
-              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
-                <p className="text-[10px] font-medium text-blue-700">Full day</p>
-                <p className="text-lg font-semibold text-blue-800">{dayReportSummary.fullDay}</p>
-              </div>
-              <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
-                <p className="text-[10px] font-medium text-violet-700">Overtime</p>
-                <p className="text-lg font-semibold text-violet-800">{dayReportSummary.overtimeHours} h</p>
+
+              <div className="rounded-lg border border-amber-100 bg-white shadow-sm">
+                <div className="border-b border-amber-100 bg-amber-50/40 px-3 py-2.5">
+                  <h3 className="text-xs font-semibold text-amber-900">Late comers</h3>
+                  <p className="text-[10px] text-amber-800/80">
+                    {dayReportLateComers.length}{' '}
+                    {dayReportLateComers.length === 1 ? 'employee' : 'employees'} arrived after the grace period
+                  </p>
+                </div>
+                <div className="max-h-56 overflow-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-amber-50/80 text-amber-900">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Employee</th>
+                        <th className="px-3 py-2 text-left font-medium">Code</th>
+                        <th className="px-3 py-2 text-left font-medium">Arrival</th>
+                        <th className="px-3 py-2 text-right font-medium">Minutes late</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dayReportLateComers.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-3 py-4 text-center text-slate-500">
+                            No late arrivals for this day.
+                          </td>
+                        </tr>
+                      ) : (
+                        dayReportLateComers.map((row) => (
+                          <tr key={row.employee_id} className="border-t border-amber-50">
+                            <td className="px-3 py-2 font-medium text-slate-800">{row.name || '—'}</td>
+                            <td className="px-3 py-2 text-slate-700">{row.employee_code || '—'}</td>
+                            <td className="px-3 py-2 font-medium text-amber-800">{getFirstInTime(row)}</td>
+                            <td className="px-3 py-2 text-right text-amber-800">
+                              {row.minutes_late != null && row.minutes_late > 0
+                                ? `${Math.round(row.minutes_late)} min`
+                                : '—'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
-            <div className="mt-4 max-h-[28rem] overflow-auto rounded-lg border border-slate-100">
+            <h3 className="mt-5 text-xs font-semibold text-slate-900">All employees</h3>
+            <p className="text-[10px] text-slate-500">Complete attendance for the selected day</p>
+
+            <div className="mt-2 max-h-[28rem] overflow-auto rounded-lg border border-slate-100">
               <table className="w-full min-w-[640px] text-xs">
                 <thead className="sticky top-0 bg-slate-50 text-slate-600">
                   <tr>
