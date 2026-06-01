@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
+import {
+  buildDayWiseReportCsv,
+  downloadDayWiseReportCsv,
+  generateDayWiseReportPdf,
+} from '../components/reports/DayWiseReportPDF';
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 import { formatIstTime, IST } from '../utils/istDisplay';
 
@@ -321,15 +326,28 @@ export default function ReportsPage() {
     [dayReportData]
   );
 
+  const getDayReportExportPayload = () => {
+    if (!dayReportData.length) {
+      throw new Error('No data available for selected day. Wait for the report to load.');
+    }
+    return {
+      dateLabel: formatDateLongIstYmd(dayReportDate),
+      departmentLabel: dayReportDepartment || null,
+      summary: dayReportSummary,
+      absentees: dayReportAbsentees,
+      lateComers: dayReportLateComers,
+      allEmployees: dayReportData,
+    };
+  };
+
   const handleDayReportDownload = async () => {
-    const params = new URLSearchParams({ date: dayReportDate });
-    if (dayReportDepartment) params.set('department', dayReportDepartment);
-    const url = `${base}/daily.csv?${params.toString()}`;
     const filename = `daily-attendance-${dayReportDate}.csv`;
     try {
       setLoading('daily');
       setToast(null);
-      await downloadCsv(url, filename);
+      const payload = getDayReportExportPayload();
+      const csv = buildDayWiseReportCsv(payload);
+      downloadDayWiseReportCsv(csv, filename);
       setToast({ type: 'success', message: 'Day report downloaded' });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Download failed' });
@@ -342,50 +360,16 @@ export default function ReportsPage() {
     try {
       setLoading('daily-pdf');
       setToast(null);
-      const [companyRes, csvRes] = await Promise.all([
-        authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
-        authFetch(`${base}/daily.csv?date=${encodeURIComponent(dayReportDate)}${
-          dayReportDepartment ? `&department=${encodeURIComponent(dayReportDepartment)}` : ''
-        }`, { headers: { Accept: 'text/csv' } }),
-      ]);
-      if (!csvRes.ok) {
-        const err = await csvRes.json().catch(() => ({}));
-        throw new Error(err.message || `Download failed (${csvRes.status})`);
-      }
+      const payload = getDayReportExportPayload();
+      const companyRes = await authFetch('/api/company', {
+        headers: { 'Content-Type': 'application/json' },
+      });
       const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
-      const company = companyJson.data || {};
-      const csvText = await csvRes.text();
-      const { header, rows } = parseCsvText(csvText);
-      if (header.length === 0) {
-        throw new Error('No data available for selected day');
-      }
-
-      const doc = createPdf({ orientation: 'landscape' });
-      const startY = addReportHeader(doc, {
-        companyName: company.name,
-        companyPhone: company.phone,
-        companyAddress: company.address,
-        title: 'Daily Attendance Report',
-        periodLabel: formatDateLongIstYmd(dayReportDate),
-        generatedAt: new Date().toLocaleString(),
-        totalEmployees: rows.length,
+      await generateDayWiseReportPdf({
+        company: companyJson.data || {},
+        filename: `daily-attendance-${dayReportDate}.pdf`,
+        ...payload,
       });
-      addAutoTable(doc, [header], rows, {
-        startY,
-        margin: { left: 24, right: 24 },
-        styles: { fontSize: 7 },
-      });
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const y = doc.internal.pageSize.getHeight() - 44;
-      doc.setFontSize(10);
-      doc.setFont(undefined, 'normal');
-      doc.text(
-        `Present: ${dayReportSummary.present} | Absent: ${dayReportSummary.absent} | Late: ${dayReportSummary.late} | Full day: ${dayReportSummary.fullDay} | Overtime: ${dayReportSummary.overtimeHours} h`,
-        pageWidth / 2,
-        y,
-        { align: 'center' }
-      );
-      savePdf(doc, `daily-attendance-${dayReportDate}.pdf`);
       setToast({ type: 'success', message: 'Day report PDF downloaded' });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'PDF generation failed' });
@@ -877,6 +861,9 @@ export default function ReportsPage() {
                     : 'Downloading...'
                   : 'Download day report'}
               </button>
+              <p className="w-full text-[10px] text-slate-500">
+                Export includes summary stats, absentees list, late comers list, and all employees.
+              </p>
             </div>
           </>
         )}
