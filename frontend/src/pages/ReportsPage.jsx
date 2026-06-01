@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
+import { formatIstTime, IST } from '../utils/istDisplay';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -11,6 +12,48 @@ const PAYROLL_MODAL_PAGE_SIZE = 25;
 
 function currentYear() {
   return new Date().getFullYear();
+}
+
+function todayIstYmd() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: IST });
+}
+
+function formatDateLongIstYmd(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return '—';
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`).toLocaleDateString('en-IN', {
+    timeZone: IST,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function formatPunchTimings(punches) {
+  const list = Array.isArray(punches) ? punches : [];
+  if (list.length === 0) return '—';
+  return list
+    .map((p) => {
+      const timeLabel = p?.punch_time ? formatIstTime(p.punch_time) : '';
+      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+      return timeLabel ? `${timeLabel} (${typeLabel})` : '';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
+function getDayStatusLabel(row) {
+  if (!row.present) return 'Absent';
+  if (row.full_day) return row.late ? 'Full day (late)' : 'Full day';
+  if (row.half_day) return row.late ? 'Half day (late)' : 'Half day';
+  if (row.left_during_lunch) return 'Left at lunch';
+  return row.late ? 'Present (late)' : 'Present';
+}
+
+function getDayTotalHours(row) {
+  if (row.total_hours_inside != null) return `${row.total_hours_inside} h`;
+  if (row.total_hours_from_shift_start != null) return `${row.total_hours_from_shift_start} h`;
+  return '—';
 }
 
 function formatMoney(n) {
@@ -111,6 +154,11 @@ export default function ReportsPage() {
     payroll: 'csv',
     overtime: 'csv',
   });
+  const [dayReportDate, setDayReportDate] = useState(todayIstYmd);
+  const [dayReportDepartment, setDayReportDepartment] = useState('');
+  const [dayReportData, setDayReportData] = useState([]);
+  const [dayReportLoading, setDayReportLoading] = useState(false);
+  const [dayReportFormat, setDayReportFormat] = useState('csv');
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -204,6 +252,130 @@ export default function ReportsPage() {
     [currentMonthPayrollRows]
   );
   const payrollModalTotalPages = Math.max(1, Math.ceil(payrollModalTotal / PAYROLL_MODAL_PAGE_SIZE));
+
+  useEffect(() => {
+    let isMounted = true;
+    const controller = new AbortController();
+    async function loadDayReport() {
+      if (!dayReportDate) return;
+      try {
+        setDayReportLoading(true);
+        const params = new URLSearchParams({ date: dayReportDate });
+        if (dayReportDepartment) params.set('department', dayReportDepartment);
+        const res = await authFetch(`/api/attendance/daily?${params.toString()}`, {
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || `Failed to load day report (${res.status})`);
+        }
+        const json = await res.json();
+        if (!isMounted) return;
+        setDayReportData(Array.isArray(json.data) ? json.data : []);
+      } catch (err) {
+        if (!isMounted || err?.name === 'AbortError') return;
+        setDayReportData([]);
+        setToast({ type: 'error', message: err.message || 'Failed to load day report' });
+      } finally {
+        if (isMounted) setDayReportLoading(false);
+      }
+    }
+    loadDayReport();
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [dayReportDate, dayReportDepartment]);
+
+  const dayReportSummary = useMemo(() => {
+    const rows = dayReportData || [];
+    const present = rows.filter((r) => r.present).length;
+    const late = rows.filter((r) => r.late).length;
+    const fullDay = rows.filter((r) => r.full_day).length;
+    const overtimeHours = rows.reduce((sum, r) => sum + (Number(r.overtime_hours) || 0), 0);
+    return {
+      total: rows.length,
+      present,
+      absent: rows.length - present,
+      late,
+      fullDay,
+      overtimeHours: Math.round(overtimeHours * 100) / 100,
+    };
+  }, [dayReportData]);
+
+  const handleDayReportDownload = async () => {
+    const params = new URLSearchParams({ date: dayReportDate });
+    if (dayReportDepartment) params.set('department', dayReportDepartment);
+    const url = `${base}/daily.csv?${params.toString()}`;
+    const filename = `daily-attendance-${dayReportDate}.csv`;
+    try {
+      setLoading('daily');
+      setToast(null);
+      await downloadCsv(url, filename);
+      setToast({ type: 'success', message: 'Day report downloaded' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Download failed' });
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleDayReportPdf = async () => {
+    try {
+      setLoading('daily-pdf');
+      setToast(null);
+      const [companyRes, csvRes] = await Promise.all([
+        authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
+        authFetch(`${base}/daily.csv?date=${encodeURIComponent(dayReportDate)}${
+          dayReportDepartment ? `&department=${encodeURIComponent(dayReportDepartment)}` : ''
+        }`, { headers: { Accept: 'text/csv' } }),
+      ]);
+      if (!csvRes.ok) {
+        const err = await csvRes.json().catch(() => ({}));
+        throw new Error(err.message || `Download failed (${csvRes.status})`);
+      }
+      const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
+      const company = companyJson.data || {};
+      const csvText = await csvRes.text();
+      const { header, rows } = parseCsvText(csvText);
+      if (header.length === 0) {
+        throw new Error('No data available for selected day');
+      }
+
+      const doc = createPdf({ orientation: 'landscape' });
+      const startY = addReportHeader(doc, {
+        companyName: company.name,
+        companyPhone: company.phone,
+        companyAddress: company.address,
+        title: 'Daily Attendance Report',
+        periodLabel: formatDateLongIstYmd(dayReportDate),
+        generatedAt: new Date().toLocaleString(),
+        totalEmployees: rows.length,
+      });
+      addAutoTable(doc, [header], rows, {
+        startY,
+        margin: { left: 24, right: 24 },
+        styles: { fontSize: 7 },
+      });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const y = doc.internal.pageSize.getHeight() - 44;
+      doc.setFontSize(10);
+      doc.setFont(undefined, 'normal');
+      doc.text(
+        `Present: ${dayReportSummary.present} | Absent: ${dayReportSummary.absent} | Late: ${dayReportSummary.late} | Full day: ${dayReportSummary.fullDay} | Overtime: ${dayReportSummary.overtimeHours} h`,
+        pageWidth / 2,
+        y,
+        { align: 'center' }
+      );
+      savePdf(doc, `daily-attendance-${dayReportDate}.pdf`);
+      setToast({ type: 'success', message: 'Day report PDF downloaded' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'PDF generation failed' });
+    } finally {
+      setLoading(null);
+    }
+  };
 
   useEffect(() => {
     if (detailsModal !== 'payroll') return;
@@ -352,7 +524,7 @@ export default function ReportsPage() {
       <header>
         <h1 className="text-lg font-semibold text-slate-900">Reports</h1>
         <p className="text-xs text-slate-500">
-          Export monthly attendance, payroll, and overtime as CSV.
+          View a full day&apos;s attendance or export monthly attendance, payroll, and overtime.
         </p>
       </header>
 
@@ -392,6 +564,175 @@ export default function ReportsPage() {
             <p className="mt-1 text-[11px] text-slate-500">Click to view payroll breakdown</p>
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">Day-wise report</h2>
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              Select a date to view the full attendance report for that day.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-medium text-slate-600">Date</label>
+              <input
+                type="date"
+                value={dayReportDate}
+                max={todayIstYmd()}
+                onChange={(e) => setDayReportDate(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] font-medium text-slate-600">Department</label>
+              <select
+                value={dayReportDepartment}
+                onChange={(e) => setDayReportDepartment(e.target.value)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+              >
+                <option value="">All departments</option>
+                {departments.map((dept) => (
+                  <option key={dept} value={dept}>
+                    {dept}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {dayReportLoading ? (
+          <div className="mt-4 h-24 rounded-lg bg-slate-50 animate-pulse" />
+        ) : (
+          <>
+            <p className="mt-3 text-[11px] font-medium text-slate-700">
+              {formatDateLongIstYmd(dayReportDate)}
+              {dayReportDepartment ? ` · ${dayReportDepartment}` : ''}
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-600">Total</p>
+                <p className="text-lg font-semibold text-slate-900">{dayReportSummary.total}</p>
+              </div>
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                <p className="text-[10px] font-medium text-emerald-700">Present</p>
+                <p className="text-lg font-semibold text-emerald-800">{dayReportSummary.present}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-medium text-slate-600">Absent</p>
+                <p className="text-lg font-semibold text-slate-800">{dayReportSummary.absent}</p>
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                <p className="text-[10px] font-medium text-amber-700">Late</p>
+                <p className="text-lg font-semibold text-amber-800">{dayReportSummary.late}</p>
+              </div>
+              <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                <p className="text-[10px] font-medium text-blue-700">Full day</p>
+                <p className="text-lg font-semibold text-blue-800">{dayReportSummary.fullDay}</p>
+              </div>
+              <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2">
+                <p className="text-[10px] font-medium text-violet-700">Overtime</p>
+                <p className="text-lg font-semibold text-violet-800">{dayReportSummary.overtimeHours} h</p>
+              </div>
+            </div>
+
+            <div className="mt-4 max-h-[28rem] overflow-auto rounded-lg border border-slate-100">
+              <table className="w-full min-w-[640px] text-xs">
+                <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Employee</th>
+                    <th className="px-3 py-2 text-left font-medium">Code</th>
+                    <th className="px-3 py-2 text-left font-medium">Branch</th>
+                    <th className="px-3 py-2 text-left font-medium">Status</th>
+                    <th className="px-3 py-2 text-left font-medium">Punch timings</th>
+                    <th className="px-3 py-2 text-right font-medium">Hours</th>
+                    <th className="px-3 py-2 text-right font-medium">OT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dayReportData.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                        No attendance records for this day.
+                      </td>
+                    </tr>
+                  ) : (
+                    dayReportData.map((row) => {
+                      const status = getDayStatusLabel(row);
+                      const statusCls = !row.present
+                        ? 'text-slate-500'
+                        : row.full_day
+                          ? 'text-blue-700'
+                          : row.late
+                            ? 'text-amber-700'
+                            : 'text-emerald-700';
+                      return (
+                        <tr key={row.employee_id} className="border-t border-slate-100">
+                          <td className="px-3 py-2 text-slate-800">{row.name || '—'}</td>
+                          <td className="px-3 py-2 text-slate-700">{row.employee_code || '—'}</td>
+                          <td className="px-3 py-2 text-slate-700">{row.branch_name || '—'}</td>
+                          <td className={`px-3 py-2 font-medium ${statusCls}`}>{status}</td>
+                          <td className="px-3 py-2 text-slate-700 max-w-xs truncate" title={formatPunchTimings(row.punches)}>
+                            {formatPunchTimings(row.punches)}
+                          </td>
+                          <td className="px-3 py-2 text-right text-slate-700">{getDayTotalHours(row)}</td>
+                          <td className="px-3 py-2 text-right text-slate-700">
+                            {row.overtime_hours != null && row.overtime_hours > 0
+                              ? `${row.overtime_hours} h`
+                              : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-100 pt-4">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                <input
+                  type="radio"
+                  name="day-report-fmt"
+                  className="border-slate-300 text-blue-600"
+                  checked={dayReportFormat === 'csv'}
+                  onChange={() => setDayReportFormat('csv')}
+                />
+                CSV
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                <input
+                  type="radio"
+                  name="day-report-fmt"
+                  className="border-slate-300 text-blue-600"
+                  checked={dayReportFormat === 'pdf'}
+                  onChange={() => setDayReportFormat('pdf')}
+                />
+                PDF
+              </label>
+              <button
+                type="button"
+                disabled={loading != null || dayReportData.length === 0}
+                onClick={() => {
+                  if (dayReportFormat === 'csv') {
+                    void handleDayReportDownload();
+                  } else {
+                    void handleDayReportPdf();
+                  }
+                }}
+                className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
+              >
+                {loading === 'daily' || loading === 'daily-pdf'
+                  ? dayReportFormat === 'pdf'
+                    ? 'Generating...'
+                    : 'Downloading...'
+                  : 'Download day report'}
+              </button>
+            </div>
+          </>
+        )}
       </section>
 
       <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">

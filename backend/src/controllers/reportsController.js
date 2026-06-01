@@ -2,6 +2,7 @@ const {
   getAttendanceReportCsv,
   getPayrollReportCsv,
   getOvertimeReportCsv,
+  getDailyReportCsv,
 } = require('../services/reportsService');
 
 function setCsvHeaders(res, filename) {
@@ -81,8 +82,41 @@ async function overtimeCsv(req, res, next) {
   }
 }
 
+/**
+ * GET /api/reports/daily.csv?date=YYYY-MM-DD&department=
+ */
+async function dailyCsv(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { date, department } = req.query || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    if (!date || typeof date !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'Query "date" (YYYY-MM-DD) is required',
+      });
+    }
+
+    const dept = department ? String(department).trim() : null;
+    const csv = await getDailyReportCsv(companyId, date.trim(), dept, req.allowedBranchIds);
+    const filename = `daily-attendance-${date.trim()}.csv`;
+    setCsvHeaders(res, filename);
+    return res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   attendanceCsv,
   payrollCsv,
   overtimeCsv,
+  dailyCsv,
 };

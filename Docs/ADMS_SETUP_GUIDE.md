@@ -55,6 +55,9 @@ Save and reboot the device once.
 
 **From the VPS:**
 
+run this from ur server: tail -f /var/log/nginx/access.log | grep -E "iclock|GED7234200345" 
+with the sno changed
+
 ```bash
 curl -i "http://127.0.0.1:3000/iclock/getrequest?SN=TEST123"
 curl -i "https://YOUR_DOMAIN/iclock/getrequest?SN=TEST123"

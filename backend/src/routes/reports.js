@@ -3,6 +3,7 @@ const {
   attendanceCsv,
   payrollCsv,
   overtimeCsv,
+  dailyCsv,
 } = require('../controllers/reportsController');
 const { authenticate, requireRole, enforceCompanyFromToken, attachBranchScopes } = require('../middleware/auth');
 
@@ -18,5 +19,6 @@ const withAuth = [
 router.get('/attendance.csv', withAuth, attendanceCsv);
 router.get('/payroll.csv', withAuth, payrollCsv);
 router.get('/overtime.csv', withAuth, overtimeCsv);
+router.get('/daily.csv', withAuth, dailyCsv);
 
 module.exports = router;

@@ -1,6 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
-const { getMonthlyAttendance } = require('./attendanceService');
+const { getMonthlyAttendance, getDailyAttendance } = require('./attendanceService');
 
 /**
  * Escape a value for CSV (wrap in quotes if needed, escape internal quotes).
@@ -169,8 +169,84 @@ async function getOvertimeReportCsv(companyId, year, month, allowedBranchIds = n
   return toCsv(header, rows);
 }
 
+function formatDailyStatus(row) {
+  if (!row.present) return 'Absent';
+  if (row.full_day) return row.late ? 'Full day (late)' : 'Full day';
+  if (row.half_day) return row.late ? 'Half day (late)' : 'Half day';
+  if (row.left_during_lunch) return 'Left at lunch';
+  return row.late ? 'Present (late)' : 'Present';
+}
+
+function formatPunchTimingsForCsv(punches) {
+  const list = Array.isArray(punches) ? punches : [];
+  if (list.length === 0) return '';
+  return list
+    .map((p) => {
+      const t = p.punch_time ? new Date(p.punch_time) : null;
+      const timeLabel =
+        t && !Number.isNaN(t.getTime())
+          ? t.toLocaleTimeString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            })
+          : '';
+      const typeLabel = String(p.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+      return timeLabel ? `${timeLabel} (${typeLabel})` : '';
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
+function formatDailyTotalHours(row) {
+  if (row.total_hours_inside != null) return row.total_hours_inside;
+  if (row.total_hours_from_shift_start != null) return row.total_hours_from_shift_start;
+  return '';
+}
+
+/**
+ * Daily attendance report CSV for a single date.
+ * Columns: Employee Code, Name, Branch, Date, Status, Late, Full Day, Punch Timings, Total Hours, Overtime Hours
+ */
+async function getDailyReportCsv(companyId, dateStr, department = null, allowedBranchIds = null) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim());
+  if (!match) {
+    throw new AppError('Valid date (YYYY-MM-DD) is required', 400);
+  }
+
+  const dept = department ? String(department).trim() : null;
+  const rows = await getDailyAttendance(companyId, dateStr.trim(), null, dept, allowedBranchIds);
+  const header = [
+    'Employee Code',
+    'Name',
+    'Branch',
+    'Date',
+    'Status',
+    'Late',
+    'Full Day',
+    'Punch Timings',
+    'Total Hours',
+    'Overtime Hours',
+  ];
+  const dataRows = rows.map((row) => [
+    row.employee_code,
+    row.name,
+    row.branch_name || '',
+    dateStr.trim(),
+    formatDailyStatus(row),
+    row.late ? 'Yes' : 'No',
+    row.full_day ? 'Yes' : 'No',
+    formatPunchTimingsForCsv(row.punches),
+    formatDailyTotalHours(row),
+    row.overtime_hours ?? 0,
+  ]);
+  return toCsv(header, dataRows);
+}
+
 module.exports = {
   getAttendanceReportCsv,
   getPayrollReportCsv,
   getOvertimeReportCsv,
+  getDailyReportCsv,
 };
