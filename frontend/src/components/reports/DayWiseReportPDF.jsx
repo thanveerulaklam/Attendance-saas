@@ -68,7 +68,7 @@ export async function generateDayWiseReportPdf({
   allEmployees,
   filename,
 }) {
-  const doc = createPdf({ orientation: 'landscape' });
+  const doc = createPdf({ orientation: 'portrait' });
   let y = addReportHeader(doc, {
     companyName: company?.name,
     companyPhone: company?.phone,
