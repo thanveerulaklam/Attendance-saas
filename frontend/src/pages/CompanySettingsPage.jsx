@@ -41,7 +41,6 @@ export default function CompanySettingsPage() {
     last_sent_for_date: null,
     last_sent_at: null,
   });
-  const [whatsappSending, setWhatsappSending] = useState(false);
   const [whatsappToast, setWhatsappToast] = useState(null);
   const [subscriptionForm, setSubscriptionForm] = useState({
     subscription_start_date: '',
@@ -237,39 +236,6 @@ export default function CompanySettingsPage() {
       setWhatsappToast({ type: 'error', message: err.message || 'Failed to save' });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleSendWhatsappNow = async () => {
-    if (whatsappSending) return;
-    try {
-      setWhatsappSending(true);
-      setWhatsappToast(null);
-      const res = await authFetch('/api/company/whatsapp/send-now', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(json.message || 'Failed to send WhatsApp message');
-      }
-      setWhatsappToast({
-        type: 'success',
-        message: json.message || 'Today’s attendance report was sent on WhatsApp',
-      });
-      const refresh = await authFetch('/api/company');
-      if (refresh.ok) {
-        const refreshJson = await refresh.json();
-        const data = refreshJson.data || {};
-        setWhatsappMeta({
-          last_sent_for_date: data.whatsapp_last_sent_for_date || null,
-          last_sent_at: data.whatsapp_last_sent_at || null,
-        });
-      }
-    } catch (err) {
-      setWhatsappToast({ type: 'error', message: err.message || 'Send failed' });
-    } finally {
-      setWhatsappSending(false);
     }
   };
 
@@ -569,7 +535,7 @@ export default function CompanySettingsPage() {
             </div>
             {whatsappMeta.last_sent_at && (
               <p className="text-[11px] text-slate-500">
-                Last auto/manual send:{' '}
+                Last automatic send:{' '}
                 {formatDateLabel(whatsappMeta.last_sent_for_date)}
                 {whatsappMeta.last_sent_at
                   ? ` · ${new Date(whatsappMeta.last_sent_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`
@@ -583,16 +549,6 @@ export default function CompanySettingsPage() {
                 className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {saving ? 'Saving…' : 'Save WhatsApp settings'}
-              </button>
-              <button
-                type="button"
-                disabled={loading || saving || whatsappSending}
-                onClick={() => {
-                  void handleSendWhatsappNow();
-                }}
-                className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-50"
-              >
-                {whatsappSending ? 'Sending…' : 'Send today’s report now'}
               </button>
             </div>
           </form>

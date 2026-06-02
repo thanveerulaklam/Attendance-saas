@@ -8,8 +8,6 @@ const {
 } = require('../services/companyService');
 const { getEffectiveEmployeeLimit } = require('../services/employeeService');
 const branchService = require('../services/branchService');
-const { sendDailyAttendanceForCompany } = require('../services/dailyAttendanceWhatsappService');
-const { isWhatsAppConfigured } = require('../services/whatsappService');
 
 /**
  * GET /api/company
@@ -245,49 +243,6 @@ async function deleteBranchHandler(req, res, next) {
   }
 }
 
-/**
- * POST /api/company/whatsapp/send-now
- * Admin only. Sends today's attendance report immediately (ignores daily idempotency).
- */
-async function sendWhatsappNowHandler(req, res, next) {
-  try {
-    const companyId = req.companyId;
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        message: 'companyId (from token) is required',
-      });
-    }
-
-    if (!isWhatsAppConfigured()) {
-      return res.status(503).json({
-        success: false,
-        message: 'WhatsApp is not configured on the server',
-      });
-    }
-
-    const company = await getCompanyById(companyId);
-    if (!company) {
-      return res.status(404).json({
-        success: false,
-        message: 'Company not found',
-      });
-    }
-
-    const result = await sendDailyAttendanceForCompany(company, {
-      skipIdempotency: true,
-    });
-
-    return res.json({
-      success: true,
-      data: result,
-      message: 'WhatsApp message sent',
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
 module.exports = {
   getCurrentCompany,
   updateCurrentCompany,
@@ -296,6 +251,5 @@ module.exports = {
   createBranchHandler,
   updateBranchHandler,
   deleteBranchHandler,
-  sendWhatsappNowHandler,
 };
 

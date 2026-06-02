@@ -72,7 +72,7 @@ async function fetchDailyRows(companyId, dateYmd) {
 /**
  * Send today's attendance report for one company to configured recipients.
  * @param {object} company - row with id, name, phone, whatsapp_* fields
- * @param {{ dateYmd?: string, skipIdempotency?: boolean }} options
+ * @param {{ dateYmd?: string }} options
  */
 async function sendDailyAttendanceForCompany(company, options = {}) {
   if (!isWhatsAppConfigured()) {
@@ -82,7 +82,7 @@ async function sendDailyAttendanceForCompany(company, options = {}) {
   const dateYmd = options.dateYmd || todayIstYmd();
   const companyId = company.id;
 
-  if (!options.skipIdempotency && company.whatsapp_last_sent_for_date) {
+  if (company.whatsapp_last_sent_for_date) {
     const last = String(company.whatsapp_last_sent_for_date).slice(0, 10);
     if (last === dateYmd) {
       return { skipped: true, reason: 'already_sent_today', dateYmd };
