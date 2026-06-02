@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
 import {
+  buildDayWiseReportPdfBlob,
+  buildDayWiseWhatsAppMessage,
   buildDayWiseReportCsv,
   downloadDayWiseReportCsv,
   generateDayWiseReportPdf,
 } from '../components/reports/DayWiseReportPDF';
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 import { formatIstTime, IST } from '../utils/istDisplay';
+import { normalizeWhatsAppNumber, openWhatsAppChat } from '../utils/whatsapp';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -390,6 +393,80 @@ export default function ReportsPage() {
       setToast({ type: 'success', message: 'Day report PDF downloaded' });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'PDF generation failed' });
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleSendDayReportWhatsApp = async () => {
+    try {
+      setLoading('daily-whatsapp');
+      setToast(null);
+      const payload = getDayReportExportPayload();
+      const companyRes = await authFetch('/api/company', {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
+      const company = companyJson.data || {};
+
+      const phone = normalizeWhatsAppNumber(company.phone);
+      if (!phone) {
+        throw new Error('Company phone is missing. Please update it in Company Settings.');
+      }
+
+      const filename = `daily-attendance-${dayReportDate}.pdf`;
+      const { blob } = buildDayWiseReportPdfBlob(
+        {
+          company,
+          ...payload,
+        },
+        filename
+      );
+
+      const shareText = buildDayWiseWhatsAppMessage({
+        companyName: company.name,
+        dateLabel: payload.dateLabel,
+        departmentLabel: payload.departmentLabel,
+        summary: payload.summary,
+      });
+
+      const canShareFile =
+        typeof navigator !== 'undefined' &&
+        typeof navigator.share === 'function' &&
+        typeof window !== 'undefined' &&
+        typeof window.File === 'function';
+
+      if (canShareFile) {
+        const file = new File([blob], filename, { type: 'application/pdf' });
+        if (typeof navigator.canShare !== 'function' || navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: 'Day-wise Attendance Report',
+            text: shareText,
+          });
+          setToast({ type: 'success', message: 'Share sheet opened. Select WhatsApp to send the PDF.' });
+          return;
+        }
+      }
+
+      // Fallback for desktop browsers where direct file attach via deeplink is not supported.
+      await generateDayWiseReportPdf({ company, filename, ...payload });
+      const opened = openWhatsAppChat(phone, `${shareText}\n\nPDF downloaded as ${filename}. Please attach and send it.`);
+      if (!opened) {
+        throw new Error('Unable to open WhatsApp for the company number.');
+      }
+      setToast({
+        type: 'success',
+        message: 'WhatsApp opened. PDF downloaded—attach it in chat and send.',
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+      const msg = String(err?.message || '');
+      if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('dismiss')) {
+        setToast({ type: 'error', message: 'Share cancelled' });
+      } else {
+        setToast({ type: 'error', message: err.message || 'Failed to open WhatsApp' });
+      }
     } finally {
       setLoading(null);
     }
@@ -949,6 +1026,16 @@ export default function ReportsPage() {
                     ? 'Generating...'
                     : 'Downloading...'
                   : 'Download day report'}
+              </button>
+              <button
+                type="button"
+                disabled={loading != null || dayReportData.length === 0}
+                onClick={() => {
+                  void handleSendDayReportWhatsApp();
+                }}
+                className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 shadow-sm hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {loading === 'daily-whatsapp' ? 'Opening WhatsApp...' : 'Send on WhatsApp'}
               </button>
               <p className="w-full text-[10px] text-slate-500">
                 Export includes summary stats, absentees list, late comers list, and all employees.
