@@ -116,17 +116,27 @@ export default function DashboardLayout() {
             <NavLink
               key={item.to}
               to={item.to}
+              end
               onClick={() => setMobileNavOpen(false)}
               className={({ isActive }) =>
-                `flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                `flex items-center gap-2.5 px-3 py-2 rounded-lg border-l-2 transition-colors ${
                   isActive
-                    ? 'bg-primary-500/10 text-primary-100'
-                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
+                    ? 'border-[#D4A843] bg-[#D4A843]/12 text-[#F5E6B8] font-medium'
+                    : 'border-transparent text-slate-300 hover:bg-slate-800/60 hover:text-white'
                 }`
               }
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />
-              <span>{item.label}</span>
+              {({ isActive }) => (
+                <>
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                      isActive ? 'bg-[#D4A843]' : 'bg-slate-500'
+                    }`}
+                    aria-hidden
+                  />
+                  <span>{item.label}</span>
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
