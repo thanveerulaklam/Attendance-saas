@@ -7,6 +7,7 @@ const {
   createBranchHandler,
   updateBranchHandler,
   deleteBranchHandler,
+  sendWhatsappNowHandler,
 } = require('../controllers/companyController');
 const {
   authenticate,
@@ -40,6 +41,9 @@ router.delete('/branches/:id', adminOnly, deleteBranchHandler);
 
 // POST /api/company/subscription (admin only)
 router.post('/subscription', adminOnly, updateSubscriptionHandler);
+
+// POST /api/company/whatsapp/send-now (admin only, manual test/send)
+router.post('/whatsapp/send-now', adminOnly, sendWhatsappNowHandler);
 
 module.exports = router;
 

@@ -8,6 +8,8 @@ const {
 } = require('../services/companyService');
 const { getEffectiveEmployeeLimit } = require('../services/employeeService');
 const branchService = require('../services/branchService');
+const { sendDailyAttendanceForCompany } = require('../services/dailyAttendanceWhatsappService');
+const { isWhatsAppConfigured } = require('../services/whatsappService');
 
 /**
  * GET /api/company
@@ -81,6 +83,9 @@ async function updateCurrentCompany(req, res, next) {
       phone: req.body.phone,
       address: req.body.address,
       paid_leave_forfeit_if_absence_gt: req.body.paid_leave_forfeit_if_absence_gt,
+      whatsapp_auto_enabled: req.body.whatsapp_auto_enabled,
+      whatsapp_primary_number: req.body.whatsapp_primary_number,
+      whatsapp_secondary_number: req.body.whatsapp_secondary_number,
     });
 
     if (!updated) {
@@ -240,6 +245,49 @@ async function deleteBranchHandler(req, res, next) {
   }
 }
 
+/**
+ * POST /api/company/whatsapp/send-now
+ * Admin only. Sends today's attendance report immediately (ignores daily idempotency).
+ */
+async function sendWhatsappNowHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    if (!isWhatsAppConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: 'WhatsApp is not configured on the server',
+      });
+    }
+
+    const company = await getCompanyById(companyId);
+    if (!company) {
+      return res.status(404).json({
+        success: false,
+        message: 'Company not found',
+      });
+    }
+
+    const result = await sendDailyAttendanceForCompany(company, {
+      skipIdempotency: true,
+    });
+
+    return res.json({
+      success: true,
+      data: result,
+      message: 'WhatsApp message sent',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getCurrentCompany,
   updateCurrentCompany,
@@ -248,5 +296,6 @@ module.exports = {
   createBranchHandler,
   updateBranchHandler,
   deleteBranchHandler,
+  sendWhatsappNowHandler,
 };
 

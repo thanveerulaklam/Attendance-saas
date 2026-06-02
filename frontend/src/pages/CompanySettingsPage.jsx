@@ -32,6 +32,17 @@ export default function CompanySettingsPage() {
     phone: '',
     address: '',
   });
+  const [whatsappForm, setWhatsappForm] = useState({
+    whatsapp_auto_enabled: false,
+    whatsapp_primary_number: '',
+    whatsapp_secondary_number: '',
+  });
+  const [whatsappMeta, setWhatsappMeta] = useState({
+    last_sent_for_date: null,
+    last_sent_at: null,
+  });
+  const [whatsappSending, setWhatsappSending] = useState(false);
+  const [whatsappToast, setWhatsappToast] = useState(null);
   const [subscriptionForm, setSubscriptionForm] = useState({
     subscription_start_date: '',
     subscription_end_date: '',
@@ -97,6 +108,15 @@ export default function CompanySettingsPage() {
           name: data.name || '',
           phone: data.phone || '',
           address: data.address || '',
+        });
+        setWhatsappForm({
+          whatsapp_auto_enabled: Boolean(data.whatsapp_auto_enabled),
+          whatsapp_primary_number: data.whatsapp_primary_number || data.phone || '',
+          whatsapp_secondary_number: data.whatsapp_secondary_number || '',
+        });
+        setWhatsappMeta({
+          last_sent_for_date: data.whatsapp_last_sent_for_date || null,
+          last_sent_at: data.whatsapp_last_sent_at || null,
         });
         setSubscriptionForm({
           subscription_start_date: toDateInputValue(data.subscription_start_date),
@@ -171,6 +191,85 @@ export default function CompanySettingsPage() {
       setError(err.message || 'Failed to save company profile');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleWhatsappChange = (field) => (event) => {
+    const value =
+      field === 'whatsapp_auto_enabled' ? event.target.checked : event.target.value;
+    setWhatsappForm((prev) => ({ ...prev, [field]: value }));
+    if (whatsappToast) setWhatsappToast(null);
+  };
+
+  const handleSaveWhatsapp = async (event) => {
+    event.preventDefault();
+    if (saving) return;
+    try {
+      setSaving(true);
+      setError(null);
+      setWhatsappToast(null);
+      const res = await authFetch('/api/company', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...form,
+          whatsapp_auto_enabled: whatsappForm.whatsapp_auto_enabled,
+          whatsapp_primary_number: whatsappForm.whatsapp_primary_number.trim() || null,
+          whatsapp_secondary_number: whatsappForm.whatsapp_secondary_number.trim() || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to save WhatsApp settings');
+      }
+      const data = json.data || {};
+      setWhatsappForm({
+        whatsapp_auto_enabled: Boolean(data.whatsapp_auto_enabled),
+        whatsapp_primary_number: data.whatsapp_primary_number || data.phone || '',
+        whatsapp_secondary_number: data.whatsapp_secondary_number || '',
+      });
+      setWhatsappMeta({
+        last_sent_for_date: data.whatsapp_last_sent_for_date || null,
+        last_sent_at: data.whatsapp_last_sent_at || null,
+      });
+      setWhatsappToast({ type: 'success', message: 'WhatsApp settings saved' });
+    } catch (err) {
+      setWhatsappToast({ type: 'error', message: err.message || 'Failed to save' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSendWhatsappNow = async () => {
+    if (whatsappSending) return;
+    try {
+      setWhatsappSending(true);
+      setWhatsappToast(null);
+      const res = await authFetch('/api/company/whatsapp/send-now', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json.message || 'Failed to send WhatsApp message');
+      }
+      setWhatsappToast({
+        type: 'success',
+        message: json.message || 'Today’s attendance report was sent on WhatsApp',
+      });
+      const refresh = await authFetch('/api/company');
+      if (refresh.ok) {
+        const refreshJson = await refresh.json();
+        const data = refreshJson.data || {};
+        setWhatsappMeta({
+          last_sent_for_date: data.whatsapp_last_sent_for_date || null,
+          last_sent_at: data.whatsapp_last_sent_at || null,
+        });
+      }
+    } catch (err) {
+      setWhatsappToast({ type: 'error', message: err.message || 'Send failed' });
+    } finally {
+      setWhatsappSending(false);
     }
   };
 
@@ -405,6 +504,100 @@ export default function CompanySettingsPage() {
           </div>
         </form>
       </section>
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Daily WhatsApp attendance report</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Automatically send today&apos;s attendance summary via PunchPay WhatsApp at 11:00 AM
+            IST to the numbers below.
+          </p>
+          {whatsappToast && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-[11px] ${
+                whatsappToast.type === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-700'
+                  : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {whatsappToast.message}
+            </div>
+          )}
+          <form onSubmit={handleSaveWhatsapp} className="mt-4 space-y-4">
+            <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-slate-300"
+                checked={whatsappForm.whatsapp_auto_enabled}
+                onChange={handleWhatsappChange('whatsapp_auto_enabled')}
+                disabled={loading || saving}
+              />
+              <span>
+                <span className="font-medium">Enable automatic daily WhatsApp</span>
+                <span className="mt-0.5 block text-[11px] text-slate-500">
+                  Scheduled at 11:00 AM IST (server time). Uses Meta template{' '}
+                  <code className="text-[10px]">daily_attendance_update</code>.
+                </span>
+              </span>
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Primary WhatsApp number</label>
+                <input
+                  value={whatsappForm.whatsapp_primary_number}
+                  onChange={handleWhatsappChange('whatsapp_primary_number')}
+                  disabled={loading || saving}
+                  placeholder="+91 98765 43210"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                />
+                <p className="text-[10px] text-slate-500">
+                  Defaults to company phone if empty when saving profile.
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">
+                  Secondary WhatsApp number (optional)
+                </label>
+                <input
+                  value={whatsappForm.whatsapp_secondary_number}
+                  onChange={handleWhatsappChange('whatsapp_secondary_number')}
+                  disabled={loading || saving}
+                  placeholder="+91 optional second recipient"
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+                />
+              </div>
+            </div>
+            {whatsappMeta.last_sent_at && (
+              <p className="text-[11px] text-slate-500">
+                Last auto/manual send:{' '}
+                {formatDateLabel(whatsappMeta.last_sent_for_date)}
+                {whatsappMeta.last_sent_at
+                  ? ` · ${new Date(whatsappMeta.last_sent_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`
+                  : ''}
+              </p>
+            )}
+            <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="submit"
+                disabled={loading || saving}
+                className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save WhatsApp settings'}
+              </button>
+              <button
+                type="button"
+                disabled={loading || saving || whatsappSending}
+                onClick={() => {
+                  void handleSendWhatsappNow();
+                }}
+                className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-50"
+              >
+                {whatsappSending ? 'Sending…' : 'Send today’s report now'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       {isAdmin && (
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">

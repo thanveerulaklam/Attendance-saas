@@ -13,7 +13,8 @@
     "seed:testdata:fresh": "npm run migrate && npm run seed:testdata",
     "connector": "node ./scripts/biometric-connector.js",
     "connector:once": "node ./scripts/biometric-connector.js --once",
-    "import:employees:excel": "node ./scripts/import-employees-from-xlsx.js"
+    "import:employees:excel": "node ./scripts/import-employees-from-xlsx.js",
+    "whatsapp:daily": "node ./scripts/run-whatsapp-daily-job.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -36,6 +37,7 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
     "multer": "^2.1.1",
+    "node-cron": "^3.0.3",
     "nodemailer": "^8.0.4",
     "pg": "^8.12.0",
     "razorpay": "^2.9.6",

@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { normalizeWhatsAppNumber } = require('../utils/whatsappPhone');
 
 /**
  * Next AMC due date:
@@ -42,6 +43,8 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
   onetime_payment_status, amc_payment_status, last_onetime_payment_date,
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
+  whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
+  whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;
 
 async function getCompanyById(companyId) {
@@ -105,9 +108,53 @@ function isSubscriptionAllowed(company) {
 }
 
 async function updateCompany(companyId, data) {
-  const allowedFields = ['name', 'phone', 'address', 'paid_leave_forfeit_if_absence_gt'];
+  const allowedFields = [
+    'name',
+    'phone',
+    'address',
+    'paid_leave_forfeit_if_absence_gt',
+    'whatsapp_auto_enabled',
+    'whatsapp_primary_number',
+    'whatsapp_secondary_number',
+  ];
   const raw = data || {};
   const normalized = { ...raw };
+
+  if (Object.prototype.hasOwnProperty.call(normalized, 'whatsapp_auto_enabled')) {
+    normalized.whatsapp_auto_enabled = Boolean(normalized.whatsapp_auto_enabled);
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'whatsapp_primary_number')) {
+    const v = normalized.whatsapp_primary_number;
+    normalized.whatsapp_primary_number =
+      v === '' || v == null ? null : normalizeWhatsAppNumber(v) || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'whatsapp_secondary_number')) {
+    const v = normalized.whatsapp_secondary_number;
+    normalized.whatsapp_secondary_number =
+      v === '' || v == null ? null : normalizeWhatsAppNumber(v) || null;
+  }
+
+  if (normalized.whatsapp_auto_enabled === true) {
+    const existing = await getCompanyById(companyId);
+    const primary =
+      normalized.whatsapp_primary_number ??
+      (existing?.whatsapp_primary_number
+        ? normalizeWhatsAppNumber(existing.whatsapp_primary_number)
+        : null) ??
+      normalizeWhatsAppNumber(existing?.phone);
+    const secondary =
+      normalized.whatsapp_secondary_number ??
+      (existing?.whatsapp_secondary_number
+        ? normalizeWhatsAppNumber(existing.whatsapp_secondary_number)
+        : null);
+    if (!primary && !secondary) {
+      throw new AppError(
+        'Add a WhatsApp number (primary or company phone) before enabling auto-send',
+        400
+      );
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalized, 'paid_leave_forfeit_if_absence_gt')) {
     const v = normalized.paid_leave_forfeit_if_absence_gt;
     if (v === '' || v === null || typeof v === 'undefined') {

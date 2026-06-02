@@ -4,6 +4,7 @@ require('dotenv').config();
 const { validateEnv } = require('./src/config/validateEnv');
 const app = require('./src/app');
 const { testConnection } = require('./src/config/database');
+const { startDailyWhatsappStatsScheduler } = require('./src/jobs/dailyWhatsappStatsJob');
 
 validateEnv();
 
@@ -24,6 +25,7 @@ async function start() {
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    startDailyWhatsappStatsScheduler();
   });
 }
 
