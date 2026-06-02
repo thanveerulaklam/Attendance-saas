@@ -23,6 +23,23 @@ function todayIstYmd() {
   return new Date().toLocaleDateString('en-CA', { timeZone: IST });
 }
 
+function istYmdFromDate(d) {
+  return d.toLocaleDateString('en-CA', { timeZone: IST });
+}
+
+function istDateFromYmd(ymd) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  // Use midday to avoid DST/offset edge cases when converting back and forth.
+  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`);
+}
+
+function yesterdayIstYmdFrom(ymd) {
+  const dt = istDateFromYmd(ymd);
+  if (!dt) return todayIstYmd();
+  return istYmdFromDate(new Date(dt.getTime() - 24 * 60 * 60 * 1000));
+}
+
 function formatDateLongIstYmd(ymd) {
   const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return '—';
@@ -378,6 +395,68 @@ export default function ReportsPage() {
     }
   };
 
+  const handleDownloadYesterdayDayReportPdf = async () => {
+    const yesterdayYmd = yesterdayIstYmdFrom(dayReportDate);
+    try {
+      setLoading('yesterday-pdf');
+      setToast(null);
+
+      const params = new URLSearchParams({ date: yesterdayYmd });
+      if (dayReportDepartment) params.set('department', dayReportDepartment);
+
+      const res = await authFetch(`/api/attendance/daily?${params.toString()}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to load yesterday report (${res.status})`);
+      }
+
+      const json = await res.json();
+      const rows = Array.isArray(json.data) ? json.data : [];
+
+      const present = rows.filter((r) => r.present).length;
+      const late = rows.filter((r) => r.late).length;
+      const fullDay = rows.filter((r) => r.full_day).length;
+      const overtimeHours = rows.reduce((sum, r) => sum + (Number(r.overtime_hours) || 0), 0);
+
+      const summary = {
+        total: rows.length,
+        present,
+        absent: rows.length - present,
+        late,
+        fullDay,
+        overtimeHours: Math.round(overtimeHours * 100) / 100,
+      };
+
+      const absentees = rows.filter((r) => !r.present);
+      const lateComers = rows.filter((r) => r.late);
+
+      const companyRes = await authFetch('/api/company', {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
+
+      await generateDayWiseReportPdf({
+        company: companyJson.data || {},
+        filename: `daily-attendance-${yesterdayYmd}.pdf`,
+        dateLabel: formatDateLongIstYmd(yesterdayYmd),
+        departmentLabel: dayReportDepartment || null,
+        summary,
+        absentees,
+        lateComers,
+        allEmployees: rows,
+      });
+
+      setToast({ type: 'success', message: 'Yesterday report PDF downloaded' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'PDF generation failed' });
+    } finally {
+      setLoading(null);
+    }
+  };
+
   useEffect(() => {
     if (detailsModal !== 'payroll') return;
     let isMounted = true;
@@ -585,6 +664,16 @@ export default function ReportsPage() {
                 onChange={(e) => setDayReportDate(e.target.value)}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
               />
+              <button
+                type="button"
+                disabled={dayReportLoading || loading != null}
+                onClick={() => {
+                  void handleDownloadYesterdayDayReportPdf();
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
+              >
+                {loading === 'yesterday-pdf' ? 'Downloading...' : 'Yesterday PDF'}
+              </button>
             </div>
             <div className="flex items-center gap-2">
               <label className="text-[11px] font-medium text-slate-600">Department</label>
@@ -672,12 +761,12 @@ export default function ReportsPage() {
               ].map(({ key, label, value, card, labelCls, valueCls }) => (
                 <div
                   key={key}
-                  className={`rounded-lg border px-3 py-3 shadow-sm ${card}`}
+                  className={`rounded-lg border px-3 py-4 shadow-sm ${card}`}
                 >
-                  <p className={`text-[10px] font-medium uppercase tracking-wide ${labelCls}`}>
+                  <p className={`text-[11px] font-medium uppercase tracking-wide ${labelCls}`}>
                     {label}
                   </p>
-                  <p className={`mt-1 text-2xl font-semibold ${valueCls}`}>{value}</p>
+                  <p className={`mt-1 text-3xl font-semibold leading-none ${valueCls}`}>{value}</p>
                 </div>
               ))}
             </div>

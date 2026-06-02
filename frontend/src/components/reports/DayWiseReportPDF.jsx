@@ -35,8 +35,8 @@ function getDayTotalHours(row) {
   return '';
 }
 
-function sectionTitle(doc, y, text) {
-  doc.setFontSize(10);
+function sectionTitle(doc, y, text, fontSize = 10) {
+  doc.setFontSize(fontSize);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text(text, 24, y);
@@ -79,7 +79,8 @@ export async function generateDayWiseReportPdf({
     totalEmployees: summary.total,
   });
 
-  y = sectionTitle(doc, y, 'Summary');
+  // Make the PDF "Summary" section stand out more, while keeping other sections unchanged.
+  y = sectionTitle(doc, y, 'Summary', 12);
   y = tableAfterTitle(
     doc,
     [['Total', 'Present', 'Absent', 'Late', 'Full day', 'Overtime (h)']],
@@ -94,7 +95,10 @@ export async function generateDayWiseReportPdf({
       ],
     ],
     y,
-    { headStyles: { fillColor: [30, 64, 175] } }
+    {
+      headStyles: { fillColor: [30, 64, 175] },
+      styles: { fontSize: 10, cellPadding: 2.5 },
+    }
   );
 
   y = sectionTitle(doc, y, `Absentees (${absentees.length})`);
