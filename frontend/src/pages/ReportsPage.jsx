@@ -433,6 +433,73 @@ export default function ReportsPage() {
     }
   };
 
+  const handleSendYesterdayDayReportWhatsApp = async () => {
+    const yesterdayYmd = yesterdayIstYmdFrom(dayReportDate);
+    try {
+      setLoading('yesterday-whatsapp');
+      setToast(null);
+
+      const params = new URLSearchParams({ date: yesterdayYmd });
+      if (dayReportDepartment) params.set('department', dayReportDepartment);
+
+      const [attendanceRes, companyRes] = await Promise.all([
+        authFetch(`/api/attendance/daily?${params.toString()}`, {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+        authFetch('/api/company', {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ]);
+
+      if (!attendanceRes.ok) {
+        const err = await attendanceRes.json().catch(() => ({}));
+        throw new Error(err.message || `Failed to load yesterday stats (${attendanceRes.status})`);
+      }
+
+      const attendanceJson = await attendanceRes.json();
+      const rows = Array.isArray(attendanceJson.data) ? attendanceJson.data : [];
+
+      const present = rows.filter((r) => r.present).length;
+      const late = rows.filter((r) => r.late).length;
+      const fullDay = rows.filter((r) => r.full_day).length;
+      const overtimeHours = rows.reduce((sum, r) => sum + (Number(r.overtime_hours) || 0), 0);
+      const summary = {
+        total: rows.length,
+        present,
+        absent: rows.length - present,
+        late,
+        fullDay,
+        overtimeHours: Math.round(overtimeHours * 100) / 100,
+      };
+      const absentees = rows.filter((r) => !r.present);
+
+      const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
+      const company = companyJson.data || {};
+      const phone = normalizeWhatsAppNumber(company.phone);
+      if (!phone) {
+        throw new Error('Company phone is missing. Please update it in Company Settings.');
+      }
+
+      const shareText = buildDayWiseWhatsAppMessage({
+        companyName: company.name,
+        dateLabel: formatDateLongIstYmd(yesterdayYmd),
+        departmentLabel: dayReportDepartment || null,
+        summary,
+        absentees,
+      });
+      const opened = openWhatsAppChat(phone, shareText);
+      if (!opened) {
+        throw new Error('Unable to open WhatsApp for the company number.');
+      }
+      setToast({ type: 'success', message: 'WhatsApp opened with yesterday stats.' });
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+      setToast({ type: 'error', message: err.message || 'Failed to open WhatsApp' });
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const handleDownloadYesterdayDayReportPdf = async () => {
     const yesterdayYmd = yesterdayIstYmdFrom(dayReportDate);
     try {
@@ -997,6 +1064,18 @@ export default function ReportsPage() {
                 className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 shadow-sm hover:border-emerald-300 hover:bg-emerald-100 disabled:opacity-50"
               >
                 {loading === 'daily-whatsapp' ? 'Opening WhatsApp...' : 'Send on WhatsApp'}
+              </button>
+              <button
+                type="button"
+                disabled={loading != null}
+                onClick={() => {
+                  void handleSendYesterdayDayReportWhatsApp();
+                }}
+                className="inline-flex items-center rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-medium text-emerald-800 shadow-sm hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                {loading === 'yesterday-whatsapp'
+                  ? 'Opening WhatsApp...'
+                  : 'Send yesterday on WhatsApp'}
               </button>
               <p className="w-full text-[10px] text-slate-500">
                 Export includes summary stats, absentees list, late comers list, and all employees.
