@@ -16,6 +16,32 @@ function formatDateLabel(iso) {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+const WHATSAPP_SEND_MIN_HOUR = 6;
+const WHATSAPP_SEND_MAX_HOUR = 22;
+const WHATSAPP_SEND_DEFAULT_HOUR = 11;
+
+function hourFromWhatsappSendTime(timeLike) {
+  if (timeLike == null || timeLike === '') return WHATSAPP_SEND_DEFAULT_HOUR;
+  if (typeof timeLike === 'number' && Number.isFinite(timeLike)) {
+    return Math.trunc(timeLike);
+  }
+  const m = /^(\d{1,2})/.exec(String(timeLike).trim());
+  return m ? Number(m[1]) : WHATSAPP_SEND_DEFAULT_HOUR;
+}
+
+function formatWhatsappSendHourLabel(hour) {
+  const h = Number(hour);
+  if (!Number.isFinite(h)) return '';
+  const period = h < 12 ? 'AM' : 'PM';
+  const display = h % 12 === 0 ? 12 : h % 12;
+  return `${display}:00 ${period} IST`;
+}
+
+const WHATSAPP_SEND_HOUR_OPTIONS = Array.from(
+  { length: WHATSAPP_SEND_MAX_HOUR - WHATSAPP_SEND_MIN_HOUR + 1 },
+  (_, i) => WHATSAPP_SEND_MIN_HOUR + i
+);
+
 export default function CompanySettingsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -36,6 +62,7 @@ export default function CompanySettingsPage() {
     whatsapp_auto_enabled: false,
     whatsapp_primary_number: '',
     whatsapp_secondary_number: '',
+    whatsapp_send_time: WHATSAPP_SEND_DEFAULT_HOUR,
   });
   const [whatsappMeta, setWhatsappMeta] = useState({
     last_sent_for_date: null,
@@ -112,6 +139,7 @@ export default function CompanySettingsPage() {
           whatsapp_auto_enabled: Boolean(data.whatsapp_auto_enabled),
           whatsapp_primary_number: data.whatsapp_primary_number || data.phone || '',
           whatsapp_secondary_number: data.whatsapp_secondary_number || '',
+          whatsapp_send_time: hourFromWhatsappSendTime(data.whatsapp_send_time),
         });
         setWhatsappMeta({
           last_sent_for_date: data.whatsapp_last_sent_for_date || null,
@@ -215,6 +243,7 @@ export default function CompanySettingsPage() {
           whatsapp_auto_enabled: whatsappForm.whatsapp_auto_enabled,
           whatsapp_primary_number: whatsappForm.whatsapp_primary_number.trim() || null,
           whatsapp_secondary_number: whatsappForm.whatsapp_secondary_number.trim() || null,
+          whatsapp_send_time: Number(whatsappForm.whatsapp_send_time),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -226,6 +255,7 @@ export default function CompanySettingsPage() {
         whatsapp_auto_enabled: Boolean(data.whatsapp_auto_enabled),
         whatsapp_primary_number: data.whatsapp_primary_number || data.phone || '',
         whatsapp_secondary_number: data.whatsapp_secondary_number || '',
+        whatsapp_send_time: hourFromWhatsappSendTime(data.whatsapp_send_time),
       });
       setWhatsappMeta({
         last_sent_for_date: data.whatsapp_last_sent_for_date || null,
@@ -475,8 +505,8 @@ export default function CompanySettingsPage() {
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
           <h2 className="text-sm font-semibold text-slate-900">Daily WhatsApp attendance report</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            Automatically send today&apos;s attendance summary via PunchPay WhatsApp at 11:00 AM
-            IST to the numbers below.
+            Automatically send today&apos;s attendance summary via PunchPay WhatsApp at your
+            chosen hour (IST) to the numbers below.
           </p>
           {whatsappToast && (
             <div
@@ -501,11 +531,26 @@ export default function CompanySettingsPage() {
               <span>
                 <span className="font-medium">Enable automatic daily WhatsApp</span>
                 <span className="mt-0.5 block text-[11px] text-slate-500">
-                  Scheduled at 11:00 AM IST (server time). Uses Meta template{' '}
+                  Sends once per day at the hour you choose (IST). Uses Meta template{' '}
                   <code className="text-[10px]">daily_attendance_update</code>.
                 </span>
               </span>
             </label>
+            <div className="space-y-1 max-w-xs">
+              <label className="text-xs font-medium text-slate-700">Daily send time (IST)</label>
+              <select
+                value={whatsappForm.whatsapp_send_time}
+                onChange={handleWhatsappChange('whatsapp_send_time')}
+                disabled={loading || saving}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+              >
+                {WHATSAPP_SEND_HOUR_OPTIONS.map((hour) => (
+                  <option key={hour} value={hour}>
+                    {formatWhatsappSendHourLabel(hour)}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-slate-700">Primary WhatsApp number</label>

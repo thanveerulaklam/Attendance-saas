@@ -84,6 +84,7 @@ async function updateCurrentCompany(req, res, next) {
       whatsapp_auto_enabled: req.body.whatsapp_auto_enabled,
       whatsapp_primary_number: req.body.whatsapp_primary_number,
       whatsapp_secondary_number: req.body.whatsapp_secondary_number,
+      whatsapp_send_time: req.body.whatsapp_send_time,
     });
 
     if (!updated) {

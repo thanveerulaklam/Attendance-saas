@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { normalizeWhatsAppNumber } = require('../utils/whatsappPhone');
+const { normalizeWhatsappSendTime } = require('../utils/whatsappSendTime');
 
 /**
  * Next AMC due date:
@@ -44,7 +45,7 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   onetime_payment_status, amc_payment_status, last_onetime_payment_date,
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
   whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
-  whatsapp_last_sent_for_date, whatsapp_last_sent_at,
+  whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;
 
 async function getCompanyById(companyId) {
@@ -116,6 +117,7 @@ async function updateCompany(companyId, data) {
     'whatsapp_auto_enabled',
     'whatsapp_primary_number',
     'whatsapp_secondary_number',
+    'whatsapp_send_time',
   ];
   const raw = data || {};
   const normalized = { ...raw };
@@ -132,6 +134,13 @@ async function updateCompany(companyId, data) {
     const v = normalized.whatsapp_secondary_number;
     normalized.whatsapp_secondary_number =
       v === '' || v == null ? null : normalizeWhatsAppNumber(v) || null;
+  }
+  if (Object.prototype.hasOwnProperty.call(normalized, 'whatsapp_send_time')) {
+    try {
+      normalized.whatsapp_send_time = normalizeWhatsappSendTime(normalized.whatsapp_send_time);
+    } catch (err) {
+      throw new AppError(err.message, 400);
+    }
   }
 
   if (normalized.whatsapp_auto_enabled === true) {
