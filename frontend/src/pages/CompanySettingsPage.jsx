@@ -69,6 +69,9 @@ export default function CompanySettingsPage() {
     last_sent_at: null,
   });
   const [whatsappToast, setWhatsappToast] = useState(null);
+  const [shiftRotationEnabled, setShiftRotationEnabled] = useState(false);
+  const [shiftRotationSaving, setShiftRotationSaving] = useState(false);
+  const [shiftRotationToast, setShiftRotationToast] = useState(null);
   const [subscriptionForm, setSubscriptionForm] = useState({
     subscription_start_date: '',
     subscription_end_date: '',
@@ -145,6 +148,7 @@ export default function CompanySettingsPage() {
           last_sent_for_date: data.whatsapp_last_sent_for_date || null,
           last_sent_at: data.whatsapp_last_sent_at || null,
         });
+        setShiftRotationEnabled(Boolean(data.enable_shift_rotation));
         setSubscriptionForm({
           subscription_start_date: toDateInputValue(data.subscription_start_date),
           subscription_end_date: toDateInputValue(data.subscription_end_date),
@@ -266,6 +270,43 @@ export default function CompanySettingsPage() {
       setWhatsappToast({ type: 'error', message: err.message || 'Failed to save' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleShiftRotation = async (nextEnabled) => {
+    const turningOn = nextEnabled && !shiftRotationEnabled;
+    const turningOff = !nextEnabled && shiftRotationEnabled;
+    if (turningOn) {
+      const ok = window.confirm(
+        'Enable factory shift rotation? This adds dated shift assignments and rotation tools on the Shifts page. Use only for factories with day/night rotating shifts.'
+      );
+      if (!ok) return;
+    }
+    if (turningOff) {
+      const ok = window.confirm(
+        'Turn off factory shift rotation? The Shifts page will hide rotation tools and attendance will use each employee\'s current shift only. Assignment history is kept.'
+      );
+      if (!ok) return;
+    }
+    try {
+      setShiftRotationSaving(true);
+      setShiftRotationToast(null);
+      const res = await authFetch('/api/company', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable_shift_rotation: nextEnabled }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save setting');
+      setShiftRotationEnabled(Boolean(json.data?.enable_shift_rotation));
+      setShiftRotationToast({
+        type: 'success',
+        message: nextEnabled ? 'Factory shift rotation enabled.' : 'Factory shift rotation disabled.',
+      });
+    } catch (err) {
+      setShiftRotationToast({ type: 'error', message: err.message || 'Failed to save' });
+    } finally {
+      setShiftRotationSaving(false);
     }
   };
 
@@ -500,6 +541,51 @@ export default function CompanySettingsPage() {
           </div>
         </form>
       </section>
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Factory shift rotation</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            For factories with day and night shifts that rotate every few weeks. Leave off for
+            offices and single-shift businesses — your existing shift setup stays unchanged.
+          </p>
+          {shiftRotationToast && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-[11px] ${
+                shiftRotationToast.type === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-700'
+                  : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {shiftRotationToast.message}
+            </div>
+          )}
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={shiftRotationEnabled}
+              onChange={(e) => handleToggleShiftRotation(e.target.checked)}
+              disabled={loading || shiftRotationSaving}
+            />
+            <span>
+              <span className="font-medium">Enable shift rotation</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                Shows Assignments and Rotation tabs on the Shifts page and tracks which shift
+                each employee was on for each date.
+              </span>
+            </span>
+          </label>
+          {shiftRotationEnabled && (
+            <p className="mt-3 text-[11px]">
+              <a href="/shifts" className="font-medium text-blue-600 hover:underline">
+                Go to Shifts →
+              </a>{' '}
+              create Day/Night templates and manage rotations.
+            </p>
+          )}
+        </section>
+      )}
 
       {isAdmin && (
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">

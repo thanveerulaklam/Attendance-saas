@@ -8,6 +8,7 @@ const {
   istMinutesFromMidnight,
   SQL_PUNCH_IST_DATE,
 } = require('../utils/istDate');
+const { resolveEffectiveShiftIdsForDate } = require('./shiftResolverService');
 
 // Company timezone for shift/late calculations. Server may run in UTC, but punches and shifts are in company local time.
 // Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
@@ -715,10 +716,15 @@ async function getDailyAttendance(
       return [];
     }
 
-    const shiftConfigMap = await getShiftConfigMap(
+    const effectiveShiftIds = await resolveEffectiveShiftIdsForDate(
+      client,
       companyId,
-      employees.map((e) => e.shift_id)
+      employees,
+      dateStr
     );
+
+    const allShiftIds = employees.map((e) => effectiveShiftIds.get(Number(e.id)) ?? e.shift_id);
+    const shiftConfigMap = await getShiftConfigMap(companyId, allShiftIds);
 
     const ids = employees.map((e) => e.id);
 
@@ -762,8 +768,9 @@ async function getDailyAttendance(
     }
 
     return employees.map((emp) => {
+      const effectiveShiftId = effectiveShiftIds.get(Number(emp.id)) ?? emp.shift_id;
       const shiftConfig =
-        shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
+        shiftConfigMap.get(effectiveShiftId) || shiftConfigMap.get(null);
       let rawDayLogs = logsByEmployee.get(emp.id) || [];
       if (
         shiftConfig.isOvernightClock &&

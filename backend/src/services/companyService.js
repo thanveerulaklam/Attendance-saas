@@ -1,7 +1,10 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { normalizeWhatsAppNumber } = require('../utils/whatsappPhone');
-const { normalizeWhatsappSendTime } = require('../utils/whatsappSendTime');
+const {
+  clearShiftRotationFlagCache,
+  backfillInitialAssignments,
+} = require('./shiftRotationPolicyService');
 
 /**
  * Next AMC due date:
@@ -44,6 +47,7 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
   onetime_payment_status, amc_payment_status, last_onetime_payment_date,
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
+  enable_shift_rotation,
   whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
   whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;
@@ -118,6 +122,7 @@ async function updateCompany(companyId, data) {
     'whatsapp_primary_number',
     'whatsapp_secondary_number',
     'whatsapp_send_time',
+    'enable_shift_rotation',
   ];
   const raw = data || {};
   const normalized = { ...raw };
@@ -164,6 +169,10 @@ async function updateCompany(companyId, data) {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(normalized, 'enable_shift_rotation')) {
+    normalized.enable_shift_rotation = Boolean(normalized.enable_shift_rotation);
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalized, 'paid_leave_forfeit_if_absence_gt')) {
     const v = normalized.paid_leave_forfeit_if_absence_gt;
     if (v === '' || v === null || typeof v === 'undefined') {
@@ -185,6 +194,11 @@ async function updateCompany(companyId, data) {
     return getCompanyById(companyId);
   }
 
+  const turningOn =
+    Object.prototype.hasOwnProperty.call(normalized, 'enable_shift_rotation') &&
+    normalized.enable_shift_rotation === true;
+  const existingBeforeUpdate = turningOn ? await getCompanyById(companyId) : null;
+
   const fields = [];
   const values = [companyId];
   let paramIndex = 2;
@@ -202,6 +216,12 @@ async function updateCompany(companyId, data) {
      RETURNING ${COMPANY_SELECT}`,
     values
   );
+
+  clearShiftRotationFlagCache(companyId);
+
+  if (turningOn && existingBeforeUpdate?.enable_shift_rotation !== true) {
+    await backfillInitialAssignments(companyId);
+  }
 
   return result.rows[0] || null;
 }

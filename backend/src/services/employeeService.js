@@ -1,5 +1,8 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
+const { assignShiftBulk } = require('./shiftAssignmentService');
+const { todayIstYmd } = require('../utils/istDate');
 const {
   validateCreateEmployee,
   validateUpdateEmployee,
@@ -249,7 +252,19 @@ async function createEmployee(companyId, data, branchContext = {}) {
       ]
     );
 
-    return result.rows[0];
+    const created = result.rows[0];
+
+    if (shiftId && (await isShiftRotationEnabled(companyId))) {
+      await assignShiftBulk(companyId, {
+        employeeIds: [created.id],
+        shiftId,
+        effectiveFrom: payload.join_date || todayIstYmd(),
+        source: 'manual',
+        notes: 'Initial assignment on hire',
+      });
+    }
+
+    return created;
   } catch (err) {
     if (err.code === '23505') {
       throw new AppError('Employee code already exists for this company', 409);
@@ -402,7 +417,22 @@ async function updateEmployee(companyId, id, data, branchContext = {}) {
     }
 
     await client.query('COMMIT');
-    return result.rows[0];
+    const updated = result.rows[0];
+
+    if (
+      updates.shift_id != null &&
+      (await isShiftRotationEnabled(companyId))
+    ) {
+      await assignShiftBulk(companyId, {
+        employeeIds: [id],
+        shiftId: updates.shift_id,
+        effectiveFrom: todayIstYmd(),
+        source: 'manual',
+        notes: 'Updated from employee form',
+      });
+    }
+
+    return updated;
   } catch (err) {
     await client.query('ROLLBACK');
     if (err.code === '23505') {

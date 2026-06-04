@@ -39,6 +39,8 @@ export default function EmployeeFormModal({
   const [branches, setBranches] = useState([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [monthlyOnlyPayroll, setMonthlyOnlyPayroll] = useState(false);
+  const [factoryShiftRotation, setFactoryShiftRotation] = useState(false);
+  const [currentAssignment, setCurrentAssignment] = useState(null);
 
 
   const [errors, setErrors] = useState({});
@@ -68,8 +70,14 @@ export default function EmployeeFormModal({
 
       authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
         .then((res) => (res.ok ? res.json() : null))
-        .then((json) => setMonthlyOnlyPayroll(json?.data?.shifts_compact_ui === true))
-        .catch(() => setMonthlyOnlyPayroll(false));
+        .then((json) => {
+          setMonthlyOnlyPayroll(json?.data?.shifts_compact_ui === true);
+          setFactoryShiftRotation(json?.data?.enable_shift_rotation === true);
+        })
+        .catch(() => {
+          setMonthlyOnlyPayroll(false);
+          setFactoryShiftRotation(false);
+        });
     }
   }, [open]);
 
@@ -136,6 +144,17 @@ export default function EmployeeFormModal({
       setToast(null);
     }
   }, [open, employee]);
+
+  useEffect(() => {
+    if (!open || !factoryShiftRotation || !employee?.id) {
+      setCurrentAssignment(null);
+      return;
+    }
+    authFetch(`/api/shift-rotation/assignments/employee/${employee.id}/current`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setCurrentAssignment(json?.data || null))
+      .catch(() => setCurrentAssignment(null));
+  }, [open, factoryShiftRotation, employee?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -700,6 +719,18 @@ export default function EmployeeFormModal({
                 ))}
               </select>
             </label>
+            {factoryShiftRotation && currentAssignment && (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Current: {currentAssignment.shift_name} (from{' '}
+                {String(currentAssignment.effective_from).slice(0, 10)}). Changing shift creates a
+                new assignment from today.
+              </p>
+            )}
+            {factoryShiftRotation && !currentAssignment && isEdit && (
+              <p className="mt-1 text-[11px] text-slate-500">
+                Changing shift creates a dated assignment from today.
+              </p>
+            )}
             {errors.shift_id && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.shift_id}</p>
             )}

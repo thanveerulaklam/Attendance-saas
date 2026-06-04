@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { authFetch } from '../utils/api';
+import ShiftAssignmentsPanel from '../components/shifts/ShiftAssignmentsPanel';
+import ShiftRotationPanel from '../components/shifts/ShiftRotationPanel';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -100,6 +102,8 @@ export default function ShiftsPage() {
   const hoursBasedOnly = company?.hours_based_shifts_only === true;
   /** Tharagai Readymades (and any company with `shifts_compact_ui`): simplified shifts + neutral legacy columns server-side. */
   const shiftsCompactUi = company?.shifts_compact_ui === true;
+  const factoryMode = company?.enable_shift_rotation === true;
+  const [activeTab, setActiveTab] = useState('templates');
   /** Company policy: absent days above this → paid leave from shift not applied (editable). */
   const [plForfeitGt, setPlForfeitGt] = useState('');
   const [savingPlPolicy, setSavingPlPolicy] = useState(false);
@@ -341,6 +345,32 @@ export default function ShiftsPage() {
     }
   };
 
+  const applyShiftPreset = (preset) => {
+    if (preset === 'day') {
+      setForm((prev) => ({
+        ...prev,
+        shift_name: prev.shift_name || 'Day Shift',
+        start_time: '09:00',
+        end_time: '21:00',
+        attendance_mode: hoursBasedOnly ? 'hours_based' : 'day_based',
+        required_hours_per_day: 11,
+        full_day_hours: 11,
+        half_day_hours: 5.5,
+      }));
+    } else if (preset === 'night') {
+      setForm((prev) => ({
+        ...prev,
+        shift_name: prev.shift_name || 'Night Shift',
+        start_time: '21:00',
+        end_time: '09:00',
+        attendance_mode: 'hours_based',
+        required_hours_per_day: 11,
+        full_day_hours: 11,
+        half_day_hours: 5.5,
+      }));
+    }
+  };
+
   return (
     <div className="space-y-4">
       <header>
@@ -357,6 +387,36 @@ export default function ShiftsPage() {
         )}
       </header>
 
+      {factoryMode && (
+        <div className="flex flex-wrap gap-2 border-b border-slate-100 pb-1">
+          {[
+            { id: 'templates', label: 'Templates' },
+            { id: 'assignments', label: 'Assignments' },
+            { id: 'rotation', label: 'Rotation' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`rounded-t-lg px-4 py-2 text-xs font-medium ${
+                activeTab === tab.id
+                  ? 'bg-white text-blue-700 shadow-sm border border-b-0 border-slate-100'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {factoryMode && activeTab === 'assignments' && (
+        <ShiftAssignmentsPanel shifts={shifts} />
+      )}
+
+      {factoryMode && activeTab === 'rotation' && <ShiftRotationPanel shifts={shifts} />}
+
+      {( !factoryMode || activeTab === 'templates') && (
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft transition-shadow duration-200 hover:shadow-md">
         {error && (
           <div className="mb-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
@@ -371,6 +431,24 @@ export default function ShiftsPage() {
           >
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-medium text-slate-700">Add shift</p>
+              {factoryMode && (
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => applyShiftPreset('day')}
+                    className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50"
+                  >
+                    Day 9–21
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyShiftPreset('night')}
+                    className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50"
+                  >
+                    Night 21–9
+                  </button>
+                </div>
+              )}
             </div>
             <div className="space-y-2">
               <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
@@ -1031,6 +1109,7 @@ export default function ShiftsPage() {
           </div>
         </div>
       </section>
+      )}
 
       {editingShift && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true" aria-labelledby="edit-shift-title">

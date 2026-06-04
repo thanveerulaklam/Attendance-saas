@@ -9,6 +9,8 @@ const {
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted } = require('./advanceLoanService');
+const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
+const { resolveShiftIdForEmployeeOnDate } = require('./shiftAssignmentService');
 const {
   computeMonthlyBaseAndAbsence,
   computePermissionOffset,
@@ -199,13 +201,28 @@ async function getDefaultShiftForCompany(client, companyId) {
 
 /**
  * Get shift config for an employee. Uses employee's assigned shift_id if set, else company default.
+ * When rotation is enabled and dateStr is provided, resolves shift for that calendar date.
  */
-async function getShiftForEmployee(client, companyId, employeeId) {
+async function getShiftForEmployee(client, companyId, employeeId, dateStr = null) {
   const empResult = await client.query(
     `SELECT shift_id FROM employees WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
   );
-  const shiftId = empResult.rowCount > 0 ? empResult.rows[0].shift_id : null;
+  const fallbackShiftId = empResult.rowCount > 0 ? empResult.rows[0].shift_id : null;
+
+  let shiftId = fallbackShiftId;
+  if (dateStr) {
+    const rotationEnabled = await isShiftRotationEnabled(companyId);
+    if (rotationEnabled) {
+      shiftId = await resolveShiftIdForEmployeeOnDate(
+        client,
+        companyId,
+        employeeId,
+        dateStr,
+        fallbackShiftId
+      );
+    }
+  }
 
   if (shiftId) {
     let result;
@@ -301,6 +318,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     const monthLastStr = `${year}-${String(month).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
+    const rotationEnabled = await isShiftRotationEnabled(companyId);
 
     const companyPlResult = await client.query(
       `SELECT paid_leave_forfeit_if_absence_gt, shifts_compact_ui FROM companies WHERE id = $1`,
@@ -390,7 +408,6 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     // Hours-based mode: payroll is hour-ratio based for all companies.
     // No half-day/full-day buckets are used; each day contributes workedHours/requiredHours.
     if (shift.attendanceMode === 'hours_based') {
-      const required = Number(shift.requiredHoursPerDay || 8);
       const dayDetails = [];
 
       let rawAbsenceDays = 0;
@@ -404,6 +421,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         if (dayKey > lastDateToConsider) {
           break;
         }
+        const dayShift = rotationEnabled
+          ? await getShiftForEmployee(client, companyId, employeeId, dayKey)
+          : shift;
+        const required = Number(dayShift.requiredHoursPerDay || 8);
         const isHoliday = holidaySet.has(dayKey);
         const dayLogs = logsByDay.get(dayKey) || [];
 
@@ -424,7 +445,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         }
 
         const sorted = normalizePayrollDayLogs(dayLogs);
-        const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, shift, dayKey);
+        const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, dayShift, dayKey);
         const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
         const presentFraction = required > 0 ? workedHoursCapped / required : 0;
@@ -455,10 +476,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
             y,
             mo,
             dNum,
-            shift.startHour,
-            shift.startMinute
+            dayShift.startHour,
+            dayShift.startMinute
           );
-          const allowedStartMs = shiftStartMs + shift.graceMs;
+          const allowedStartMs = shiftStartMs + dayShift.graceMs;
           if (firstInTime.getTime() > allowedStartMs) {
             isLate = true;
             const diffMs = firstInTime.getTime() - allowedStartMs;
@@ -523,23 +544,24 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       );
       let paidLeaveUsed = Math.min(paidLeaveDaysAllowed, rawAbsenceDays);
       let absenceDays = Math.max(0, rawAbsenceDays - paidLeaveUsed);
+      const defaultRequired = Number(shift.requiredHoursPerDay || 8);
       // Hours-based payroll always applies paid leave against shortfall hours.
-      const rawAbsenceDaysByHours = required > 0 ? rawAbsenceHours / required : 0;
+      const rawAbsenceDaysByHours = defaultRequired > 0 ? rawAbsenceHours / defaultRequired : 0;
       paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
         shift.paidLeaveDays,
         rawAbsenceDaysByHours,
         plForfeitIfAbsenceGt
       );
-      const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * required);
+      const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * defaultRequired);
       const paidLeaveHoursUsed = Math.min(paidLeaveHoursAllowed, rawAbsenceHours);
-      paidLeaveUsed = required > 0 ? paidLeaveHoursUsed / required : 0;
-      absenceDays = required > 0 ? Math.max(0, rawAbsenceHours - paidLeaveHoursUsed) / required : 0;
+      paidLeaveUsed = defaultRequired > 0 ? paidLeaveHoursUsed / defaultRequired : 0;
+      absenceDays = defaultRequired > 0 ? Math.max(0, rawAbsenceHours - paidLeaveHoursUsed) / defaultRequired : 0;
       rawAbsenceDays = rawAbsenceDaysByHours;
       const unusedPaidLeaveDaysRaw = Math.max(
         0,
         Number(paidLeaveDaysAllowed || 0) - Number(paidLeaveUsed || 0)
       );
-      const unusedPaidLeaveHoursRaw = Math.max(0, unusedPaidLeaveDaysRaw * required);
+      const unusedPaidLeaveHoursRaw = Math.max(0, unusedPaidLeaveDaysRaw * defaultRequired);
       const unusedPaidLeaveDays = Number(unusedPaidLeaveDaysRaw.toFixed(2));
       const unusedPaidLeaveHours = Number(unusedPaidLeaveHoursRaw.toFixed(2));
       const unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
