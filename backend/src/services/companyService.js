@@ -198,10 +198,13 @@ async function updateCompany(companyId, data) {
     return getCompanyById(companyId);
   }
 
-  const turningOn =
+  const enablingRotation =
     Object.prototype.hasOwnProperty.call(normalized, 'enable_shift_rotation') &&
     normalized.enable_shift_rotation === true;
-  const existingBeforeUpdate = turningOn ? await getCompanyById(companyId) : null;
+
+  if (enablingRotation) {
+    await backfillInitialAssignments(companyId);
+  }
 
   const fields = [];
   const values = [companyId];
@@ -222,10 +225,6 @@ async function updateCompany(companyId, data) {
   );
 
   clearShiftRotationFlagCache(companyId);
-
-  if (turningOn && existingBeforeUpdate?.enable_shift_rotation !== true) {
-    await backfillInitialAssignments(companyId);
-  }
 
   return result.rows[0] || null;
 }

@@ -20,6 +20,17 @@ function todayIstYmd() {
   return new Date().toLocaleDateString('en-CA', { timeZone: IST });
 }
 
+/** Normalize PostgreSQL DATE / timestamptz / string to YYYY-MM-DD for SQL ::date casts. */
+function pgDateToYmd(value) {
+  if (value == null || value === '') return todayIstYmd();
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return istYmdFromDate(value);
+  }
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(value).trim());
+  if (m) return m[1];
+  return todayIstYmd();
+}
+
 /**
  * IST calendar day as UTC instants: [start, end) where end is start of next IST day.
  * @param {string} ymd - YYYY-MM-DD
@@ -67,6 +78,7 @@ module.exports = {
   istYmdFromDate,
   istYmdParts,
   todayIstYmd,
+  pgDateToYmd,
   istDayBounds,
   addDaysIst,
   istMinutesFromMidnight,

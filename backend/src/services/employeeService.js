@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
 const { assignShiftBulk } = require('./shiftAssignmentService');
-const { todayIstYmd } = require('../utils/istDate');
+const { todayIstYmd, pgDateToYmd } = require('../utils/istDate');
 const {
   validateCreateEmployee,
   validateUpdateEmployee,
@@ -258,7 +258,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
       await assignShiftBulk(companyId, {
         employeeIds: [created.id],
         shiftId,
-        effectiveFrom: payload.join_date || todayIstYmd(),
+        effectiveFrom: pgDateToYmd(payload.join_date),
         source: 'manual',
         notes: 'Initial assignment on hire',
       });

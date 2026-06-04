@@ -1,6 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
-const { todayIstYmd } = require('../utils/istDate');
+const { todayIstYmd, pgDateToYmd } = require('../utils/istDate');
 
 const flagCache = new Map();
 
@@ -57,9 +57,7 @@ async function backfillInitialAssignments(companyId, createdBy = null) {
       const shiftId = emp.shift_id ?? defaultShiftId;
       if (!shiftId) continue;
       const effectiveFrom =
-        emp.join_date != null
-          ? String(emp.join_date).slice(0, 10)
-          : todayIstYmd();
+        emp.join_date != null ? pgDateToYmd(emp.join_date) : todayIstYmd();
       await client.query(
         `INSERT INTO employee_shift_assignments
            (company_id, employee_id, shift_id, effective_from, source, created_by)
@@ -79,8 +77,16 @@ async function backfillInitialAssignments(companyId, createdBy = null) {
     await client.query('COMMIT');
     return { inserted, skipped: false };
   } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore rollback errors */
+    }
+    const wrapped = new Error(
+      err?.message || 'Failed to initialize shift assignments'
+    );
+    wrapped.statusCode = 500;
+    throw wrapped;
   } finally {
     client.release();
   }
