@@ -10,6 +10,15 @@ import {
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 import { formatIstTime, IST } from '../utils/istDisplay';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../utils/whatsapp';
+import {
+  computeRegularOffenders,
+  DayReportCharts,
+  MonthOverviewCharts,
+  RegularOffendersCharts,
+  RegularOffendersPanel,
+  ReportsPageHero,
+  SectionShell,
+} from '../components/reports/ReportsInsights';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -190,6 +199,7 @@ export default function ReportsPage() {
   const [dayReportData, setDayReportData] = useState([]);
   const [dayReportLoading, setDayReportLoading] = useState(false);
   const [dayReportFormat, setDayReportFormat] = useState('csv');
+  const [monthlyAttendanceEmployees, setMonthlyAttendanceEmployees] = useState([]);
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -251,22 +261,31 @@ export default function ReportsPage() {
           page: '1',
           limit: '500',
         });
-        const [employeesRes, payrollRes] = await Promise.all([
+        const attendanceParams = new URLSearchParams({
+          year: String(currentMonthYear),
+          month: String(currentMonthNumber),
+        });
+        const [employeesRes, payrollRes, attendanceRes] = await Promise.all([
           authFetch('/api/employees?limit=500', {
             headers: { 'Content-Type': 'application/json' },
           }),
           authFetch(`/api/payroll?${summaryParams.toString()}`, {
             headers: { 'Content-Type': 'application/json' },
           }),
+          authFetch(`/api/attendance/monthly?${attendanceParams.toString()}`, {
+            headers: { 'Content-Type': 'application/json' },
+          }),
         ]);
 
         const employeesJson = employeesRes.ok ? await employeesRes.json() : { data: { data: [] } };
         const payrollJson = payrollRes.ok ? await payrollRes.json() : { data: { data: [] } };
+        const attendanceJson = attendanceRes.ok ? await attendanceRes.json() : { data: { employees: [] } };
 
         if (!isMounted) return;
         const activeEmployees = (employeesJson.data?.data || []).filter((emp) => emp.status === 'active');
         setPayrollEmployees(activeEmployees);
         setCurrentMonthPayrollRows(payrollJson.data?.data || []);
+        setMonthlyAttendanceEmployees(attendanceJson.data?.employees || []);
       } finally {
         if (isMounted) setSummaryLoading(false);
       }
@@ -282,6 +301,30 @@ export default function ReportsPage() {
     () => (currentMonthPayrollRows || []).reduce((sum, row) => sum + (Number(row.net_salary) || 0), 0),
     [currentMonthPayrollRows]
   );
+
+  const monthRegularOffenders = useMemo(
+    () =>
+      computeRegularOffenders(
+        monthlyAttendanceEmployees,
+        currentDay,
+        '',
+        employees
+      ),
+    [monthlyAttendanceEmployees, currentDay, employees]
+  );
+
+  const daySectionRegularOffenders = useMemo(
+    () =>
+      computeRegularOffenders(
+        monthlyAttendanceEmployees,
+        currentDay,
+        dayReportDepartment,
+        employees
+      ),
+    [monthlyAttendanceEmployees, currentDay, dayReportDepartment, employees]
+  );
+
+  const monthRegularPeriodLabel = `Month to date — ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} (through day ${currentDay})`;
   const payrollModalTotalPages = Math.max(1, Math.ceil(payrollModalTotal / PAYROLL_MODAL_PAGE_SIZE));
 
   useEffect(() => {
@@ -679,8 +722,11 @@ export default function ReportsPage() {
     }
   };
 
+  const selectedMonthLabel = MONTHS.find((m) => m.value === month)?.label || '';
+  const heroDayLabel = formatDateLongIstYmd(dayReportDate);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {toast && (
         <div className="fixed inset-x-3 top-20 z-30 sm:inset-x-auto sm:right-6">
           <div
@@ -706,31 +752,33 @@ export default function ReportsPage() {
         </div>
       )}
 
-      <header>
-        <h1 className="text-lg font-semibold text-slate-900">Reports</h1>
-        <p className="text-xs text-slate-500">
-          View a full day&apos;s attendance or export monthly attendance, payroll, and overtime.
-        </p>
-      </header>
+      <ReportsPageHero
+        monthLabel={MONTHS.find((m) => m.value === currentMonthNumber)?.label || ''}
+        year={currentMonthYear}
+        dayLabel={heroDayLabel}
+      />
 
-      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
-        <h2 className="text-sm font-semibold text-slate-900">Current month overview</h2>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          Live summary for {MONTHS.find((m) => m.value === currentMonthNumber)?.label} {currentMonthYear} up to day {currentDay}.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+      <SectionShell
+        badge="Executive summary"
+        title="Current month overview"
+        description={`Live summary for ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} up to day ${currentDay}.`}
+        accent="blue"
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <button
             type="button"
             onClick={() => setDetailsModal('employees')}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-primary-200 hover:bg-primary-50"
+            className="group rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 px-4 py-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md"
           >
-            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
               Employees under payroll
             </p>
-            <p className="mt-1 text-2xl font-semibold text-slate-900">
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
               {summaryLoading ? '...' : payrollEmployees.length}
             </p>
-            <p className="mt-1 text-[11px] text-slate-500">Click to view employee details</p>
+            <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
+              View employee details →
+            </p>
           </button>
           <button
             type="button"
@@ -738,27 +786,44 @@ export default function ReportsPage() {
               setPayrollModalPage(1);
               setDetailsModal('payroll');
             }}
-            className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-left shadow-sm transition hover:border-primary-200 hover:bg-primary-50"
+            className="group rounded-xl border border-slate-200 bg-gradient-to-br from-white to-primary-50/30 px-4 py-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md"
           >
-            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
               Payroll total (month to date)
             </p>
-            <p className="mt-1 text-2xl font-semibold text-slate-900">
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
               {summaryLoading ? '...' : `₹${formatMoney(currentMonthPayrollTotal)}`}
             </p>
-            <p className="mt-1 text-[11px] text-slate-500">Click to view payroll breakdown</p>
+            <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
+              View payroll breakdown →
+            </p>
           </button>
         </div>
-      </section>
+        <div className="mt-5">
+          <MonthOverviewCharts payrollRows={currentMonthPayrollRows} loading={summaryLoading} />
+        </div>
+        <div className="mt-6 space-y-4">
+          <RegularOffendersCharts
+            regularLateComers={monthRegularOffenders.regularLateComers}
+            regularAbsentees={monthRegularOffenders.regularAbsentees}
+            loading={summaryLoading}
+          />
+          <RegularOffendersPanel
+            regularLateComers={monthRegularOffenders.regularLateComers}
+            regularAbsentees={monthRegularOffenders.regularAbsentees}
+            loading={summaryLoading}
+            periodLabel={monthRegularPeriodLabel}
+          />
+        </div>
+      </SectionShell>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-900">Day-wise report</h2>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              Select a date to view the full attendance report for that day.
-            </p>
-          </div>
+      <SectionShell
+        badge="Daily operations"
+        title="Day-wise report"
+        description="Select a date to view the full attendance report for that day."
+        accent="emerald"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-end sm:-mt-2">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <label className="text-[11px] font-medium text-slate-600">Date</label>
@@ -800,10 +865,15 @@ export default function ReportsPage() {
 
         {dayReportLoading ? (
           <div className="mt-4 space-y-4">
-            <div className="h-24 rounded-lg bg-slate-50 animate-pulse" />
+            <div className="h-24 rounded-xl bg-slate-100 animate-pulse" />
+            <div className="grid gap-3 lg:grid-cols-3">
+              <div className="h-52 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="h-52 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="h-52 rounded-xl bg-slate-100 animate-pulse" />
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="h-40 rounded-lg bg-slate-50 animate-pulse" />
-              <div className="h-40 rounded-lg bg-slate-50 animate-pulse" />
+              <div className="h-40 rounded-xl bg-slate-100 animate-pulse" />
+              <div className="h-40 rounded-xl bg-slate-100 animate-pulse" />
             </div>
           </div>
         ) : (
@@ -876,10 +946,18 @@ export default function ReportsPage() {
               ))}
             </div>
 
+            <div className="mt-5">
+              <DayReportCharts
+                summary={dayReportSummary}
+                rows={dayReportData}
+                loading={dayReportLoading}
+              />
+            </div>
+
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
               <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
                 <div className="border-b border-slate-100 px-3 py-2.5">
-                  <h3 className="text-xs font-semibold text-slate-900">Absentees</h3>
+                  <h3 className="text-xs font-semibold text-slate-900">Absentees today</h3>
                   <p className="text-[10px] text-slate-500">
                     {dayReportAbsentees.length}{' '}
                     {dayReportAbsentees.length === 1 ? 'employee' : 'employees'} did not mark attendance
@@ -917,7 +995,7 @@ export default function ReportsPage() {
 
               <div className="rounded-lg border border-amber-100 bg-white shadow-sm">
                 <div className="border-b border-amber-100 bg-amber-50/40 px-3 py-2.5">
-                  <h3 className="text-xs font-semibold text-amber-900">Late comers</h3>
+                  <h3 className="text-xs font-semibold text-amber-900">Late comers today</h3>
                   <p className="text-[10px] text-amber-800/80">
                     {dayReportLateComers.length}{' '}
                     {dayReportLateComers.length === 1 ? 'employee' : 'employees'} arrived after the grace period
@@ -958,6 +1036,15 @@ export default function ReportsPage() {
                   </table>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-6">
+              <RegularOffendersPanel
+                regularLateComers={daySectionRegularOffenders.regularLateComers}
+                regularAbsentees={daySectionRegularOffenders.regularAbsentees}
+                loading={summaryLoading}
+                periodLabel={`${monthRegularPeriodLabel}${dayReportDepartment ? ` · ${dayReportDepartment}` : ''}`}
+              />
             </div>
 
             <h3 className="mt-5 text-xs font-semibold text-slate-900">All employees</h3>
@@ -1083,14 +1170,14 @@ export default function ReportsPage() {
             </div>
           </>
         )}
-      </section>
+      </SectionShell>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
-        <h2 className="text-sm font-semibold text-slate-900">Date range</h2>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          Select year and month for the report period.
-        </p>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center">
+      <SectionShell
+        badge="Monthly exports"
+        title="Date range & downloads"
+        description="Select year and month, then export attendance, payroll, or overtime reports."
+      >
+        <div className="grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center">
           <div className="flex items-center gap-2">
             <label className="text-[11px] font-medium text-slate-600">Year</label>
             <select
@@ -1117,12 +1204,10 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <h2 className="mt-6 text-sm font-semibold text-slate-900">Download</h2>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          Choose a report, pick CSV or PDF, then download for {MONTHS.find((m) => m.value === month)?.label}{' '}
-          {year}.
+        <p className="mt-5 text-[11px] font-medium text-slate-700">
+          Download for {selectedMonthLabel} {year}
         </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <div className="mt-3 grid gap-4 sm:grid-cols-3">
           {[
             {
               key: 'attendance',
@@ -1146,7 +1231,7 @@ export default function ReportsPage() {
             return (
               <div
                 key={key}
-                className="flex flex-col rounded-xl border border-slate-200 bg-slate-50/40 px-4 py-3 shadow-sm"
+                className="flex flex-col rounded-xl border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/60 px-4 py-3 shadow-sm transition hover:border-primary-200/60 hover:shadow-md"
               >
                 <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
                 <p className="mt-1 flex-1 text-[11px] leading-snug text-slate-500">{blurb}</p>
@@ -1203,14 +1288,15 @@ export default function ReportsPage() {
             <li><strong>Overtime:</strong> Employee code, name, overtime hours for the month.</li>
           </ul>
         </div>
-      </section>
+      </SectionShell>
 
-      <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
-        <h2 className="text-sm font-semibold text-slate-900">Detailed Attendance Report (PDF)</h2>
-        <p className="mt-0.5 text-[11px] text-slate-500">
-          Generate a printable PDF with per-employee summary and per-day attendance details.
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <SectionShell
+        badge="Advanced"
+        title="Detailed attendance report (PDF)"
+        description="Generate a printable PDF with per-employee summary and per-day attendance details."
+        accent="blue"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-3">
             <div>
               <label className="block text-[11px] font-medium text-slate-600 mb-1">
@@ -1341,7 +1427,7 @@ export default function ReportsPage() {
             </div>
           </div>
         </div>
-      </section>
+      </SectionShell>
 
       {detailsModal && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3 sm:px-4">
