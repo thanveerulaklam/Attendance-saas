@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { normalizeWhatsAppNumber } = require('../utils/whatsappPhone');
+const { normalizeWhatsappSendTime } = require('../utils/whatsappSendTime');
 const {
   clearShiftRotationFlagCache,
   backfillInitialAssignments,
@@ -140,7 +141,10 @@ async function updateCompany(companyId, data) {
     normalized.whatsapp_secondary_number =
       v === '' || v == null ? null : normalizeWhatsAppNumber(v) || null;
   }
-  if (Object.prototype.hasOwnProperty.call(normalized, 'whatsapp_send_time')) {
+  if (
+    Object.prototype.hasOwnProperty.call(normalized, 'whatsapp_send_time') &&
+    normalized.whatsapp_send_time !== undefined
+  ) {
     try {
       normalized.whatsapp_send_time = normalizeWhatsappSendTime(normalized.whatsapp_send_time);
     } catch (err) {

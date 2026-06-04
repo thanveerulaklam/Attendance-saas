@@ -76,16 +76,26 @@ async function updateCurrentCompany(req, res, next) {
       });
     }
 
-    const updated = await updateCompany(companyId, {
-      name: req.body.name,
-      phone: req.body.phone,
-      address: req.body.address,
-      paid_leave_forfeit_if_absence_gt: req.body.paid_leave_forfeit_if_absence_gt,
-      whatsapp_auto_enabled: req.body.whatsapp_auto_enabled,
-      whatsapp_primary_number: req.body.whatsapp_primary_number,
-      whatsapp_secondary_number: req.body.whatsapp_secondary_number,
-      whatsapp_send_time: req.body.whatsapp_send_time,
-    });
+    const body = req.body || {};
+    const patch = {};
+    const keys = [
+      'name',
+      'phone',
+      'address',
+      'paid_leave_forfeit_if_absence_gt',
+      'whatsapp_auto_enabled',
+      'whatsapp_primary_number',
+      'whatsapp_secondary_number',
+      'whatsapp_send_time',
+      'enable_shift_rotation',
+    ];
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(body, key)) {
+        patch[key] = body[key];
+      }
+    }
+
+    const updated = await updateCompany(companyId, patch);
 
     if (!updated) {
       return res.status(404).json({
