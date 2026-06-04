@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { authFetch } from '../utils/api';
+import { authFetch } from '../../utils/api';
 
 export default function ShiftAssignmentsPanel({ shifts }) {
   const [employees, setEmployees] = useState([]);
