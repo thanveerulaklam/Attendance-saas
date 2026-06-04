@@ -376,8 +376,27 @@ export default function ShiftsPage() {
       <header>
         <h1 className="text-lg font-semibold text-slate-900">Shifts</h1>
         <p className="text-xs text-slate-500">
-          Define standard working hours and grace time for your factory.
+          {factoryMode
+            ? 'Factory mode: create Day/Night templates, assign staff, then optionally set up automatic rotation.'
+            : 'Define standard working hours and grace time for your factory.'}
         </p>
+        {factoryMode && (
+          <div className="mt-3 max-w-2xl rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-[11px] text-blue-900">
+            <p className="font-semibold">Quick guide</p>
+            <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+              <li>
+                <strong>Templates</strong> — Use &quot;Day 9–21&quot; / &quot;Night 21–9&quot; buttons, then save.
+                Night shift should use <strong>Hours based</strong> (spans midnight).
+              </li>
+              <li>
+                <strong>Assignments</strong> — Select employees and assign them to Day or Night with a start date.
+              </li>
+              <li>
+                <strong>Rotation</strong> — Only if you swap teams every few weeks automatically; otherwise use Assignments only.
+              </li>
+            </ol>
+          </div>
+        )}
         {shiftsCompactUi && (
           <p className="mt-1 text-[10px] text-slate-500 max-w-xl">
             Compact shifts for this company (e.g. Tharagai Readymades): weekly-off, late, no-leave incentive, and

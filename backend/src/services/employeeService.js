@@ -283,7 +283,7 @@ async function getEmployees(
   allowedBranchIds = null
 ) {
   const pageNumber = Math.max(Number(page) || 1, 1);
-  const pageSize = Math.min(Math.max(Number(limit) || 10, 1), 100);
+  const pageSize = Math.min(Math.max(Number(limit) || 10, 1), 500);
   const offset = (pageNumber - 1) * pageSize;
 
   const baseParams = [companyId];

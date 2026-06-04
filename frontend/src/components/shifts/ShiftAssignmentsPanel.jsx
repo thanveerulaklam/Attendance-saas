@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../../utils/api';
+import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
 
 export default function ShiftAssignmentsPanel({ shifts }) {
   const [employees, setEmployees] = useState([]);
@@ -18,15 +19,15 @@ export default function ShiftAssignmentsPanel({ shifts }) {
       setLoading(true);
       setError(null);
       const [empRes, assignRes] = await Promise.all([
-        authFetch('/api/employees?limit=500&status=active'),
+        authFetch('/api/employees?limit=500'),
         authFetch('/api/shift-rotation/assignments?limit=50'),
       ]);
       if (!empRes.ok) throw new Error('Failed to load employees');
       if (!assignRes.ok) throw new Error('Failed to load assignments');
       const empJson = await empRes.json();
       const assignJson = await assignRes.json();
-      setEmployees((empJson.data || []).filter((e) => e.status === 'active'));
-      setAssignments(assignJson.data || []);
+      setEmployees(activeEmployeesFromApi(empJson));
+      setAssignments(arrayFromApi(assignJson));
     } catch (err) {
       setError(err.message || 'Unable to load data');
     } finally {
@@ -82,8 +83,14 @@ export default function ShiftAssignmentsPanel({ shifts }) {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-700">
+        <p className="font-medium text-slate-900">What to do here</p>
+        <p className="mt-1">
+          Select employees, choose the shift they should work (Day or Night), and set the date the
+          change starts. Attendance and payroll use the shift that applies on each calendar day.
+        </p>
+      </div>
       <p className="text-xs text-slate-500">
-        Move employees between day and night shifts with an effective date.{' '}
         <Link to="/settings/company" className="text-blue-600 hover:underline">
           Factory mode settings
         </Link>

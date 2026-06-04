@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../../utils/api';
+import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
 
 export default function ShiftRotationPanel({ shifts }) {
   const [groups, setGroups] = useState([]);
@@ -23,14 +24,14 @@ export default function ShiftRotationPanel({ shifts }) {
       setError(null);
       const [groupRes, empRes] = await Promise.all([
         authFetch('/api/shift-rotation/rotation-groups'),
-        authFetch('/api/employees?limit=500&status=active'),
+        authFetch('/api/employees?limit=500'),
       ]);
       if (!groupRes.ok) throw new Error('Failed to load rotation groups');
       if (!empRes.ok) throw new Error('Failed to load employees');
       const groupJson = await groupRes.json();
       const empJson = await empRes.json();
-      setGroups(groupJson.data || []);
-      setEmployees((empJson.data || []).filter((e) => e.status === 'active'));
+      setGroups(arrayFromApi(groupJson));
+      setEmployees(activeEmployeesFromApi(empJson));
     } catch (err) {
       setError(err.message || 'Unable to load rotation groups');
     } finally {
@@ -153,10 +154,14 @@ export default function ShiftRotationPanel({ shifts }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-slate-500">
-        Define groups that swap between shift templates every few weeks. Rotations also run
-        automatically when the next date is due.
-      </p>
+      <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-700">
+        <p className="font-medium text-slate-900">What to do here (optional)</p>
+        <p className="mt-1">
+          Create a group, link <strong>Shift A</strong> and <strong>Shift B</strong> (your Day and
+          Night templates), add employees to slot A or B, and set how many weeks between swaps.
+          Use <strong>Rotate now</strong> for an immediate swap, or wait for the next rotation date.
+        </p>
+      </div>
 
       {error && (
         <div className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
