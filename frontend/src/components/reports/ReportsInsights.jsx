@@ -24,9 +24,10 @@ const CHART = {
   tick: '#64748b',
 };
 
-/** Minimum occurrences in the month (MTD) to flag as a regular offender. */
+/** Minimum occurrences in the month (MTD) to flag as a regular pattern. */
 export const REGULAR_LATE_MIN_DAYS = 2;
 export const REGULAR_ABSENT_MIN_DAYS = 2;
+export const REGULAR_ONTIME_MIN_DAYS = 2;
 
 export function computeRegularOffenders(monthlyEmployees, asOfDay, department = '', employeeDirectory = []) {
   const deptById = new Map(
@@ -45,6 +46,7 @@ export function computeRegularOffenders(monthlyEmployees, asOfDay, department = 
       );
       const lateCount = days.filter((d) => d.late).length;
       const absentCount = days.filter((d) => !d.present).length;
+      const onTimeCount = days.filter((d) => d.present && !d.late).length;
 
       return {
         employee_id: empId,
@@ -52,6 +54,7 @@ export function computeRegularOffenders(monthlyEmployees, asOfDay, department = 
         employee_code: emp.employee_code || '',
         lateCount,
         absentCount,
+        onTimeCount,
       };
     })
     .filter(Boolean);
@@ -64,7 +67,11 @@ export function computeRegularOffenders(monthlyEmployees, asOfDay, department = 
     .filter((e) => e.absentCount >= REGULAR_ABSENT_MIN_DAYS)
     .sort((a, b) => b.absentCount - a.absentCount || a.name.localeCompare(b.name));
 
-  return { regularLateComers, regularAbsentees };
+  const regularOntimeArrivals = mapped
+    .filter((e) => e.onTimeCount >= REGULAR_ONTIME_MIN_DAYS)
+    .sort((a, b) => b.onTimeCount - a.onTimeCount || a.name.localeCompare(b.name));
+
+  return { regularLateComers, regularAbsentees, regularOntimeArrivals };
 }
 
 function truncateLabel(value, max = 14) {
@@ -139,34 +146,34 @@ export function ReportsPageHero({ monthLabel, year, dayLabel }) {
   );
 }
 
-export function MonthOverviewCharts({ payrollRows, loading }) {
+export function MonthOverviewCharts({ payrollRows, regularOntimeArrivals = [], loading }) {
   const topPayroll = useMemo(() => {
     const rows = Array.isArray(payrollRows) ? payrollRows : [];
     return [...rows]
       .sort((a, b) => (Number(b.net_salary) || 0) - (Number(a.net_salary) || 0))
       .slice(0, 8)
-      .map((row) => ({
-        name: truncateLabel(row.employee_name || row.employee_code, 12),
-        net: Number(row.net_salary) || 0,
-      }));
-  }, [payrollRows]);
-
-  const presentVsGap = useMemo(() => {
-    const rows = Array.isArray(payrollRows) ? payrollRows : [];
-    return [...rows]
-      .filter((r) => (Number(r.total_days) || 0) > 0)
-      .sort((a, b) => (Number(b.present_days) || 0) - (Number(a.present_days) || 0))
-      .slice(0, 8)
       .map((row) => {
-        const total = Number(row.total_days) || 0;
-        const present = Number(row.present_days) || 0;
+        const fullName = row.employee_name || row.employee_code || 'Employee';
         return {
-          name: truncateLabel(row.employee_name || row.employee_code, 12),
-          present,
-          gap: Math.max(0, total - present),
+          name: truncateLabel(fullName, 14),
+          fullName,
+          net: Number(row.net_salary) || 0,
         };
       });
   }, [payrollRows]);
+
+  const topOntime = useMemo(
+    () =>
+      (regularOntimeArrivals || []).slice(0, 8).map((row) => ({
+        name: truncateLabel(row.name, 14),
+        fullName: row.name,
+        count: row.onTimeCount,
+      })),
+    [regularOntimeArrivals]
+  );
+
+  const payrollChartHeight = Math.max(200, topPayroll.length * 26);
+  const ontimeChartHeight = Math.max(200, topOntime.length * 26);
 
   const payrollAvgPresent = useMemo(() => {
     const rows = Array.isArray(payrollRows) ? payrollRows : [];
@@ -188,13 +195,37 @@ export function MonthOverviewCharts({ payrollRows, loading }) {
     );
   }
 
-  if (topPayroll.length === 0 && presentVsGap.length === 0) {
+  if (topPayroll.length === 0 && topOntime.length === 0) {
     return (
       <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-8 text-center text-xs text-slate-500">
-        Monthly payroll charts will appear once payroll records exist for this month.
+        Monthly charts will appear once payroll and attendance records exist for this month.
       </p>
     );
   }
+
+  const payrollTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const row = payload[0]?.payload;
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg">
+        <p className="font-medium text-slate-800">{row?.fullName || row?.name}</p>
+        <p className="text-slate-600">
+          Net salary: ₹{Number(payload[0]?.value || 0).toLocaleString('en-IN')}
+        </p>
+      </div>
+    );
+  };
+
+  const ontimeTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const row = payload[0]?.payload;
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs shadow-lg">
+        <p className="font-medium text-slate-800">{row?.fullName || row?.name}</p>
+        <p className="text-slate-600">On-time arrival days: {payload[0]?.value}</p>
+      </div>
+    );
+  };
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -203,21 +234,27 @@ export function MonthOverviewCharts({ payrollRows, loading }) {
           <span>Top 8 employees</span>
           <span>Avg attendance {payrollAvgPresent}%</span>
         </div>
-        <div className="h-48">
+        <div style={{ height: payrollChartHeight }}>
           {topPayroll.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topPayroll} layout="vertical" margin={{ left: 4, right: 12, top: 4, bottom: 4 }}>
+              <BarChart
+                data={topPayroll}
+                layout="vertical"
+                margin={{ left: 8, right: 16, top: 4, bottom: 4 }}
+                barCategoryGap="18%"
+              >
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={CHART.grid} />
                 <XAxis type="number" tick={{ fontSize: 10, fill: CHART.tick }} tickLine={false} />
                 <YAxis
                   type="category"
                   dataKey="name"
-                  width={72}
+                  width={100}
+                  interval={0}
                   tick={{ fontSize: 10, fill: CHART.tick }}
                   tickLine={false}
                   axisLine={false}
                 />
-                <Tooltip content={<CorporateTooltip />} />
+                <Tooltip content={payrollTooltip} />
                 <Bar dataKey="net" name="Net salary" fill={CHART.payroll} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -227,22 +264,42 @@ export function MonthOverviewCharts({ payrollRows, loading }) {
         </div>
       </ChartCard>
 
-      <ChartCard title="Month-to-date attendance" subtitle="Present vs non-present days (payroll period)">
-        <div className="h-48">
-          {presentVsGap.length > 0 ? (
+      <ChartCard
+        title="Regular on-time arrival"
+        subtitle={`Employees with ${REGULAR_ONTIME_MIN_DAYS}+ on-time arrival days (month to date)`}
+      >
+        <div className="mb-2 text-[10px] text-slate-500">
+          {regularOntimeArrivals.length}{' '}
+          {regularOntimeArrivals.length === 1 ? 'employee' : 'employees'} flagged
+        </div>
+        <div style={{ height: ontimeChartHeight }}>
+          {topOntime.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={presentVsGap} margin={{ left: -16, right: 8, top: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={CHART.grid} />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: CHART.tick }} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: CHART.tick }} tickLine={false} axisLine={false} />
-                <Tooltip content={<CorporateTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Bar dataKey="present" name="Present days" stackId="a" fill={CHART.present} radius={[0, 0, 0, 0]} />
-                <Bar dataKey="gap" name="Other days" stackId="a" fill={CHART.absent} radius={[4, 4, 0, 0]} />
+              <BarChart
+                data={topOntime}
+                layout="vertical"
+                margin={{ left: 8, right: 16, top: 4, bottom: 4 }}
+                barCategoryGap="18%"
+              >
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={CHART.grid} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: CHART.tick }} tickLine={false} />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={100}
+                  interval={0}
+                  tick={{ fontSize: 10, fill: CHART.tick }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip content={ontimeTooltip} />
+                <Bar dataKey="count" name="On-time days" fill={CHART.present} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="py-12 text-center text-xs text-slate-500">No attendance days in payroll yet</p>
+            <p className="py-12 text-center text-xs text-slate-500">
+              No regular on-time arrivals yet ({REGULAR_ONTIME_MIN_DAYS}+ days required).
+            </p>
           )}
         </div>
       </ChartCard>

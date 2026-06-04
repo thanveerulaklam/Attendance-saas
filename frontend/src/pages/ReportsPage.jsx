@@ -800,7 +800,11 @@ export default function ReportsPage() {
           </button>
         </div>
         <div className="mt-5">
-          <MonthOverviewCharts payrollRows={currentMonthPayrollRows} loading={summaryLoading} />
+          <MonthOverviewCharts
+            payrollRows={currentMonthPayrollRows}
+            regularOntimeArrivals={monthRegularOffenders.regularOntimeArrivals}
+            loading={summaryLoading}
+          />
         </div>
         <div className="mt-6 space-y-4">
           <RegularOffendersCharts
