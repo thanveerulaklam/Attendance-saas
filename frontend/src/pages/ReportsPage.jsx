@@ -313,17 +313,6 @@ export default function ReportsPage() {
     [monthlyAttendanceEmployees, currentDay, employees]
   );
 
-  const daySectionRegularOffenders = useMemo(
-    () =>
-      computeRegularOffenders(
-        monthlyAttendanceEmployees,
-        currentDay,
-        dayReportDepartment,
-        employees
-      ),
-    [monthlyAttendanceEmployees, currentDay, dayReportDepartment, employees]
-  );
-
   const monthRegularPeriodLabel = `Month to date — ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} (through day ${currentDay})`;
   const payrollModalTotalPages = Math.max(1, Math.ceil(payrollModalTotal / PAYROLL_MODAL_PAGE_SIZE));
 
@@ -1040,15 +1029,6 @@ export default function ReportsPage() {
                   </table>
                 </div>
               </div>
-            </div>
-
-            <div className="mt-6">
-              <RegularOffendersPanel
-                regularLateComers={daySectionRegularOffenders.regularLateComers}
-                regularAbsentees={daySectionRegularOffenders.regularAbsentees}
-                loading={summaryLoading}
-                periodLabel={`${monthRegularPeriodLabel}${dayReportDepartment ? ` · ${dayReportDepartment}` : ''}`}
-              />
             </div>
 
             <h3 className="mt-5 text-xs font-semibold text-slate-900">All employees</h3>
