@@ -9,6 +9,7 @@ export default function ShiftRotationPanel({ shifts }) {
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
   const [rotatingId, setRotatingId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   const [form, setForm] = useState({
     name: '',
     shift_a_id: '',
@@ -99,6 +100,33 @@ export default function ShiftRotationPanel({ shifts }) {
       setError(err.message || 'Rotation failed');
     } finally {
       setRotatingId(null);
+    }
+  };
+
+  const handleDelete = async (group) => {
+    const label = group.name || 'this rotation group';
+    if (
+      !window.confirm(
+        `Delete "${label}"? Members stay on their current shifts; only the automatic rotation schedule is removed.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setDeletingId(group.id);
+      setError(null);
+      const res = await authFetch(`/api/shift-rotation/rotation-groups/${group.id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.message || 'Failed to delete group');
+      }
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to delete group');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -257,14 +285,24 @@ export default function ShiftRotationPanel({ shifts }) {
                   {group.shift_c_name ? ` · C: ${group.shift_c_name}` : ''}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => handleRotate(group.id)}
-                disabled={rotatingId === group.id}
-                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                {rotatingId === group.id ? 'Rotating…' : 'Rotate now'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleRotate(group.id)}
+                  disabled={rotatingId === group.id || deletingId === group.id}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {rotatingId === group.id ? 'Rotating…' : 'Rotate now'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(group)}
+                  disabled={deletingId === group.id || rotatingId === group.id}
+                  className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  {deletingId === group.id ? 'Deleting…' : 'Delete group'}
+                </button>
+              </div>
             </div>
 
             {group.preview?.length > 0 && (
@@ -300,10 +338,10 @@ export default function ShiftRotationPanel({ shifts }) {
                   ))}
                 </ul>
               )}
-              <div className="flex flex-wrap gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-2 pt-1">
                 <select
                   id={`add-member-${group.id}`}
-                  className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
+                  className="rounded-lg border border-slate-200 px-2 py-1 text-xs min-w-[160px]"
                   defaultValue=""
                 >
                   <option value="">Add employee…</option>
@@ -321,10 +359,32 @@ export default function ShiftRotationPanel({ shifts }) {
                     const sel = document.getElementById(`add-member-${group.id}`);
                     if (sel?.value) addMemberToGroup(group.id, sel.value, 'A');
                   }}
-                  className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
+                  className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
                 >
-                  Add to slot A
+                  Add to slot A{group.shift_a_name ? ` (${group.shift_a_name})` : ''}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sel = document.getElementById(`add-member-${group.id}`);
+                    if (sel?.value) addMemberToGroup(group.id, sel.value, 'B');
+                  }}
+                  className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                >
+                  Add to slot B{group.shift_b_name ? ` (${group.shift_b_name})` : ''}
+                </button>
+                {group.shift_c_id && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sel = document.getElementById(`add-member-${group.id}`);
+                      if (sel?.value) addMemberToGroup(group.id, sel.value, 'C');
+                    }}
+                    className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                  >
+                    Add to slot C{group.shift_c_name ? ` (${group.shift_c_name})` : ''}
+                  </button>
+                )}
               </div>
             </div>
           </section>

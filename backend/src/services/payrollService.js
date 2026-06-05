@@ -319,6 +319,14 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     const shift = await getShiftForEmployee(client, companyId, employeeId);
     const rotationEnabled = await isShiftRotationEnabled(companyId);
+    const dayShiftCache = new Map();
+    const getDayShift = async (dayKey) => {
+      if (!rotationEnabled) return shift;
+      if (dayShiftCache.has(dayKey)) return dayShiftCache.get(dayKey);
+      const cfg = await getShiftForEmployee(client, companyId, employeeId, dayKey);
+      dayShiftCache.set(dayKey, cfg);
+      return cfg;
+    };
 
     const companyPlResult = await client.query(
       `SELECT paid_leave_forfeit_if_absence_gt, shifts_compact_ui FROM companies WHERE id = $1`,
@@ -328,8 +336,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     const shiftsCompactUi = companyPlResult.rows[0]?.shifts_compact_ui === true;
 
     const needOvernightRange =
-      shift.isOvernightClock &&
-      (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based');
+      rotationEnabled ||
+      (shift.isOvernightClock &&
+        (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based'));
     const rangeStart = needOvernightRange
       ? addDays(monthFirstStr, -1)
       : monthFirstStr;
@@ -368,16 +377,18 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     for (const row of logsResult.rows) {
       const punchTime = new Date(row.punch_time);
+      const punchYmd = istYmdFromDate(punchTime);
+      const punchShift = rotationEnabled ? await getDayShift(punchYmd) : shift;
       let key;
-      if (shiftsCompactUi && shift.attendanceMode === 'hours_based') {
-        key = attributedCompactHoursBasedDateStr(punchTime, shift);
+      if (shiftsCompactUi && punchShift.attendanceMode === 'hours_based') {
+        key = attributedCompactHoursBasedDateStr(punchTime, punchShift);
       } else if (
-        shift.isOvernightClock &&
-        (shift.attendanceMode === 'shift_based' || shift.attendanceMode === 'hours_based')
+        punchShift.isOvernightClock &&
+        (punchShift.attendanceMode === 'shift_based' || punchShift.attendanceMode === 'hours_based')
       ) {
-        key = attributedShiftStartDateStr(punchTime, shift);
+        key = attributedShiftStartDateStr(punchTime, punchShift);
       } else {
-        key = istYmdFromDate(punchTime);
+        key = punchYmd;
       }
       if (key < monthFirstStr || key > monthLastStr) continue;
       if (!logsByDay.has(key)) {
@@ -422,7 +433,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           break;
         }
         const dayShift = rotationEnabled
-          ? await getShiftForEmployee(client, companyId, employeeId, dayKey)
+          ? await getDayShift(dayKey)
           : shift;
         const required = Number(dayShift.requiredHoursPerDay || 8);
         const isHoliday = holidaySet.has(dayKey);
@@ -603,6 +614,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     for (const [dayKey, dayLogs] of logsByDay.entries()) {
       if (!dayLogs.length || dayKey > lastDateToConsider) continue;
 
+      const dayShift = rotationEnabled ? await getDayShift(dayKey) : shift;
+
       const sorted = normalizePayrollDayLogs(dayLogs);
       const logsForStatus = sorted.map((l) => ({
         punch_time: l.punchTime.toISOString(),
@@ -612,7 +625,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const isCurrentDateForStatus = dayKey === todayIstYmd();
       const status = computeDayStatus(
         logsForStatus,
-        shift,
+        dayShift,
         dayKey,
         isCurrentDateForStatus,
         Date.now()
@@ -644,10 +657,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           y2,
           m2,
           d2,
-          shift.startHour,
-          shift.startMinute
+          dayShift.startHour,
+          dayShift.startMinute
         );
-        const allowedStartMs = shiftStartMs + shift.graceMs;
+        const allowedStartMs = shiftStartMs + dayShift.graceMs;
         const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
         if (firstInTime) {
           totalLateMs += Math.max(0, firstInTime.getTime() - allowedStartMs);
@@ -715,6 +728,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       if (dayKey > lastDateToConsider) break;
       const isHoliday = holidaySet.has(dayKey);
       const dayLogs = logsByDay.get(dayKey) || [];
+      const dayShift = rotationEnabled ? await getDayShift(dayKey) : shift;
 
       if (!dayLogs.length) {
         dayDetails.push({
@@ -736,7 +750,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const isCurrentDateForStatus = dayKey === todayIstYmd();
       const status = computeDayStatus(
         logsForStatus,
-        shift,
+        dayShift,
         dayKey,
         isCurrentDateForStatus,
         Date.now()

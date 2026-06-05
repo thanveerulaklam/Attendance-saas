@@ -1,6 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
-const { addDaysIst, todayIstYmd } = require('../utils/istDate');
+const { addDaysIst, todayIstYmd, pgDateToYmd } = require('../utils/istDate');
 const { assertShiftRotationEnabled } = require('./shiftRotationPolicyService');
 
 async function resolveShiftIdForEmployeeOnDate(client, companyId, employeeId, dateStr, fallbackShiftId) {
@@ -47,6 +47,39 @@ async function resolveShiftIdsForEmployeesOnDate(client, companyId, employeeIds,
     }
   }
   return map;
+}
+
+async function getAssignmentsForEmployeeInRange(
+  client,
+  companyId,
+  employeeId,
+  startDateStr,
+  endDateStr
+) {
+  const r = await client.query(
+    `SELECT shift_id, effective_from, effective_to
+     FROM employee_shift_assignments
+     WHERE company_id = $1 AND employee_id = $2
+       AND effective_from <= $4::date
+       AND (effective_to IS NULL OR effective_to >= $3::date)
+     ORDER BY effective_from ASC`,
+    [companyId, employeeId, startDateStr, endDateStr]
+  );
+  return r.rows;
+}
+
+function resolveShiftIdFromAssignments(rows, dateStr, fallbackShiftId) {
+  let match = null;
+  let matchFrom = '';
+  for (const row of rows || []) {
+    const from = pgDateToYmd(row.effective_from);
+    const to = row.effective_to ? pgDateToYmd(row.effective_to) : null;
+    if (from <= dateStr && (!to || to >= dateStr) && from >= matchFrom) {
+      match = row;
+      matchFrom = from;
+    }
+  }
+  return match ? Number(match.shift_id) : fallbackShiftId ?? null;
 }
 
 async function assignShiftBulk(companyId, { employeeIds, shiftId, effectiveFrom, notes, source, rotationGroupId, createdBy }) {
@@ -204,6 +237,8 @@ async function getCurrentAssignment(companyId, employeeId) {
 module.exports = {
   resolveShiftIdForEmployeeOnDate,
   resolveShiftIdsForEmployeesOnDate,
+  getAssignmentsForEmployeeInRange,
+  resolveShiftIdFromAssignments,
   assignShiftBulk,
   listAssignments,
   getEmployeeAssignmentHistory,
