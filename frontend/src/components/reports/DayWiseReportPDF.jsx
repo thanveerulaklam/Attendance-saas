@@ -59,12 +59,14 @@ export function buildDayWiseWhatsAppMessage({
   companyName,
   dateLabel,
   departmentLabel,
+  branchLabel,
   summary,
   absentees,
 }) {
   const absentRows = Array.isArray(absentees) ? absentees : [];
 
   const lines = ['*Day-wise Attendance Report*', `*Date:* ${dateLabel}`];
+  if (branchLabel) lines.push(`*Branch:* ${branchLabel}`);
   if (departmentLabel) lines.push(`*Department:* ${departmentLabel}`);
   if (companyName) lines.push(`*Company:* ${companyName}`);
   lines.push('');
@@ -96,18 +98,20 @@ export function buildDayWiseReportDoc({
   company,
   dateLabel,
   departmentLabel,
+  branchLabel,
   summary,
   absentees,
   lateComers,
   allEmployees,
 }) {
+  const scopeParts = [dateLabel, branchLabel, departmentLabel].filter(Boolean);
   const doc = createPdf({ orientation: 'portrait' });
   let y = addReportHeader(doc, {
     companyName: company?.name,
     companyPhone: company?.phone,
     companyAddress: company?.address,
     title: 'Day-wise Attendance Report',
-    periodLabel: departmentLabel ? `${dateLabel} · ${departmentLabel}` : dateLabel,
+    periodLabel: scopeParts.join(' · '),
     generatedAt: new Date().toLocaleString(),
     totalEmployees: summary.total,
   });
@@ -220,6 +224,7 @@ function csvRow(cells) {
 export function buildDayWiseReportCsv({
   dateLabel,
   departmentLabel,
+  branchLabel,
   summary,
   absentees,
   lateComers,
@@ -228,6 +233,7 @@ export function buildDayWiseReportCsv({
   const lines = [];
   lines.push(csvRow(['Day-wise Attendance Report']));
   lines.push(csvRow(['Date', dateLabel]));
+  if (branchLabel) lines.push(csvRow(['Branch', branchLabel]));
   if (departmentLabel) lines.push(csvRow(['Department', departmentLabel]));
   lines.push('');
 

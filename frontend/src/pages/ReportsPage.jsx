@@ -200,6 +200,8 @@ export default function ReportsPage() {
   const [dayReportLoading, setDayReportLoading] = useState(false);
   const [dayReportFormat, setDayReportFormat] = useState('csv');
   const [monthlyAttendanceEmployees, setMonthlyAttendanceEmployees] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [reportBranchFilter, setReportBranchFilter] = useState('');
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -212,25 +214,31 @@ export default function ReportsPage() {
     let isMounted = true;
     async function loadFilterOptions() {
       try {
-        const [employeesRes, departmentsRes] = await Promise.all([
+        const [employeesRes, departmentsRes, branchesRes] = await Promise.all([
           authFetch('/api/employees?limit=500', {
             headers: { 'Content-Type': 'application/json' },
           }),
           authFetch('/api/employees/departments', {
             headers: { 'Content-Type': 'application/json' },
           }),
+          authFetch('/api/company/branches', {
+            headers: { 'Content-Type': 'application/json' },
+          }),
         ]);
 
         const employeesJson = employeesRes.ok ? await employeesRes.json() : { data: { data: [] } };
         const departmentsJson = departmentsRes.ok ? await departmentsRes.json() : { data: [] };
+        const branchesJson = branchesRes.ok ? await branchesRes.json() : { data: [] };
 
         if (!isMounted) return;
         setEmployees(employeesJson.data?.data || []);
         setDepartments(departmentsJson.data || []);
+        setBranches(Array.isArray(branchesJson.data) ? branchesJson.data : []);
       } catch {
         if (!isMounted) return;
         setEmployees([]);
         setDepartments([]);
+        setBranches([]);
       }
     }
 
@@ -265,6 +273,10 @@ export default function ReportsPage() {
           year: String(currentMonthYear),
           month: String(currentMonthNumber),
         });
+        if (reportBranchFilter) {
+          summaryParams.set('branch_id', reportBranchFilter);
+          attendanceParams.set('branch_id', reportBranchFilter);
+        }
         const [employeesRes, payrollRes, attendanceRes] = await Promise.all([
           authFetch('/api/employees?limit=500', {
             headers: { 'Content-Type': 'application/json' },
@@ -282,7 +294,11 @@ export default function ReportsPage() {
         const attendanceJson = attendanceRes.ok ? await attendanceRes.json() : { data: { employees: [] } };
 
         if (!isMounted) return;
-        const activeEmployees = (employeesJson.data?.data || []).filter((emp) => emp.status === 'active');
+        let activeEmployees = (employeesJson.data?.data || []).filter((emp) => emp.status === 'active');
+        if (reportBranchFilter) {
+          const bid = Number(reportBranchFilter);
+          activeEmployees = activeEmployees.filter((emp) => Number(emp.branch_id) === bid);
+        }
         setPayrollEmployees(activeEmployees);
         setCurrentMonthPayrollRows(payrollJson.data?.data || []);
         setMonthlyAttendanceEmployees(attendanceJson.data?.employees || []);
@@ -295,7 +311,13 @@ export default function ReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [currentMonthYear, currentMonthNumber]);
+  }, [currentMonthYear, currentMonthNumber, reportBranchFilter]);
+
+  const selectedBranchLabel = useMemo(() => {
+    if (!reportBranchFilter) return null;
+    const match = branches.find((b) => String(b.id) === String(reportBranchFilter));
+    return match?.name || `Branch #${reportBranchFilter}`;
+  }, [reportBranchFilter, branches]);
 
   const currentMonthPayrollTotal = useMemo(
     () => (currentMonthPayrollRows || []).reduce((sum, row) => sum + (Number(row.net_salary) || 0), 0),
@@ -313,7 +335,10 @@ export default function ReportsPage() {
     [monthlyAttendanceEmployees, currentDay, employees]
   );
 
-  const monthRegularPeriodLabel = `Month to date — ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} (through day ${currentDay})`;
+  const monthRegularPeriodLabel = useMemo(() => {
+    const base = `Month to date — ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} (through day ${currentDay})`;
+    return selectedBranchLabel ? `${base} · ${selectedBranchLabel}` : base;
+  }, [currentMonthNumber, currentMonthYear, currentDay, selectedBranchLabel]);
   const payrollModalTotalPages = Math.max(1, Math.ceil(payrollModalTotal / PAYROLL_MODAL_PAGE_SIZE));
 
   useEffect(() => {
@@ -325,6 +350,7 @@ export default function ReportsPage() {
         setDayReportLoading(true);
         const params = new URLSearchParams({ date: dayReportDate });
         if (dayReportDepartment) params.set('department', dayReportDepartment);
+        if (reportBranchFilter) params.set('branch_id', reportBranchFilter);
         const res = await authFetch(`/api/attendance/daily?${params.toString()}`, {
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -349,7 +375,14 @@ export default function ReportsPage() {
       isMounted = false;
       controller.abort();
     };
-  }, [dayReportDate, dayReportDepartment]);
+  }, [dayReportDate, dayReportDepartment, reportBranchFilter]);
+
+  const dayReportScopeLabel = useMemo(() => {
+    const parts = [formatDateLongIstYmd(dayReportDate)];
+    if (selectedBranchLabel) parts.push(selectedBranchLabel);
+    if (dayReportDepartment) parts.push(dayReportDepartment);
+    return parts.join(' · ');
+  }, [dayReportDate, selectedBranchLabel, dayReportDepartment]);
 
   const dayReportSummary = useMemo(() => {
     const rows = dayReportData || [];
@@ -383,6 +416,7 @@ export default function ReportsPage() {
     }
     return {
       dateLabel: formatDateLongIstYmd(dayReportDate),
+      branchLabel: selectedBranchLabel,
       departmentLabel: dayReportDepartment || null,
       summary: dayReportSummary,
       absentees: dayReportAbsentees,
@@ -448,6 +482,7 @@ export default function ReportsPage() {
       const shareText = buildDayWiseWhatsAppMessage({
         companyName: company.name,
         dateLabel: payload.dateLabel,
+        branchLabel: payload.branchLabel,
         departmentLabel: payload.departmentLabel,
         summary: payload.summary,
         absentees: payload.absentees,
@@ -473,6 +508,7 @@ export default function ReportsPage() {
 
       const params = new URLSearchParams({ date: yesterdayYmd });
       if (dayReportDepartment) params.set('department', dayReportDepartment);
+      if (reportBranchFilter) params.set('branch_id', reportBranchFilter);
 
       const [attendanceRes, companyRes] = await Promise.all([
         authFetch(`/api/attendance/daily?${params.toString()}`, {
@@ -515,6 +551,7 @@ export default function ReportsPage() {
       const shareText = buildDayWiseWhatsAppMessage({
         companyName: company.name,
         dateLabel: formatDateLongIstYmd(yesterdayYmd),
+        branchLabel: selectedBranchLabel,
         departmentLabel: dayReportDepartment || null,
         summary,
         absentees,
@@ -540,6 +577,7 @@ export default function ReportsPage() {
 
       const params = new URLSearchParams({ date: yesterdayYmd });
       if (dayReportDepartment) params.set('department', dayReportDepartment);
+      if (reportBranchFilter) params.set('branch_id', reportBranchFilter);
 
       const res = await authFetch(`/api/attendance/daily?${params.toString()}`, {
         headers: { 'Content-Type': 'application/json' },
@@ -579,6 +617,7 @@ export default function ReportsPage() {
         company: companyJson.data || {},
         filename: `daily-attendance-${yesterdayYmd}.pdf`,
         dateLabel: formatDateLongIstYmd(yesterdayYmd),
+        branchLabel: selectedBranchLabel,
         departmentLabel: dayReportDepartment || null,
         summary,
         absentees,
@@ -606,6 +645,7 @@ export default function ReportsPage() {
           page: String(payrollModalPage),
           limit: String(PAYROLL_MODAL_PAGE_SIZE),
         });
+        if (reportBranchFilter) modalParams.set('branch_id', reportBranchFilter);
         const res = await authFetch(`/api/payroll?${modalParams.toString()}`, {
           headers: { 'Content-Type': 'application/json' },
         });
@@ -626,7 +666,7 @@ export default function ReportsPage() {
     return () => {
       isMounted = false;
     };
-  }, [detailsModal, payrollModalPage, currentMonthYear, currentMonthNumber]);
+  }, [detailsModal, payrollModalPage, currentMonthYear, currentMonthNumber, reportBranchFilter]);
 
   const handleDownload = (type) => async () => {
     const urls = {
@@ -747,68 +787,31 @@ export default function ReportsPage() {
         dayLabel={heroDayLabel}
       />
 
-      <SectionShell
-        badge="Executive summary"
-        title="Current month overview"
-        description={`Live summary for ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} up to day ${currentDay}.`}
-        accent="blue"
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => setDetailsModal('employees')}
-            className="group rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 px-4 py-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Employees under payroll
+      {branches.length > 0 && (
+        <div className="flex flex-col gap-3 rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold text-slate-900">Branch filter</p>
+            <p className="text-[10px] text-slate-500">
+              View daily and monthly reports for a specific branch or all branches.
             </p>
-            <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
-              {summaryLoading ? '...' : payrollEmployees.length}
-            </p>
-            <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
-              View employee details →
-            </p>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setPayrollModalPage(1);
-              setDetailsModal('payroll');
-            }}
-            className="group rounded-xl border border-slate-200 bg-gradient-to-br from-white to-primary-50/30 px-4 py-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Payroll total (month to date)
-            </p>
-            <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
-              {summaryLoading ? '...' : `₹${formatMoney(currentMonthPayrollTotal)}`}
-            </p>
-            <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
-              View payroll breakdown →
-            </p>
-          </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-[11px] font-medium text-slate-600">Branch</label>
+            <select
+              value={reportBranchFilter}
+              onChange={(e) => setReportBranchFilter(e.target.value)}
+              className="min-w-[10rem] rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+            >
+              <option value="">All branches</option>
+              {branches.map((b) => (
+                <option key={String(b.id)} value={String(b.id)}>
+                  {b.name || `Branch #${b.id}`}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div className="mt-5">
-          <MonthOverviewCharts
-            payrollRows={currentMonthPayrollRows}
-            regularOntimeArrivals={monthRegularOffenders.regularOntimeArrivals}
-            loading={summaryLoading}
-          />
-        </div>
-        <div className="mt-6 space-y-4">
-          <RegularOffendersCharts
-            regularLateComers={monthRegularOffenders.regularLateComers}
-            regularAbsentees={monthRegularOffenders.regularAbsentees}
-            loading={summaryLoading}
-          />
-          <RegularOffendersPanel
-            regularLateComers={monthRegularOffenders.regularLateComers}
-            regularAbsentees={monthRegularOffenders.regularAbsentees}
-            loading={summaryLoading}
-            periodLabel={monthRegularPeriodLabel}
-          />
-        </div>
-      </SectionShell>
+      )}
 
       <SectionShell
         badge="Daily operations"
@@ -871,10 +874,7 @@ export default function ReportsPage() {
           </div>
         ) : (
           <>
-            <p className="mt-3 text-[11px] font-medium text-slate-700">
-              {formatDateLongIstYmd(dayReportDate)}
-              {dayReportDepartment ? ` · ${dayReportDepartment}` : ''}
-            </p>
+            <p className="mt-3 text-[11px] font-medium text-slate-700">{dayReportScopeLabel}</p>
 
             <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
@@ -1154,6 +1154,69 @@ export default function ReportsPage() {
             </div>
           </>
         )}
+      </SectionShell>
+
+      <SectionShell
+        badge="Executive summary"
+        title="Current month overview"
+        description={`Live summary for ${MONTHS.find((m) => m.value === currentMonthNumber)?.label} ${currentMonthYear} up to day ${currentDay}${selectedBranchLabel ? ` · ${selectedBranchLabel}` : ''}.`}
+        accent="blue"
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setDetailsModal('employees')}
+            className="group rounded-xl border border-slate-200 bg-gradient-to-br from-white to-slate-50/80 px-4 py-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Employees under payroll
+            </p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
+              {summaryLoading ? '...' : payrollEmployees.length}
+            </p>
+            <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
+              View employee details →
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPayrollModalPage(1);
+              setDetailsModal('payroll');
+            }}
+            className="group rounded-xl border border-slate-200 bg-gradient-to-br from-white to-primary-50/30 px-4 py-4 text-left shadow-sm transition hover:border-primary-200 hover:shadow-md"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Payroll total (month to date)
+            </p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
+              {summaryLoading ? '...' : `₹${formatMoney(currentMonthPayrollTotal)}`}
+            </p>
+            <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
+              View payroll breakdown →
+            </p>
+          </button>
+        </div>
+        <div className="mt-5">
+          <MonthOverviewCharts
+            payrollRows={currentMonthPayrollRows}
+            regularOntimeArrivals={monthRegularOffenders.regularOntimeArrivals}
+            loading={summaryLoading}
+          />
+        </div>
+        <div className="mt-6 space-y-4">
+          <RegularOffendersCharts
+            regularLateComers={monthRegularOffenders.regularLateComers}
+            regularAbsentees={monthRegularOffenders.regularAbsentees}
+            loading={summaryLoading}
+          />
+          <RegularOffendersPanel
+            regularLateComers={monthRegularOffenders.regularLateComers}
+            regularAbsentees={monthRegularOffenders.regularAbsentees}
+            loading={summaryLoading}
+            periodLabel={monthRegularPeriodLabel}
+          />
+        </div>
       </SectionShell>
 
       <SectionShell
