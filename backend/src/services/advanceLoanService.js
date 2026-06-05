@@ -20,6 +20,20 @@ function parseDateOnly(value) {
   return str;
 }
 
+function addCalendarMonths(year, month, deltaMonths = 1) {
+  let y = Number(year);
+  let m = Number(month) + Number(deltaMonths);
+  while (m > 12) {
+    m -= 12;
+    y += 1;
+  }
+  while (m < 1) {
+    m += 12;
+    y -= 1;
+  }
+  return { year: y, month: m };
+}
+
 async function createRepaymentSchedule(client, loan, loanDateStr, installments, monthlyInstallment) {
   const loanDate = new Date(`${loanDateStr}T00:00:00Z`);
   if (Number.isNaN(loanDate.getTime())) {
@@ -368,19 +382,148 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
   }
 }
 
-async function skipRepayment(companyId, repaymentId, reason) {
-  const note = reason ? `Skipped: ${String(reason).trim()}` : 'Skipped by admin';
-  const result = await pool.query(
-    `UPDATE employee_advance_repayments
-     SET status = 'skipped',
-         notes = CASE WHEN notes IS NULL OR notes = '' THEN $3 ELSE notes || E'\n' || $3 END,
-         updated_at = NOW()
-     WHERE company_id = $1 AND id = $2
-     RETURNING *`,
-    [companyId, Number(repaymentId), note]
+async function rescheduleSkippedAmount(client, skippedRepayment, skippedAmount, note) {
+  const companyId = skippedRepayment.company_id;
+  const loanId = Number(skippedRepayment.loan_id);
+
+  const nextPendingResult = await client.query(
+    `SELECT id, year, month, repayment_amount, suggested_amount
+     FROM employee_advance_repayments
+     WHERE company_id = $1
+       AND loan_id = $2
+       AND status = 'pending'
+       AND (
+         year > $3
+         OR (year = $3 AND month > $4)
+       )
+     ORDER BY year ASC, month ASC
+     LIMIT 1`,
+    [companyId, loanId, Number(skippedRepayment.year), Number(skippedRepayment.month)]
   );
-  if (result.rowCount === 0) throw new AppError('Repayment not found', 404);
-  return result.rows[0];
+
+  if (nextPendingResult.rowCount > 0) {
+    const next = nextPendingResult.rows[0];
+    const newAmount = toMoney(Number(next.repayment_amount || 0) + skippedAmount);
+    const rescheduleNote = `Rescheduled ₹${skippedAmount} from ${skippedRepayment.month}/${skippedRepayment.year}`;
+    await client.query(
+      `UPDATE employee_advance_repayments
+       SET repayment_amount = $3,
+           suggested_amount = $4,
+           notes = CASE WHEN notes IS NULL OR notes = '' THEN $5 ELSE notes || E'\n' || $5 END,
+           updated_at = NOW()
+       WHERE company_id = $1 AND id = $2`,
+      [
+        companyId,
+        next.id,
+        newAmount,
+        toMoney(Number(next.suggested_amount || 0) + skippedAmount),
+        rescheduleNote,
+      ]
+    );
+    return {
+      rescheduled_to: { year: next.year, month: next.month, repayment_amount: newAmount },
+      created_installment: null,
+    };
+  }
+
+  const lastScheduledResult = await client.query(
+    `SELECT year, month
+     FROM employee_advance_repayments
+     WHERE company_id = $1 AND loan_id = $2
+     ORDER BY year DESC, month DESC
+     LIMIT 1`,
+    [companyId, loanId]
+  );
+  const lastScheduled = lastScheduledResult.rows[0] || skippedRepayment;
+  const target = addCalendarMonths(lastScheduled.year, lastScheduled.month, 1);
+
+  const inserted = await client.query(
+    `INSERT INTO employee_advance_repayments (
+       company_id, employee_id, loan_id, year, month,
+       repayment_amount, suggested_amount, status, notes
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8)
+     RETURNING *`,
+    [
+      companyId,
+      skippedRepayment.employee_id,
+      loanId,
+      target.year,
+      target.month,
+      skippedAmount,
+      skippedAmount,
+      note ? `Rescheduled from ${skippedRepayment.month}/${skippedRepayment.year}: ${note}` : `Rescheduled from ${skippedRepayment.month}/${skippedRepayment.year}`,
+    ]
+  );
+
+  await client.query(
+    `UPDATE employee_advance_loans
+     SET total_installments = total_installments + 1,
+         updated_at = NOW()
+     WHERE company_id = $1 AND id = $2`,
+    [companyId, loanId]
+  );
+
+  return {
+    rescheduled_to: { year: target.year, month: target.month, repayment_amount: skippedAmount },
+    created_installment: inserted.rows[0],
+  };
+}
+
+async function skipRepayment(companyId, repaymentId, reason) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const current = await client.query(
+      `SELECT r.*, l.status AS loan_status
+       FROM employee_advance_repayments r
+       INNER JOIN employee_advance_loans l
+         ON l.id = r.loan_id AND l.company_id = r.company_id
+       WHERE r.company_id = $1 AND r.id = $2
+       FOR UPDATE OF r`,
+      [companyId, Number(repaymentId)]
+    );
+    if (current.rowCount === 0) throw new AppError('Repayment not found', 404);
+
+    const row = current.rows[0];
+    if (row.status !== 'pending') {
+      throw new AppError('Only pending repayments can be skipped', 400);
+    }
+    if (!['active', 'on_hold'].includes(row.loan_status)) {
+      throw new AppError('Repayment can only be skipped when the loan is active or on hold', 400);
+    }
+
+    const skippedAmount = toMoney(row.repayment_amount);
+    const note = reason ? `Skipped: ${String(reason).trim()}` : 'Skipped by admin';
+
+    const skippedResult = await client.query(
+      `UPDATE employee_advance_repayments
+       SET status = 'skipped',
+           notes = CASE WHEN notes IS NULL OR notes = '' THEN $3 ELSE notes || E'\n' || $3 END,
+           updated_at = NOW()
+       WHERE company_id = $1 AND id = $2
+       RETURNING *`,
+      [companyId, Number(repaymentId), note]
+    );
+
+    const reschedule =
+      skippedAmount > 0
+        ? await rescheduleSkippedAmount(client, row, skippedAmount, note)
+        : { rescheduled_to: null, created_installment: null };
+
+    await client.query('COMMIT');
+
+    return {
+      ...skippedResult.rows[0],
+      reschedule,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 async function getEmployeeLoanSummary(companyId, employeeId, year = null, month = null) {
@@ -595,4 +738,5 @@ module.exports = {
   addLoanToEmployee,
   waiveLoan,
   deleteLoan,
+  addCalendarMonths,
 };

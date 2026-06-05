@@ -35,7 +35,9 @@ export default function AdvancesPage() {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth() + 1;
-  const [tab, setTab] = useState('active');
+  const [tab, setTab] = useState('monthly');
+  const [selectedYear, setSelectedYear] = useState(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [employees, setEmployees] = useState([]);
   const [loans, setLoans] = useState([]);
   const [monthlyRepayments, setMonthlyRepayments] = useState([]);
@@ -82,7 +84,7 @@ export default function AdvancesPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ year: String(currentYear), month: String(currentMonth) });
+      const params = new URLSearchParams({ year: String(selectedYear), month: String(selectedMonth) });
       const [empRes, loansRes, monthlyRes] = await Promise.all([
         authFetch('/api/employees?limit=300', { headers: { 'Content-Type': 'application/json' } }),
         authFetch('/api/advance-loans', { headers: { 'Content-Type': 'application/json' } }),
@@ -99,7 +101,7 @@ export default function AdvancesPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentYear, currentMonth]);
+  }, [selectedYear, selectedMonth]);
 
   useEffect(() => {
     loadAll();
@@ -215,19 +217,32 @@ export default function AdvancesPage() {
     await loadAll();
   }
 
-  async function handleSkip(repaymentId) {
-    if (!window.confirm('Skip this month repayment?')) return;
+  async function handleSkip(repaymentId, repaymentLabel = 'this month') {
+    if (
+      !window.confirm(
+        `Skip ${repaymentLabel}? The amount will not be deducted now and will be rescheduled to the next pending installment (or a new month if this was the last one).`
+      )
+    ) {
+      return;
+    }
     const reason = skipPending || 'Skipped by admin';
     const res = await authFetch(`/api/advance-loans/repayments/${repaymentId}/skip`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason }),
     });
+    const json = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setToast({ type: 'error', message: 'Skip failed' });
+      setToast({ type: 'error', message: json.message || 'Skip failed' });
       return;
     }
+    const reschedule = json.data?.reschedule?.rescheduled_to;
+    const rescheduleMsg = reschedule
+      ? ` Rescheduled to ${monthLabel(reschedule.year, reschedule.month)} (₹${formatMoney(reschedule.repayment_amount)}).`
+      : '';
+    setToast({ type: 'success', message: `Installment skipped.${rescheduleMsg}` });
     setSkipPending(null);
+    if (expandedLoanId) await refreshExpandedLoan(expandedLoanId);
     await loadAll();
   }
 
@@ -402,16 +417,29 @@ export default function AdvancesPage() {
                                   <td className="py-1 pr-2">₹{formatMoney(r.suggested_amount)}</td>
                                   <td className="py-1 pr-2">₹{formatMoney(r.repayment_amount)}</td>
                                   <td className="py-1 pr-2">{r.status}</td>
-                                  <td className="py-1 pr-2 text-right">
+                                  <td className="py-1 pr-2 text-right space-x-2">
                                     {r.status === 'pending' && ['active', 'on_hold'].includes(expandedLoan.status) && (
-                                      <button
-                                        type="button"
-                                        disabled={markPaidRepaymentId === r.id}
-                                        onClick={() => openMarkPaidDialog(r)}
-                                        className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const reason = window.prompt('Reason to skip this month?') || '';
+                                            setSkipPending(reason);
+                                            handleSkip(r.id, monthLabel(r.year, r.month));
+                                          }}
+                                          className="text-amber-700 hover:underline"
+                                        >
+                                          Skip month
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={markPaidRepaymentId === r.id}
+                                          onClick={() => openMarkPaidDialog(r)}
+                                          className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
+                                        </button>
+                                      </>
                                     )}
                                   </td>
                                 </tr>
@@ -428,8 +456,41 @@ export default function AdvancesPage() {
           </div>
         ) : tab === 'monthly' ? (
           <div>
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="text-[11px] text-slate-600">
+                  Payroll month
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                    className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900"
+                  >
+                    {Array.from({ length: 12 }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>
+                        {new Date(2000, i, 1).toLocaleString('default', { month: 'long' })}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-[11px] text-slate-600">
+                  Year
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(Number(e.target.value))}
+                    className="mt-1 block rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900"
+                  >
+                    {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Use <span className="font-medium text-amber-700">Skip month</span> here before payroll if some employees should not be deducted this month.
+              </p>
+            </div>
             <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-              Total advance deductions this month: ₹{formatMoney(totalMonthlyDeduction)} across {new Set(monthlyRepayments.map((r) => r.employee_id)).size} employees
+              Pending deductions for {monthLabel(selectedYear, selectedMonth)}: ₹{formatMoney(totalMonthlyDeduction)} across {new Set(monthlyRepayments.map((r) => r.employee_id)).size} employees
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[900px] text-xs">
@@ -441,11 +502,20 @@ export default function AdvancesPage() {
                   <th className="pb-2 pr-3">This Month Deduction</th>
                   <th className="pb-2 pr-3">Suggested</th>
                   <th className="pb-2 pr-3">Status</th>
-                  <th className="pb-2 pr-3">Override</th>
+                  <th className="pb-2 pr-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {monthlyRepayments.map((r) => (
+                {monthlyRepayments.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-slate-500">
+                      No pending advance deductions for {monthLabel(selectedYear, selectedMonth)}.
+                      {selectedYear === currentYear && selectedMonth === currentMonth
+                        ? ' Employees with loans may already be skipped, deducted, or not due this month.'
+                        : ' Change the month above to match the payroll period you are generating.'}
+                    </td>
+                  </tr>
+                ) : monthlyRepayments.map((r) => (
                   <tr key={r.id} className="border-b border-slate-100">
                     <td className="py-2 pr-3">{r.employee_name} ({r.employee_code})</td>
                     <td className="py-2 pr-3">#{r.loan_id}</td>
@@ -457,31 +527,31 @@ export default function AdvancesPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setOverrideRepayment(r);
-                          setOverrideForm({ repayment_amount: String(r.repayment_amount), override_reason: '' });
-                          setOverrideOpen(true);
+                          const reason = window.prompt('Reason to skip this month?') || '';
+                          setSkipPending(reason);
+                          handleSkip(r.id, `${r.employee_name} — ${monthLabel(selectedYear, selectedMonth)}`);
                         }}
-                        className="text-blue-600"
+                        className="font-medium text-amber-700 hover:underline"
                       >
-                        Override
+                        Skip month
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                          const reason = window.prompt('Reason to skip this month?') || '';
-                          setSkipPending(reason);
-                          handleSkip(r.id);
+                          setOverrideRepayment(r);
+                          setOverrideForm({ repayment_amount: String(r.repayment_amount), override_reason: '' });
+                          setOverrideOpen(true);
                         }}
-                        className="text-amber-600"
+                        className="text-blue-600 hover:underline"
                       >
-                        Skip Month
+                        Override
                       </button>
                       {r.status === 'pending' && ['active', 'on_hold'].includes(r.loan_status) && (
                         <button
                           type="button"
                           disabled={markPaidRepaymentId === r.id}
                           onClick={() => openMarkPaidDialog(r)}
-                          className="text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
                         </button>
