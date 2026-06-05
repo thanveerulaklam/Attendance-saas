@@ -896,11 +896,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE } from '../utils/apiBase';
-import { PRICING_PLANS } from '../constants/pricingPlans';
-
 const WHATSAPP_NUMBER = '919600844041';
 const WHATSAPP_LINK =
   'https://wa.me/919600844041?text=Hi%2C%20I%20want%20to%20try%20PunchPay%20for%20my%20business';
+const WHATSAPP_PRICING_LINK =
+  'https://wa.me/919600844041?text=Hi%2C%20I%20want%20to%20know%20PunchPay%20plans%20and%20pricing';
 
 /* ── Google Fonts injected once ── */
 if (!document.getElementById('pp-fonts')) {
@@ -1052,17 +1052,6 @@ if (!document.getElementById('pp-vars')) {
     .pp-feat-card { transition: border-color 0.2s, transform 0.2s; }
     .pp-feat-card:hover { border-color: var(--pp-border) !important; transform: translateY(-2px); }
 
-    /* plan card */
-    .pp-plan { display: flex; flex-direction: column; }
-    .pp-plan-feat { font-size: 11px; color: var(--pp-white-dim); padding: 3px 0; display: flex; align-items: flex-start; gap: 7px; line-height: 1.4; }
-    .pp-plan-feat::before { content: '✓'; color: var(--pp-gold); font-weight: 700; flex-shrink: 0; }
-    .pp-plan-feat.dim { color: rgba(255,255,255,0.25); }
-    .pp-plan-feat.dim::before { color: rgba(255,255,255,0.15); content: '—'; }
-
-    /* comparison table */
-    .pp-cmp-th { padding: 10px 12px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; text-align: center; }
-    .pp-cmp-td { padding: 10px 12px; text-align: center; font-size: 11px; }
-
     /* whatsapp float */
     .pp-wa-float {
       position: fixed; bottom: 24px; right: 24px; z-index: 9999;
@@ -1100,9 +1089,6 @@ if (!document.getElementById('pp-vars')) {
       .pp-features-grid { grid-template-columns: 1fr !important; }
       .pp-steps-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
       .pp-steps-line { display: none !important; }
-      .pp-plans-grid { grid-template-columns: 1fr !important; }
-      .pp-compare-wrap { overflow-x: auto !important; }
-      .pp-compare-wrap table { min-width: 840px !important; }
       .pp-testimonials-grid { grid-template-columns: 1fr !important; }
       .pp-footer-grid { grid-template-columns: 1fr !important; gap: 20px !important; }
       .pp-wa-float { bottom: 14px !important; right: 14px !important; width: 50px !important; height: 50px !important; font-size: 22px !important; }
@@ -1238,17 +1224,6 @@ export default function LoginPage() {
     label:    { display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--pp-white-dim)', marginBottom: 6, letterSpacing: '0.5px', textTransform: 'uppercase' },
   };
 
-  /* ── pricing data (shared with SuperAdmin plan codes) ── */
-  const plans = PRICING_PLANS;
-
-  /* ── comparison data ── */
-  const cmpRows = [
-    { emp: '25 Employees',  other_mo: '₹1,250/mo', other_3y: '₹45,000',   pp: '₹20,000 + ₹5k AMC',   pp_plan: 'Basic Plan',        pp_3y: '₹35,000',    save: '₹10,000' },
-    { emp: '50 Employees',  other_mo: '₹2,500/mo', other_3y: '₹90,000',   pp: '₹35,000 + ₹8k AMC',   pp_plan: 'Growth Plan',       pp_3y: '₹59,000',    save: '₹31,000' },
-    { emp: '100 Employees', other_mo: '₹5,000/mo', other_3y: '₹1,80,000', pp: '₹60,000 + ₹15k AMC',  pp_plan: 'Business Plan',     pp_3y: '₹1,05,000',  save: '₹75,000' },
-    { emp: '200 Employees', other_mo: '₹10,000/mo',other_3y: '₹3,60,000', pp: '₹1,00,000 + ₹25k AMC',pp_plan: 'Professional Plan', pp_3y: '₹1,75,000',  save: '₹1,85,000' },
-  ];
-
   return (
     <div style={S.page}>
 
@@ -1280,7 +1255,7 @@ export default function LoginPage() {
           {/* nav links */}
           <nav className="pp-nav-actions" style={{ display: 'flex', alignItems: 'center', gap: 28 }}>
             <div className="pp-nav-links" style={{ display: 'flex', gap: 24 }}>
-              {[['Features','features'],['How it Works','how-it-works'],['Pricing','pricing']].map(([label, id]) => (
+              {[['Features','features'],['How it Works','how-it-works'],['Plans & Pricing','pricing']].map(([label, id]) => (
                 <button key={id} type="button" className="pp-nav-link" onClick={() => handleScrollToSection(id)}>{label}</button>
               ))}
             </div>
@@ -1434,106 +1409,98 @@ export default function LoginPage() {
           </div>
         </section>
 
-        {/* ══ PRICING ══ */}
+        {/* ══ PLANS & PRICING CTA ══ */}
         <section id="pricing" ref={pricingRef} style={S.section()}>
           <div style={S.maxW}>
-            <div className={pricingInView ? 'pp-fade-up' : ''} style={{ textAlign: 'center', marginBottom: 8 }}>
+            <div
+              className={`pp-card-gold ${pricingInView ? 'pp-fade-up' : ''}`}
+              style={{
+                textAlign: 'center',
+                padding: '56px 32px',
+                borderRadius: 20,
+                maxWidth: 720,
+                margin: '0 auto',
+              }}
+            >
               <div className="pp-eyebrow">Transparent Pricing</div>
-              <h2 className="pp-syne" style={{ ...S.heading, fontSize: 34, marginBottom: 8 }}>One-Time Price.<br/>No Subscriptions.</h2>
-              <p style={{ ...S.dim, fontSize: 13 }}>Pay once, own it forever. AMC keeps your software updated. All prices exclude 18% GST.</p>
-            </div>
+              <h2 className="pp-syne" style={{ ...S.heading, fontSize: 34, marginBottom: 12 }}>
+                Choose Your Plan
+              </h2>
+              <p style={{ ...S.dim, fontSize: 14, lineHeight: 1.7, maxWidth: 520, margin: '0 auto 24px' }}>
+                One subscription price for every plan — plus a one-time license and setup fee
+                based on your team size. All prices exclude 18% GST.
+              </p>
 
-            {/* plan cards */}
-            <div className="pp-plans-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 32 }}>
-              {plans.map((p) => (
-                <div key={p.code} style={{
-                  background: p.popular ? 'linear-gradient(160deg,#1c1600,#111)' : 'var(--pp-card)',
-                  border: p.popular ? '1px solid rgba(212,168,67,0.4)' : '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: 14, padding: '14px 12px', display: 'flex', flexDirection: 'column',
-                  position: 'relative',
-                }}>
-                  {p.popular && (
-                    <div style={{
-                      position: 'absolute', top: -11, left: '50%', transform: 'translateX(-50%)',
-                      background: 'var(--pp-gold)', color: 'var(--pp-black)',
-                      fontFamily: "'Syne',sans-serif", fontSize: 9, fontWeight: 800,
-                      letterSpacing: '1px', padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap',
-                    }}>★ Most Popular</div>
-                  )}
-                  <div className="pp-syne" style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--pp-white-dim)', marginBottom: 8 }}>{p.name}</div>
-                  <div className="pp-syne" style={{ fontSize: p.price === 'Custom' ? 18 : 20, fontWeight: 800, color: 'var(--pp-gold)', letterSpacing: '-1px', lineHeight: 1 }}>
-                    {p.price === 'Custom' ? 'Custom' : <><span style={{ fontSize: 12, verticalAlign: 'top', marginTop: 3, display: 'inline-block' }}>₹</span>{p.price}</>}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--pp-white-dim)', margin: '6px 0 8px' }}>{p.emp} Employees</div>
-                  <div style={{
-                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-                    borderRadius: 6, padding: '5px 8px', marginBottom: 10,
-                  }}>
-                    <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '1.5px', color: 'rgba(255,255,255,0.3)', fontWeight: 600 }}>Annual AMC</div>
-                    <div className="pp-syne" style={{ fontSize: 13, fontWeight: 700, color: 'var(--pp-white)' }}>{p.amc === 'Custom' ? 'Custom' : `₹${p.amc} / year`}</div>
-                  </div>
-                  <div className="pp-divider" />
-                  {p.features.map(f => <div key={f} className="pp-plan-feat">{f}</div>)}
-                  {p.dimFeatures.map(f => <div key={f} className="pp-plan-feat dim">{f}</div>)}
+              <div style={{
+                background: 'rgba(212,168,67,0.08)',
+                border: '1px solid var(--pp-border)',
+                borderRadius: 14,
+                padding: '24px 20px',
+                marginBottom: 24,
+                maxWidth: 420,
+                marginLeft: 'auto',
+                marginRight: 'auto',
+              }}>
+                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--pp-gold-dim)', fontWeight: 600, marginBottom: 8 }}>
+                  All Plans Include
                 </div>
-              ))}
-            </div>
-
-            {/* GST / branch note */}
-            <div style={{
-              marginTop: 14, padding: '13px 18px',
-              background: 'rgba(212,168,67,0.06)', border: '1px solid var(--pp-border)',
-              borderRadius: 10, display: 'flex', alignItems: 'center', gap: 12, fontSize: 12, color: 'var(--pp-white-dim)',
-            }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pp-gold)" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0 }}>
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-              <span>All prices are <strong style={{ color: 'var(--pp-white)' }}>exclusive of 18% GST</strong>, applicable on both one-time and AMC charges.
-              For <strong style={{ color: 'var(--pp-white)' }}>multiple branches</strong>, pricing may vary — contact
-              Anish: <strong style={S.gold}>+91 98424 81388</strong> / Thanveer: <strong style={S.gold}>+91 96008 44041</strong></span>
-            </div>
-
-            {/* ── comparison table ── */}
-            <div className="pp-compare-wrap" style={{ marginTop: 36 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-                <div>
-                  <div className="pp-eyebrow" style={{ marginBottom: 4 }}>Why PunchPay?</div>
-                  <div className="pp-syne" style={{ fontSize: 20, fontWeight: 800, letterSpacing: '-0.5px', color: 'var(--pp-white)' }}>Pay Once. Save Every Month.</div>
+                <div className="pp-syne" style={{ fontSize: 40, fontWeight: 800, color: 'var(--pp-gold)', letterSpacing: '-2px', lineHeight: 1 }}>
+                  <span style={{ fontSize: 18, verticalAlign: 'top', marginTop: 6, display: 'inline-block' }}>₹</span>
+                  49
+                  <span style={{ fontSize: 16, color: 'var(--pp-white-dim)', fontWeight: 500, letterSpacing: 0 }}>/employee/mo</span>
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--pp-white-dim)', textAlign: 'right', maxWidth: 240, lineHeight: 1.6 }}>
-                  Others charge <strong style={{ color: '#e74c3c' }}>₹50/employee/month</strong> forever.<br/>PunchPay is a one-time investment.
+                <div style={{ fontSize: 12, color: 'var(--pp-white-dim)', marginTop: 6 }}>billed annually</div>
+                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 10, lineHeight: 1.5 }}>
+                  Same price on Silver, Gold, Platinum, Titanium &amp; Enterprise
                 </div>
               </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr>
-                    <th style={{ ...{padding:'10px 12px',textAlign:'left',fontSize:10,textTransform:'uppercase',letterSpacing:'1px',fontWeight:700,color:'var(--pp-white-dim)'}, background:'rgba(255,255,255,0.04)', borderRadius:'8px 0 0 0' }}>Shop Size</th>
-                    <th className="pp-cmp-th" style={{ background:'rgba(192,57,43,0.15)', color:'#e74c3c' }}>Other SaaS<br/><span style={{fontWeight:400,fontSize:9}}>(₹50/emp/month)</span></th>
-                    <th className="pp-cmp-th" style={{ background:'rgba(192,57,43,0.1)', color:'#e74c3c' }}>3 Year Cost<br/><span style={{fontWeight:400,fontSize:9}}>(Other SaaS)</span></th>
-                    <th className="pp-cmp-th" style={{ background:'rgba(212,168,67,0.12)', color:'var(--pp-gold)' }}>PunchPay<br/><span style={{fontWeight:400,fontSize:9}}>(One-time + AMC)</span></th>
-                    <th className="pp-cmp-th" style={{ background:'rgba(212,168,67,0.12)', color:'var(--pp-gold)' }}>3 Year Cost<br/><span style={{fontWeight:400,fontSize:9}}>(PunchPay)</span></th>
-                    <th className="pp-cmp-th" style={{ background:'rgba(39,174,96,0.15)', color:'#27ae60', borderRadius:'0 8px 0 0' }}>You Save</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {cmpRows.map((r, i) => (
-                    <tr key={r.emp} style={{ borderBottom: i < cmpRows.length-1 ? '1px solid rgba(255,255,255,0.04)' : 'none', background: i%2===0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
-                      <td style={{ padding:'10px 12px', color:'var(--pp-white)', fontWeight:600, fontSize:11 }}>{r.emp}</td>
-                      <td className="pp-cmp-td" style={{ color:'#e74c3c' }}>{r.other_mo}<br/><span style={{fontSize:10,color:'rgba(255,255,255,0.3)'}}>₹{parseInt(r.other_mo.replace(/[₹,\/mo]/g,'').trim())*12}/yr</span></td>
-                      <td className="pp-cmp-td" style={{ color:'#e74c3c', fontWeight:700 }}>{r.other_3y}</td>
-                      <td className="pp-cmp-td" style={{ color:'var(--pp-gold)' }}>{r.pp}<br/><span style={{fontSize:10,color:'rgba(255,255,255,0.3)'}}>{r.pp_plan}</span></td>
-                      <td className="pp-cmp-td" style={{ color:'var(--pp-gold)', fontWeight:700 }}>{r.pp_3y}</td>
-                      <td className="pp-cmp-td pp-syne" style={{ color:'#27ae60', fontWeight:800 }}>{r.save}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              <div style={{ marginTop:10, padding:'10px 14px', background:'rgba(39,174,96,0.08)', border:'1px solid rgba(39,174,96,0.25)', borderRadius:8, fontSize:11, color:'var(--pp-white-dim)', display:'flex', alignItems:'center', gap:10 }}>
-                <span style={{fontSize:15}}>💡</span>
-                <span><strong style={{color:'#27ae60'}}>PunchPay pays for itself within 2 years</strong> for any shop with 50+ employees — and keeps saving money every year after.</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 12, marginBottom: 28 }}>
+                {[
+                  'Silver to Enterprise plans',
+                  'License & setup from ₹10,000',
+                  'Multi-branch available',
+                ].map((t) => (
+                  <div
+                    key={t}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      fontSize: 12,
+                      color: 'var(--pp-white-dim)',
+                      background: 'rgba(255,255,255,0.04)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 20,
+                      padding: '6px 14px',
+                    }}
+                  >
+                    <span style={S.gold}>✓</span> {t}
+                  </div>
+                ))}
               </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 14 }}>
+                <a
+                  href={WHATSAPP_PRICING_LINK}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="pp-btn-gold"
+                  style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#0A0A0A"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M11.999 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5.006L2 22l5.135-1.347A9.953 9.953 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2z"/></svg>
+                  Get Plans & Pricing
+                </a>
+                <button type="button" className="pp-btn-ghost" onClick={() => handleScrollToSection('demo')}>
+                  Request a Demo
+                </button>
+              </div>
+
+              <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 20, lineHeight: 1.6 }}>
+                GST applies on license, setup, and subscription charges. Multi-branch pricing may vary.
+                <br />
+                Anish: <strong style={S.gold}>+91 98424 81388</strong> · Thanveer: <strong style={S.gold}>+91 96008 44041</strong>
+              </p>
             </div>
           </div>
         </section>
@@ -1714,7 +1681,7 @@ export default function LoginPage() {
           <div>
             <div className="pp-syne" style={{ fontSize:12, fontWeight:700, color:'var(--pp-white-dim)', marginBottom:14, letterSpacing:'1px', textTransform:'uppercase' }}>Product</div>
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              {[['Features','features'],['How it Works','how-it-works'],['Pricing','pricing'],['Login','login-section']].map(([l,id]) => (
+              {[['Features','features'],['How it Works','how-it-works'],['Plans & Pricing','pricing'],['Login','login-section']].map(([l,id]) => (
                 <button key={id} type="button" className="pp-nav-link" style={{ textAlign:'left', fontSize:12 }} onClick={() => handleScrollToSection(id)}>{l}</button>
               ))}
             </div>
