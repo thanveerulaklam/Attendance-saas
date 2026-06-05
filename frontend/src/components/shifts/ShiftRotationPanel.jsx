@@ -2,6 +2,18 @@ import { useEffect, useState } from 'react';
 import { authFetch } from '../../utils/api';
 import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
 
+function shiftNameForSlot(group, slot) {
+  if (slot === 'A') return group.shift_a_name || 'Shift 1';
+  if (slot === 'B') return group.shift_b_name || 'Shift 2';
+  if (slot === 'C') return group.shift_c_name || 'Shift 3';
+  return slot;
+}
+
+function shiftNameFromList(shifts, id) {
+  if (!id) return null;
+  return shifts.find((s) => String(s.id) === String(id))?.shift_name;
+}
+
 export default function ShiftRotationPanel({ shifts }) {
   const [groups, setGroups] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -185,9 +197,9 @@ export default function ShiftRotationPanel({ shifts }) {
       <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-700">
         <p className="font-medium text-slate-900">What to do here (optional)</p>
         <p className="mt-1">
-          Create a group, link <strong>Shift A</strong> and <strong>Shift B</strong> (your Day and
-          Night templates), add employees to slot A or B, and set how many weeks between swaps.
-          Use <strong>Rotate now</strong> for an immediate swap, or wait for the next rotation date.
+          Pick the shifts that swap (e.g. Day and Night), add employees to their current shift in
+          the cycle, and set how many weeks between swaps. Use <strong>Rotate now</strong> for an
+          immediate swap, or wait for the next rotation date.
         </p>
       </div>
 
@@ -203,57 +215,98 @@ export default function ShiftRotationPanel({ shifts }) {
       >
         <h2 className="text-sm font-semibold text-slate-900">New rotation group</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <input
-            value={form.name}
-            onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-            placeholder="Group name (e.g. Production line 1)"
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
-          <select
-            value={form.shift_a_id}
-            onChange={(e) => setForm((p) => ({ ...p, shift_a_id: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="">Shift A (slot A)</option>
-            {shifts.map((s) => (
-              <option key={s.id} value={s.id}>{s.shift_name}</option>
-            ))}
-          </select>
-          <select
-            value={form.shift_b_id}
-            onChange={(e) => setForm((p) => ({ ...p, shift_b_id: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="">Shift B (slot B)</option>
-            {shifts.map((s) => (
-              <option key={s.id} value={s.id}>{s.shift_name}</option>
-            ))}
-          </select>
-          <select
-            value={form.shift_c_id}
-            onChange={(e) => setForm((p) => ({ ...p, shift_c_id: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="">Shift C (optional)</option>
-            {shifts.map((s) => (
-              <option key={s.id} value={s.id}>{s.shift_name}</option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min={1}
-            value={form.interval_weeks}
-            onChange={(e) => setForm((p) => ({ ...p, interval_weeks: e.target.value }))}
-            placeholder="Interval (weeks)"
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
-          <input
-            type="date"
-            value={form.anchor_date}
-            onChange={(e) => setForm((p) => ({ ...p, anchor_date: e.target.value }))}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          />
+          <div className="sm:col-span-2 lg:col-span-3">
+            <input
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              placeholder="Group name (e.g. Production line 1)"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              First shift in rotation
+            </label>
+            <select
+              value={form.shift_a_id}
+              onChange={(e) => setForm((p) => ({ ...p, shift_a_id: e.target.value }))}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="">Select shift…</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id}>{s.shift_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              Second shift in rotation
+            </label>
+            <select
+              value={form.shift_b_id}
+              onChange={(e) => setForm((p) => ({ ...p, shift_b_id: e.target.value }))}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="">Select shift…</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id}>{s.shift_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              Third shift (optional)
+            </label>
+            <select
+              value={form.shift_c_id}
+              onChange={(e) => setForm((p) => ({ ...p, shift_c_id: e.target.value }))}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="">None</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id}>{s.shift_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              Swap every (weeks)
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={form.interval_weeks}
+              onChange={(e) => setForm((p) => ({ ...p, interval_weeks: e.target.value }))}
+              placeholder="2"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">
+              Rotation start date
+            </label>
+            <input
+              type="date"
+              value={form.anchor_date}
+              onChange={(e) => setForm((p) => ({ ...p, anchor_date: e.target.value }))}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </div>
         </div>
+        {form.shift_a_id && form.shift_b_id && (
+          <p className="text-[11px] text-slate-600">
+            Employees swap between{' '}
+            <strong>{shiftNameFromList(shifts, form.shift_a_id)}</strong> and{' '}
+            <strong>{shiftNameFromList(shifts, form.shift_b_id)}</strong>
+            {form.shift_c_id ? (
+              <>
+                {' '}
+                (and <strong>{shiftNameFromList(shifts, form.shift_c_id)}</strong> if 3-way)
+              </>
+            ) : null}{' '}
+            every {form.interval_weeks || 2} week(s).
+          </p>
+        )}
         <button
           type="submit"
           disabled={creating}
@@ -281,8 +334,8 @@ export default function ShiftRotationPanel({ shifts }) {
                   {String(group.next_rotation_date).slice(0, 10)}
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  A: {group.shift_a_name} · B: {group.shift_b_name}
-                  {group.shift_c_name ? ` · C: ${group.shift_c_name}` : ''}
+                  Rotates: {group.shift_a_name} ↔ {group.shift_b_name}
+                  {group.shift_c_name ? ` ↔ ${group.shift_c_name}` : ''}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -310,14 +363,17 @@ export default function ShiftRotationPanel({ shifts }) {
                 <span className="font-medium">After next rotation: </span>
                 {group.preview
                   .slice(0, 5)
-                  .map((p) => `${p.employee_name} → slot ${p.next_slot}`)
+                  .map((p) => `${p.employee_name} → ${shiftNameForSlot(group, p.next_slot)}`)
                   .join(' · ')}
                 {group.preview.length > 5 ? ` · +${group.preview.length - 5} more` : ''}
               </div>
             )}
 
             <div className="space-y-2">
-              <p className="text-[11px] font-medium text-slate-700">Members</p>
+              <div className="flex items-center justify-between text-[11px] font-medium text-slate-700">
+                <span>Members</span>
+                <span className="font-normal text-slate-500">Current shift</span>
+              </div>
               {(group.members || []).length === 0 ? (
                 <p className="text-[11px] text-slate-500">No members yet.</p>
               ) : (
@@ -329,10 +385,13 @@ export default function ShiftRotationPanel({ shifts }) {
                         value={m.slot}
                         onChange={(e) => updateMemberSlot(group.id, m.employee_id, e.target.value)}
                         className="rounded border border-slate-200 px-2 py-1"
+                        aria-label={`Current shift for ${m.employee_name}`}
                       >
-                        <option value="A">Slot A</option>
-                        <option value="B">Slot B</option>
-                        {group.shift_c_id && <option value="C">Slot C</option>}
+                        <option value="A">{group.shift_a_name}</option>
+                        <option value="B">{group.shift_b_name}</option>
+                        {group.shift_c_id && (
+                          <option value="C">{group.shift_c_name}</option>
+                        )}
                       </select>
                     </li>
                   ))}
@@ -361,7 +420,7 @@ export default function ShiftRotationPanel({ shifts }) {
                   }}
                   className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
                 >
-                  Add to slot A{group.shift_a_name ? ` (${group.shift_a_name})` : ''}
+                  Add to {group.shift_a_name || 'shift 1'}
                 </button>
                 <button
                   type="button"
@@ -371,7 +430,7 @@ export default function ShiftRotationPanel({ shifts }) {
                   }}
                   className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
                 >
-                  Add to slot B{group.shift_b_name ? ` (${group.shift_b_name})` : ''}
+                  Add to {group.shift_b_name || 'shift 2'}
                 </button>
                 {group.shift_c_id && (
                   <button
@@ -382,7 +441,7 @@ export default function ShiftRotationPanel({ shifts }) {
                     }}
                     className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200"
                   >
-                    Add to slot C{group.shift_c_name ? ` (${group.shift_c_name})` : ''}
+                    Add to {group.shift_c_name || 'shift 3'}
                   </button>
                 )}
               </div>
