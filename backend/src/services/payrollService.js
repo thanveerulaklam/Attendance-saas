@@ -290,6 +290,24 @@ function addDays(isoDateStr, delta) {
   return addDaysIst(isoDateStr, delta);
 }
 
+/** Holidays/weekly-offs adjacent to an absent day (for treatHolidayAdjacentAbsenceAsWorking). */
+function getAdjacentHolidayAbsentKeys(holidaySet, presentDayKeys, rangeStart, rangeEnd) {
+  const keys = new Set();
+  for (const holidayKey of holidaySet) {
+    if (holidayKey > rangeEnd) continue;
+    const prevKey = addDays(holidayKey, -1);
+    const nextKey = addDays(holidayKey, 1);
+    const absentPrev =
+      prevKey >= rangeStart && prevKey <= rangeEnd && !presentDayKeys.has(prevKey);
+    const absentNext =
+      nextKey >= rangeStart && nextKey <= rangeEnd && !presentDayKeys.has(nextKey);
+    if (absentPrev || absentNext) {
+      keys.add(holidayKey);
+    }
+  }
+  return keys;
+}
+
 /**
  * For incomplete months (current month viewed before month-end), only count working days
  * and absence for dates that have already occurred. Avoids penalizing staff for future days.
@@ -674,20 +692,19 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       }
     }
 
+    const adjacentHolidayAbsentKeys =
+      treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0
+        ? getAdjacentHolidayAbsentKeys(
+            holidaySet,
+            presentDayKeys,
+            firstDayStr,
+            lastDateToConsider
+          )
+        : new Set();
+
     let effectiveWorkingDays = workingDays;
-    if (treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0) {
-      let holidaysCountedAsWorking = 0;
-      for (const holidayKey of holidaySet) {
-        if (holidayKey > lastDateToConsider) continue;
-        const prevKey = addDays(holidayKey, -1);
-        const nextKey = addDays(holidayKey, 1);
-        const absentPrev = prevKey >= firstDayStr && prevKey <= lastDateToConsider && !presentDayKeys.has(prevKey);
-        const absentNext = nextKey >= firstDayStr && nextKey <= lastDateToConsider && !presentDayKeys.has(nextKey);
-        if (absentPrev || absentNext) {
-          holidaysCountedAsWorking += 1;
-        }
-      }
-      effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
+    if (adjacentHolidayAbsentKeys.size > 0) {
+      effectiveWorkingDays = workingDays + adjacentHolidayAbsentKeys.size;
     }
 
     const rawAbsenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
@@ -765,6 +782,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         minutesLate: !isHoliday ? Number(status.minutesLate || 0) : 0,
         status: isHoliday ? 'weekly_off' : status.present ? (status.halfDay ? 'half_day' : 'present') : 'absent',
       });
+    }
+
+    for (const detail of dayDetails) {
+      if (adjacentHolidayAbsentKeys.has(detail.date) && detail.status === 'weekly_off') {
+        detail.status = 'absent';
+      }
     }
 
     return {
@@ -2678,6 +2701,7 @@ async function generateMonthlyPayrollForAllActive(companyId, year, month, payrol
 }
 
 module.exports = {
+  getAdjacentHolidayAbsentKeys,
   getAttendanceSummary,
   getPayrollBreakdown,
   getAttendanceSummaryForRange,

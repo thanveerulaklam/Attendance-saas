@@ -28,7 +28,7 @@
     color: var(--white);
     width: 794px;
     margin: 0 auto;
-    overflow-x: hidden;
+    overflow-x: auto;
   }
 
   /* ── PAGE 1: HERO ── */
@@ -384,23 +384,38 @@
   /* ── PAGE 3: PRICING ── */
   .pricing-page {
     background: var(--black);
-    padding: 40px 56px 36px;
+    padding: 36px 32px 32px;
+    overflow: visible;
+  }
+
+  .page.pricing-page {
+    overflow: visible;
+    min-height: auto;
+    height: auto;
+    padding-bottom: 48px;
   }
 
   .pricing-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 10px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
     margin-top: 0;
+    padding-top: 18px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: visible;
   }
 
   .plan-card {
     background: var(--card-bg);
     border: 1px solid rgba(255,255,255,0.06);
     border-radius: 14px;
-    padding: 14px 12px;
+    padding: 12px 9px;
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    overflow: visible;
   }
 
   .plan-card.popular {
@@ -412,28 +427,31 @@
   .plan-card.popular::before {
     content: '★ Most Popular';
     position: absolute;
-    top: -11px;
+    top: -14px;
     left: 50%;
     transform: translateX(-50%);
     background: var(--gold);
     color: var(--black);
     font-family: 'Syne', sans-serif;
-    font-size: 9px;
+    font-size: 8px;
     font-weight: 800;
-    letter-spacing: 1px;
-    padding: 3px 10px;
+    letter-spacing: 0.5px;
+    padding: 4px 8px;
     border-radius: 20px;
     white-space: nowrap;
+    z-index: 3;
+    line-height: 1.2;
   }
 
   .plan-name {
     font-family: 'Syne', sans-serif;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.5px;
     color: var(--white-dim);
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+    word-break: break-word;
   }
 
   .plan-price {
@@ -546,10 +564,12 @@
 
   .plan-license .plan-license-price {
     font-family: 'Syne', sans-serif;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 800;
     color: var(--gold);
     letter-spacing: -0.5px;
+    line-height: 1.15;
+    word-break: break-word;
   }
 
   .plan-card.popular .plan-license .plan-license-price {
@@ -557,9 +577,10 @@
   }
 
   .plan-limit {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--white-dim);
-    margin: 6px 0 10px;
+    margin: 4px 0 8px;
+    line-height: 1.35;
   }
 
   .plan-divider {
@@ -569,13 +590,14 @@
   }
 
   .plan-feature {
-    font-size: 11px;
+    font-size: 9.5px;
     color: var(--white-dim);
-    padding: 3px 0;
+    padding: 2px 0;
     display: flex;
     align-items: flex-start;
-    gap: 7px;
-    line-height: 1.4;
+    gap: 5px;
+    line-height: 1.35;
+    word-break: break-word;
   }
 
   .plan-feature::before {
@@ -793,6 +815,29 @@
     color: rgba(255,255,255,0.25);
     letter-spacing: 2px;
     text-transform: uppercase;
+  }
+
+  /* Chrome print/PDF: large text-shadow blur renders as solid gold blocks.
+     Disable glows, shadows, and noise overlay when saving as PDF. */
+  @media print {
+    .page { overflow: visible !important; min-height: auto !important; }
+    .page::before { display: none !important; }
+
+    .pricing-subscription-hero {
+      background: #161200 !important;
+      box-shadow: none !important;
+    }
+
+    .pricing-subscription-hero .sub-price {
+      text-shadow: none !important;
+    }
+
+    .pricing-grid { padding-top: 24px; }
+    .plan-card.popular {
+      background: #161200 !important;
+      padding-top: 18px;
+    }
+    .plan-card.popular::before { top: 8px; }
   }
 </style>
 </head>
