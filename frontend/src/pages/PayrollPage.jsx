@@ -2364,31 +2364,34 @@ export default function PayrollPage() {
       </section>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
-          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
-            <h2 className="text-sm font-semibold text-slate-900">
-              {modalEmployeeId
-                ? 'Generate payroll'
-                : payrollMode === 'monthly'
-                  ? 'Generate payroll for all'
-                  : 'Generate weekly payroll for all'}
-            </h2>
-            <p className="mt-1 text-[11px] text-slate-500">
-              {modalEmployeeId && selectedGenerateEmployee
-                ? payrollMode === 'monthly'
-                  ? `Create or update payroll for ${formatEmployeeOption(selectedGenerateEmployee)} for the selected month.`
-                  : `Create or update weekly payroll for ${formatEmployeeOption(selectedGenerateEmployee)} starting from ${weekStartDate}.`
-                : modalEmployeeId
-                  ? 'Selected employee is not eligible. Choose another employee or clear the selection.'
-                : activeCount > 0
+        <div className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-slate-900/40 p-3">
+          <div className="flex w-full max-w-sm max-h-[90vh] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-soft">
+            <div className="shrink-0 border-b border-slate-100 px-4 py-4">
+              <h2 className="text-sm font-semibold text-slate-900">
+                {modalEmployeeId
+                  ? 'Generate payroll'
+                  : payrollMode === 'monthly'
+                    ? 'Generate payroll for all'
+                    : 'Generate weekly payroll for all'}
+              </h2>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {modalEmployeeId && selectedGenerateEmployee
                   ? payrollMode === 'monthly'
-                    ? `Create or update payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for the selected month. Uses current attendance data.`
-                    : `Create or update weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) starting from ${weekStartDate}. Uses current attendance data.`
-                  : modalBranchId
-                    ? 'No eligible employees in the selected branch. Choose another branch or add employees.'
-                    : 'No eligible employees. Add active employees to generate payroll.'}
-            </p>
-            <form onSubmit={handleGenerateAll} className="mt-4 space-y-3">
+                    ? `Create or update payroll for ${formatEmployeeOption(selectedGenerateEmployee)} for the selected month.`
+                    : `Create or update weekly payroll for ${formatEmployeeOption(selectedGenerateEmployee)} starting from ${weekStartDate}.`
+                  : modalEmployeeId
+                    ? 'Selected employee is not eligible. Choose another employee or clear the selection.'
+                  : activeCount > 0
+                    ? payrollMode === 'monthly'
+                      ? `Create or update payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for the selected month. Uses current attendance data.`
+                      : `Create or update weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) starting from ${weekStartDate}. Uses current attendance data.`
+                    : modalBranchId
+                      ? 'No eligible employees in the selected branch. Choose another branch or add employees.'
+                      : 'No eligible employees. Add active employees to generate payroll.'}
+              </p>
+            </div>
+            <form onSubmit={handleGenerateAll} className="flex min-h-0 flex-1 flex-col">
+              <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
               <div>
                 <label className="text-[11px] font-medium text-slate-700">Branch</label>
                 <select
@@ -2622,7 +2625,8 @@ export default function PayrollPage() {
                   </p>
                 </div>
               )}
-              <div className="flex justify-end gap-2 pt-2">
+              </div>
+              <div className="flex shrink-0 justify-end gap-2 border-t border-slate-100 bg-white px-4 py-3">
                 <button
                   type="button"
                   disabled={generating}
