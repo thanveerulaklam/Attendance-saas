@@ -556,6 +556,7 @@ export default function PayrollPage() {
     year: currentYear(),
     month: String(new Date().getMonth() + 1),
     branch_id: '',
+    employee_id: '',
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
@@ -564,6 +565,7 @@ export default function PayrollPage() {
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
     branch_id: '',
+    employee_id: '',
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
@@ -644,6 +646,22 @@ export default function PayrollPage() {
     const branch = branches.find((b) => String(b.id) === String(modalBranchId));
     return branch?.name || `branch #${modalBranchId}`;
   }, [modalBranchId, branches]);
+
+  const modalEmployeeId =
+    payrollMode === 'monthly' ? generateForm.employee_id : weeklyGenerateForm.employee_id;
+
+  const employeesEligibleForGenerate = useMemo(() => {
+    const frequency = payrollMode === 'monthly' ? 'monthly' : 'weekly';
+    return (employeesForGenerate || []).filter(
+      (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === frequency
+    );
+  }, [employeesForGenerate, payrollMode]);
+
+  const selectedGenerateEmployee = useMemo(
+    () =>
+      employeesEligibleForGenerate.find((e) => String(e.id) === String(modalEmployeeId)) || null,
+    [employeesEligibleForGenerate, modalEmployeeId]
+  );
 
   useEffect(() => {
     if (monthlyOnlyPayroll && payrollMode !== 'monthly') {
@@ -1538,33 +1556,40 @@ export default function PayrollPage() {
     setAttendanceMeta(null);
   };
 
-  const activeMonthlyCount = employeesForGenerate.filter(
-    (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'monthly'
-  ).length;
-  const activeWeeklyCount = employeesForGenerate.filter(
-    (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'weekly'
-  ).length;
-  const activeCount =
-    monthlyOnlyPayroll || payrollMode === 'monthly' ? activeMonthlyCount : activeWeeklyCount;
+  const activeCount = employeesEligibleForGenerate.length;
+  const canGeneratePayroll = modalEmployeeId ? Boolean(selectedGenerateEmployee) : activeCount > 0;
 
   const openGenerateModal = () => {
     const presetBranch = branchFilter || '';
-    setGenerateForm((f) => ({ ...f, branch_id: presetBranch }));
-    setWeeklyGenerateForm((f) => ({ ...f, branch_id: presetBranch }));
+    const presetEmployee = employeeId || '';
+    setGenerateForm((f) => ({ ...f, branch_id: presetBranch, employee_id: presetEmployee }));
+    setWeeklyGenerateForm((f) => ({ ...f, branch_id: presetBranch, employee_id: presetEmployee }));
     setModalOpen(true);
   };
+
+  const formatEmployeeOption = (emp) => `${emp.name} (${emp.employee_code || emp.id})`;
 
   const handleGenerateAll = async (e) => {
     e.preventDefault();
     if (payrollMode === 'monthly') {
-      const { year: y, month: m } = generateForm;
+      const { year: y, month: m, employee_id: selectedEmployeeId } = generateForm;
       if (!y || !m) {
         setToast({ type: 'error', message: 'Select year and month' });
         return;
       }
 
+      const monthLabel = new Date(2000, Number(m) - 1, 1).toLocaleString('default', {
+        month: 'long',
+      });
+      const isSingle = Boolean(selectedEmployeeId);
+      const employeeLabel = selectedGenerateEmployee
+        ? formatEmployeeOption(selectedGenerateEmployee)
+        : 'selected employee';
+
       const confirmed = window.confirm(
-        `Generate payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for ${new Date(2000, Number(m) - 1, 1).toLocaleString('default', { month: 'long' })} ${y}? This will create or update records from current attendance.`
+        isSingle
+          ? `Generate payroll for ${employeeLabel} for ${monthLabel} ${y}? This will create or update the record from current attendance.`
+          : `Generate payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for ${monthLabel} ${y}? This will create or update records from current attendance.`
       );
       if (!confirmed) return;
 
@@ -1584,15 +1609,20 @@ export default function PayrollPage() {
         if (noLeaveIncentiveRaw !== '') {
           payload.no_leave_incentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
         }
-        if (generateForm.branch_id) {
+        if (isSingle) {
+          payload.employee_id = Number(selectedEmployeeId);
+        } else if (generateForm.branch_id) {
           payload.branch_id = Number(generateForm.branch_id);
         }
 
-        const res = await authFetch('/api/payroll/generate-all', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
+        const res = await authFetch(
+          isSingle ? '/api/payroll/generate' : '/api/payroll/generate-all',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          }
+        );
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           const msg =
@@ -1602,23 +1632,28 @@ export default function PayrollPage() {
           throw new Error(msg);
         }
         const json = await res.json();
-        const data = json.data || {};
-        const generated = data.generated ?? 0;
-        const failed = data.failed ?? 0;
         setModalOpen(false);
-        const errors = Array.isArray(data.errors) ? data.errors : [];
-        setGenerationFailures(errors);
-        const successMsg =
-          failed > 0
-            ? `Payroll generated for ${generated} employees. ${failed} failed.`
-            : `Payroll generated for ${generated} employee${
-                generated !== 1 ? 's' : ''
-              }.`;
-        setToast({ type: 'success', message: successMsg });
+        if (isSingle) {
+          setGenerationFailures([]);
+          setToast({ type: 'success', message: `Payroll generated for ${employeeLabel}.` });
+        } else {
+          const data = json.data || {};
+          const generated = data.generated ?? 0;
+          const failed = data.failed ?? 0;
+          const errors = Array.isArray(data.errors) ? data.errors : [];
+          setGenerationFailures(errors);
+          const successMsg =
+            failed > 0
+              ? `Payroll generated for ${generated} employees. ${failed} failed.`
+              : `Payroll generated for ${generated} employee${
+                  generated !== 1 ? 's' : ''
+                }.`;
+          setToast({ type: 'success', message: successMsg });
+        }
         setPage(1);
         setYear(Number(y));
         setMonth(m);
-        setEmployeeId('');
+        setEmployeeId(isSingle ? String(selectedEmployeeId) : '');
         setReloadKey((k) => k + 1);
       } catch (err) {
         setToast({
@@ -1632,28 +1667,43 @@ export default function PayrollPage() {
     }
 
     // weekly
+    const selectedEmployeeId = weeklyGenerateForm.employee_id;
+    const isSingle = Boolean(selectedEmployeeId);
+    const employeeLabel = selectedGenerateEmployee
+      ? formatEmployeeOption(selectedGenerateEmployee)
+      : 'selected employee';
+
     const confirmed = window.confirm(
-      `Generate weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for week starting ${weekStartDate}? This will create or update records from current attendance.`
+      isSingle
+        ? `Generate weekly payroll for ${employeeLabel} for week starting ${weekStartDate}? This will create or update the record from current attendance.`
+        : `Generate weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for week starting ${weekStartDate}? This will create or update records from current attendance.`
     );
     if (!confirmed) return;
 
     try {
       setGenerating(true);
       setToast(null);
-      const res = await authFetch('/api/payroll/generate-all-weekly', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          week_start_date: weekStartDate,
-          ...(weeklyGenerateForm.branch_id
-            ? { branch_id: Number(weeklyGenerateForm.branch_id) }
-            : {}),
-          include_overtime: weeklyGenerateForm.includeOvertime !== false,
-          treat_holiday_adjacent_absence_as_working:
-            weeklyGenerateForm.treatHolidayAdjacentAbsenceAsWorking === true,
-          apply_advance_repayments: weeklyGenerateForm.applyAdvanceRepayments === true,
-        }),
-      });
+      const payload = {
+        week_start_date: weekStartDate,
+        include_overtime: weeklyGenerateForm.includeOvertime !== false,
+        treat_holiday_adjacent_absence_as_working:
+          weeklyGenerateForm.treatHolidayAdjacentAbsenceAsWorking === true,
+        apply_advance_repayments: weeklyGenerateForm.applyAdvanceRepayments === true,
+      };
+      if (isSingle) {
+        payload.employee_id = Number(selectedEmployeeId);
+      } else if (weeklyGenerateForm.branch_id) {
+        payload.branch_id = Number(weeklyGenerateForm.branch_id);
+      }
+
+      const res = await authFetch(
+        isSingle ? '/api/payroll/generate-weekly' : '/api/payroll/generate-all-weekly',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }
+      );
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const msg =
@@ -1663,21 +1713,26 @@ export default function PayrollPage() {
         throw new Error(msg);
       }
       const json = await res.json();
-      const data = json.data || {};
-      const generated = data.generated ?? 0;
-      const failed = data.failed ?? 0;
       setModalOpen(false);
-      const errors = Array.isArray(data.errors) ? data.errors : [];
-      setGenerationFailures(errors);
-      const successMsg =
-        failed > 0
-          ? `Weekly payroll generated for ${generated} employees. ${failed} failed.`
-          : `Weekly payroll generated for ${generated} employee${
-              generated !== 1 ? 's' : ''
-            }.`;
-      setToast({ type: 'success', message: successMsg });
+      if (isSingle) {
+        setGenerationFailures([]);
+        setToast({ type: 'success', message: `Weekly payroll generated for ${employeeLabel}.` });
+      } else {
+        const data = json.data || {};
+        const generated = data.generated ?? 0;
+        const failed = data.failed ?? 0;
+        const errors = Array.isArray(data.errors) ? data.errors : [];
+        setGenerationFailures(errors);
+        const successMsg =
+          failed > 0
+            ? `Weekly payroll generated for ${generated} employees. ${failed} failed.`
+            : `Weekly payroll generated for ${generated} employee${
+                generated !== 1 ? 's' : ''
+              }.`;
+        setToast({ type: 'success', message: successMsg });
+      }
       setPage(1);
-      setEmployeeId('');
+      setEmployeeId(isSingle ? String(selectedEmployeeId) : '');
       setReloadKey((k) => k + 1);
     } catch (err) {
       setToast({
@@ -2312,16 +2367,26 @@ export default function PayrollPage() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
           <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-soft">
             <h2 className="text-sm font-semibold text-slate-900">
-              {payrollMode === 'monthly' ? 'Generate payroll for all' : 'Generate weekly payroll for all'}
+              {modalEmployeeId
+                ? 'Generate payroll'
+                : payrollMode === 'monthly'
+                  ? 'Generate payroll for all'
+                  : 'Generate weekly payroll for all'}
             </h2>
             <p className="mt-1 text-[11px] text-slate-500">
-              {activeCount > 0
+              {modalEmployeeId && selectedGenerateEmployee
                 ? payrollMode === 'monthly'
-                  ? `Create or update payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for the selected month. Uses current attendance data.`
-                  : `Create or update weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) starting from ${weekStartDate}. Uses current attendance data.`
-                : modalBranchId
-                  ? 'No eligible employees in the selected branch. Choose another branch or add employees.'
-                  : 'No eligible employees. Add active employees to generate payroll.'}
+                  ? `Create or update payroll for ${formatEmployeeOption(selectedGenerateEmployee)} for the selected month.`
+                  : `Create or update weekly payroll for ${formatEmployeeOption(selectedGenerateEmployee)} starting from ${weekStartDate}.`
+                : modalEmployeeId
+                  ? 'Selected employee is not eligible. Choose another employee or clear the selection.'
+                : activeCount > 0
+                  ? payrollMode === 'monthly'
+                    ? `Create or update payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for the selected month. Uses current attendance data.`
+                    : `Create or update weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) starting from ${weekStartDate}. Uses current attendance data.`
+                  : modalBranchId
+                    ? 'No eligible employees in the selected branch. Choose another branch or add employees.'
+                    : 'No eligible employees. Add active employees to generate payroll.'}
             </p>
             <form onSubmit={handleGenerateAll} className="mt-4 space-y-3">
               <div>
@@ -2331,9 +2396,9 @@ export default function PayrollPage() {
                   onChange={(e) => {
                     const branch_id = e.target.value;
                     if (payrollMode === 'monthly') {
-                      setGenerateForm((f) => ({ ...f, branch_id }));
+                      setGenerateForm((f) => ({ ...f, branch_id, employee_id: '' }));
                     } else {
-                      setWeeklyGenerateForm((f) => ({ ...f, branch_id }));
+                      setWeeklyGenerateForm((f) => ({ ...f, branch_id, employee_id: '' }));
                     }
                   }}
                   className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
@@ -2346,7 +2411,34 @@ export default function PayrollPage() {
                   ))}
                 </select>
                 <p className="mt-1 text-[10px] text-slate-500">
-                  Generate for one branch only, or leave as all branches to run company-wide payroll.
+                  Narrow employees by branch, or leave as all branches for company-wide payroll.
+                </p>
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-700">Employee</label>
+                <select
+                  value={modalEmployeeId}
+                  onChange={(e) => {
+                    const employee_id = e.target.value;
+                    if (payrollMode === 'monthly') {
+                      setGenerateForm((f) => ({ ...f, employee_id }));
+                    } else {
+                      setWeeklyGenerateForm((f) => ({ ...f, employee_id }));
+                    }
+                  }}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+                >
+                  <option value="">
+                    {modalBranchId ? 'All employees in branch' : 'All employees'}
+                  </option>
+                  {employeesEligibleForGenerate.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {formatEmployeeOption(emp)}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Pick one employee for individual payroll, or leave blank to generate for everyone in scope.
                 </p>
               </div>
               {payrollMode === 'monthly' ? (
@@ -2541,10 +2633,16 @@ export default function PayrollPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={generating || activeCount === 0}
+                  disabled={generating || !canGeneratePayroll}
                   className="rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {generating ? 'Generating...' : payrollMode === 'monthly' ? 'Generate for all' : 'Generate weekly for all'}
+                  {generating
+                    ? 'Generating...'
+                    : modalEmployeeId
+                      ? 'Generate payroll'
+                      : payrollMode === 'monthly'
+                        ? 'Generate for all'
+                        : 'Generate weekly for all'}
                 </button>
               </div>
             </form>

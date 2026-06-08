@@ -49,7 +49,7 @@ async function list(req, res, next) {
 /**
  * POST /api/payroll/generate
  * Auth: admin or hr (JWT)
- * Body: { employee_id, year, month, include_overtime?, treat_holiday_adjacent_absence_as_working? }
+ * Body: { employee_id, year, month, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_advance_repayments? }
  */
 async function generate(req, res, next) {
   try {
@@ -60,6 +60,7 @@ async function generate(req, res, next) {
       month: monthRaw,
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
+      apply_advance_repayments: applyAdvanceRepaymentsRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
       encash_unused_paid_leave: encashUnusedPaidLeaveRaw,
     } = req.body || {};
@@ -69,6 +70,7 @@ async function generate(req, res, next) {
     const month = Number(monthRaw);
     const includeOvertime = includeOvertimeRaw !== false;
     const treatHolidayAdjacentAbsenceAsWorking = treatHolidayRaw === true;
+    const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
     const hasNoLeaveIncentiveInput =
       noLeaveIncentiveRaw !== undefined &&
       noLeaveIncentiveRaw !== null &&
@@ -88,6 +90,7 @@ async function generate(req, res, next) {
     const result = await generateMonthlyPayroll(companyId, employeeId, year, month, {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
+      apply_advance_repayments: applyAdvanceRepayments,
       noLeaveIncentive,
       encashUnusedPaidLeave,
       allowedBranchIds: req.allowedBranchIds,
