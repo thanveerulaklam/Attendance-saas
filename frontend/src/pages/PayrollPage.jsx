@@ -555,6 +555,7 @@ export default function PayrollPage() {
   const [generateForm, setGenerateForm] = useState({
     year: currentYear(),
     month: String(new Date().getMonth() + 1),
+    branch_id: '',
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
@@ -562,6 +563,7 @@ export default function PayrollPage() {
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
+    branch_id: '',
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
@@ -624,6 +626,24 @@ export default function PayrollPage() {
     if (!Number.isFinite(bid)) return employees;
     return (employees || []).filter((e) => Number(e.branch_id) === bid);
   }, [employees, branchFilter]);
+
+  const modalBranchId =
+    payrollMode === 'monthly' ? generateForm.branch_id : weeklyGenerateForm.branch_id;
+
+  const employeesForGenerate = useMemo(() => {
+    if (!modalBranchId) return employees;
+    const bid = Number(modalBranchId);
+    if (!Number.isFinite(bid)) return employees;
+    return (employees || []).filter((e) => Number(e.branch_id) === bid);
+  }, [employees, modalBranchId]);
+
+  const generateBranchLabel = useMemo(() => {
+    if (!modalBranchId) {
+      return branches.length > 1 ? 'all branches' : 'all employees';
+    }
+    const branch = branches.find((b) => String(b.id) === String(modalBranchId));
+    return branch?.name || `branch #${modalBranchId}`;
+  }, [modalBranchId, branches]);
 
   useEffect(() => {
     if (monthlyOnlyPayroll && payrollMode !== 'monthly') {
@@ -1518,14 +1538,21 @@ export default function PayrollPage() {
     setAttendanceMeta(null);
   };
 
-  const activeMonthlyCount = employees.filter(
+  const activeMonthlyCount = employeesForGenerate.filter(
     (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'monthly'
   ).length;
-  const activeWeeklyCount = employees.filter(
+  const activeWeeklyCount = employeesForGenerate.filter(
     (e) => e.status === 'active' && (e.payroll_frequency || 'monthly') === 'weekly'
   ).length;
   const activeCount =
     monthlyOnlyPayroll || payrollMode === 'monthly' ? activeMonthlyCount : activeWeeklyCount;
+
+  const openGenerateModal = () => {
+    const presetBranch = branchFilter || '';
+    setGenerateForm((f) => ({ ...f, branch_id: presetBranch }));
+    setWeeklyGenerateForm((f) => ({ ...f, branch_id: presetBranch }));
+    setModalOpen(true);
+  };
 
   const handleGenerateAll = async (e) => {
     e.preventDefault();
@@ -1537,7 +1564,7 @@ export default function PayrollPage() {
       }
 
       const confirmed = window.confirm(
-        `Generate payroll for all ${activeCount} active employees for ${new Date(2000, Number(m) - 1, 1).toLocaleString('default', { month: 'long' })} ${y}? This will create or update records from current attendance.`
+        `Generate payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for ${new Date(2000, Number(m) - 1, 1).toLocaleString('default', { month: 'long' })} ${y}? This will create or update records from current attendance.`
       );
       if (!confirmed) return;
 
@@ -1556,6 +1583,9 @@ export default function PayrollPage() {
         };
         if (noLeaveIncentiveRaw !== '') {
           payload.no_leave_incentive = Math.max(0, Number(noLeaveIncentiveRaw) || 0);
+        }
+        if (generateForm.branch_id) {
+          payload.branch_id = Number(generateForm.branch_id);
         }
 
         const res = await authFetch('/api/payroll/generate-all', {
@@ -1603,7 +1633,7 @@ export default function PayrollPage() {
 
     // weekly
     const confirmed = window.confirm(
-      `Generate weekly payroll for all ${activeCount} active weekly employees for week starting ${weekStartDate}? This will create or update records from current attendance.`
+      `Generate weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for week starting ${weekStartDate}? This will create or update records from current attendance.`
     );
     if (!confirmed) return;
 
@@ -1615,6 +1645,9 @@ export default function PayrollPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           week_start_date: weekStartDate,
+          ...(weeklyGenerateForm.branch_id
+            ? { branch_id: Number(weeklyGenerateForm.branch_id) }
+            : {}),
           include_overtime: weeklyGenerateForm.includeOvertime !== false,
           treat_holiday_adjacent_absence_as_working:
             weeklyGenerateForm.treatHolidayAdjacentAbsenceAsWorking === true,
@@ -1703,7 +1736,7 @@ export default function PayrollPage() {
         </div>
         <button
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={openGenerateModal}
           disabled={!subscriptionAllowed}
           className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -2284,11 +2317,38 @@ export default function PayrollPage() {
             <p className="mt-1 text-[11px] text-slate-500">
               {activeCount > 0
                 ? payrollMode === 'monthly'
-                  ? `Create or update payroll for all ${activeCount} active employees for the selected month. Uses current attendance data.`
-                  : `Create or update weekly payroll for all ${activeCount} active weekly employees starting from ${weekStartDate}. Uses current attendance data.`
-                : 'No eligible employees. Add active employees to generate payroll.'}
+                  ? `Create or update payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) for the selected month. Uses current attendance data.`
+                  : `Create or update weekly payroll for ${activeCount} active employee${activeCount !== 1 ? 's' : ''} (${generateBranchLabel}) starting from ${weekStartDate}. Uses current attendance data.`
+                : modalBranchId
+                  ? 'No eligible employees in the selected branch. Choose another branch or add employees.'
+                  : 'No eligible employees. Add active employees to generate payroll.'}
             </p>
             <form onSubmit={handleGenerateAll} className="mt-4 space-y-3">
+              <div>
+                <label className="text-[11px] font-medium text-slate-700">Branch</label>
+                <select
+                  value={modalBranchId}
+                  onChange={(e) => {
+                    const branch_id = e.target.value;
+                    if (payrollMode === 'monthly') {
+                      setGenerateForm((f) => ({ ...f, branch_id }));
+                    } else {
+                      setWeeklyGenerateForm((f) => ({ ...f, branch_id }));
+                    }
+                  }}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
+                >
+                  <option value="">All branches</option>
+                  {(branches || []).map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Generate for one branch only, or leave as all branches to run company-wide payroll.
+                </p>
+              </div>
               {payrollMode === 'monthly' ? (
                 <div className="grid grid-cols-2 gap-3">
                   <div>

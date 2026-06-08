@@ -9,6 +9,7 @@ const {
   getWeeklyPayrollBreakdown,
 } = require('../services/payrollService');
 const auditService = require('../services/auditService');
+const { resolveBranchScope } = require('../utils/branchScope');
 
 /**
  * GET /api/payroll
@@ -105,7 +106,7 @@ async function generate(req, res, next) {
 
 /**
  * POST /api/payroll/generate-all
- * Body: { year, month, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_advance_repayments? }
+ * Body: { year, month, branch_id?, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_advance_repayments? }
  * Generates payroll for all active employees for the given month.
  */
 async function generateAll(req, res, next) {
@@ -114,6 +115,7 @@ async function generateAll(req, res, next) {
     const {
       year: yearRaw,
       month: monthRaw,
+      branch_id: branchIdRaw,
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       apply_advance_repayments: applyAdvanceRepaymentsRaw,
@@ -142,18 +144,25 @@ async function generateAll(req, res, next) {
       });
     }
 
+    const allowedBranchIds = await resolveBranchScope({
+      companyId,
+      allowedBranchIds: req.allowedBranchIds,
+      requestedBranchId: branchIdRaw,
+    });
+
     const result = await generateMonthlyPayrollForAllActive(companyId, year, month, {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
       apply_advance_repayments: applyAdvanceRepayments,
       noLeaveIncentive,
       encashUnusedPaidLeave,
-      allowedBranchIds: req.allowedBranchIds,
+      allowedBranchIds,
     });
 
     auditService.log(companyId, req.user?.user_id, 'payroll.generate_all', 'payroll', null, {
       year,
       month,
+      branch_id: branchIdRaw != null && String(branchIdRaw).trim() !== '' ? Number(branchIdRaw) : null,
       generated: result.generated,
       failed: result.failed,
     }).catch(() => {});
@@ -293,13 +302,14 @@ async function generateWeekly(req, res, next) {
 
 /**
  * POST /api/payroll/generate-all-weekly
- * Body: { week_start_date, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_salary_advances?, apply_advance_repayments? }
+ * Body: { week_start_date, branch_id?, include_overtime?, treat_holiday_adjacent_absence_as_working?, apply_salary_advances?, apply_advance_repayments? }
  */
 async function generateAllWeekly(req, res, next) {
   try {
     const companyId = req.companyId;
     const {
       week_start_date: weekStartDateRaw,
+      branch_id: branchIdRaw,
       include_overtime: includeOvertimeRaw,
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       apply_salary_advances: applySalaryAdvancesRaw,
@@ -319,10 +329,16 @@ async function generateAllWeekly(req, res, next) {
       });
     }
 
+    const allowedBranchIds = await resolveBranchScope({
+      companyId,
+      allowedBranchIds: req.allowedBranchIds,
+      requestedBranchId: branchIdRaw,
+    });
+
     const result = await generateWeeklyPayrollForAllActive(companyId, weekStartDate, {
       includeOvertime,
       treatHolidayAdjacentAbsenceAsWorking,
-      allowedBranchIds: req.allowedBranchIds,
+      allowedBranchIds,
       apply_salary_advances: applySalaryAdvances,
       apply_advance_repayments: applyAdvanceRepayments,
     });
@@ -330,6 +346,7 @@ async function generateAllWeekly(req, res, next) {
     auditService
       .log(companyId, req.user?.user_id, 'payroll.generate_all_weekly', 'payroll', null, {
         week_start_date: weekStartDate,
+        branch_id: branchIdRaw != null && String(branchIdRaw).trim() !== '' ? Number(branchIdRaw) : null,
         generated: result.generated,
         failed: result.failed,
       })
