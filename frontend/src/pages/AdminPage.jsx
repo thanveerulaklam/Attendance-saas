@@ -6,6 +6,7 @@ import {
   planDefaultLimits,
   planOptionsForAdminSelect,
 } from '../constants/pricingPlans';
+import AdminFinanceSection from './AdminFinanceSection';
 
 const ADMIN_KEY_STORAGE = 'attendance_saas_admin_key';
 const ADMIN_PLAN_OPTIONS = planOptionsForAdminSelect();
@@ -163,6 +164,12 @@ function paymentNeedsAttention(status) {
   return ['unpaid', 'overdue', 'pending'].includes(status || 'unpaid');
 }
 
+function isOnetimePaid(company) {
+  if (!company) return false;
+  if (company.onetime_fee_paid === true) return true;
+  return (company.onetime_payment_status || 'unpaid') === 'paid';
+}
+
 function getBillingAttentionReasons(company) {
   const reasons = [];
   const accessEnd = company.subscription_end_date || deriveSubscriptionDates(company).end?.toISOString?.();
@@ -297,6 +304,7 @@ export default function AdminPage() {
   const [customerBillingFilter, setCustomerBillingFilter] = useState('all');
   const [renewBusyId, setRenewBusyId] = useState(null);
   const [billingQuickBusyId, setBillingQuickBusyId] = useState(null);
+  const [adminTab, setAdminTab] = useState('operations');
   const [dashboardAudit, setDashboardAudit] = useState([]);
   const [limitsSaving, setLimitsSaving] = useState(false);
   const [limitsForm, setLimitsForm] = useState({
@@ -847,6 +855,12 @@ export default function AdminPage() {
     setPending([]);
     setOverview(null);
     setKeyError('');
+  };
+
+  const handleAdminAuthError = () => {
+    setKeyError('Invalid admin key');
+    sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+    setAdminKey('');
   };
 
   const handleLockToggle = async (company, action) => {
@@ -1406,6 +1420,39 @@ export default function AdminPage() {
           </div>
         )}
 
+        <nav className="mb-6 flex gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm w-fit">
+          <button
+            type="button"
+            onClick={() => setAdminTab('operations')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              adminTab === 'operations'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Operations
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdminTab('accounts')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              adminTab === 'accounts'
+                ? 'bg-emerald-700 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            Accounts
+          </button>
+        </nav>
+
+        {adminTab === 'accounts' ? (
+          <AdminFinanceSection
+            adminKey={adminKey}
+            onAuthError={handleAdminAuthError}
+            setToast={setToast}
+          />
+        ) : (
+          <>
         {/* High-level overview cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 mb-6">
           {['totalCompanies', 'activeCompanies', 'pendingCompanies', 'declinedCompanies', 'lockedCompanies'].map((key) => {
@@ -1632,14 +1679,16 @@ export default function AdminPage() {
                             >
                               AMC received
                             </button>
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => quickMarkOtcPaid(q)}
-                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              OTC received
-                            </button>
+                            {!isOnetimePaid(q) && (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => quickMarkOtcPaid(q)}
+                                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                One-time received
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => setDetailsCompany(q)}
@@ -1999,6 +2048,8 @@ export default function AdminPage() {
             Back to login
           </Link>
         </p>
+          </>
+        )}
 
         {/* Company details modal */}
         {detailsCompany && (
@@ -2101,14 +2152,16 @@ export default function AdminPage() {
                       >
                         AMC received today
                       </button>
-                      <button
-                        type="button"
-                        disabled={billingQuickBusyId === detailsCompany.id}
-                        onClick={() => quickMarkOtcPaid(detailsCompany)}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                      >
-                        One-time received today
-                      </button>
+                      {!isOnetimePaid(detailsCompany) && (
+                        <button
+                          type="button"
+                          disabled={billingQuickBusyId === detailsCompany.id}
+                          onClick={() => quickMarkOtcPaid(detailsCompany)}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          One-time received today
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">

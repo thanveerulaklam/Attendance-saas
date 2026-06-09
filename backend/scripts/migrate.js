@@ -58,6 +58,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'shift_rotation_groups'
   )`,
+  '059_company_payment_ledger.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'company_payment_ledger'
+  )`,
 };
 
 async function hasExistingSchema(client) {

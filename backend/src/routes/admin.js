@@ -15,6 +15,7 @@ const {
   setCompanyEmployeeLimit,
   setCompanyBranchLimit,
   getCollectionsQueue,
+  getFinanceOverview,
   renewCompanySubscription,
   getRecentSuperadminAudit,
   getCompanyAudit,
@@ -51,6 +52,7 @@ router.use(requireApprovalSecret);
 router.get('/pending-companies', listPendingCompanies);
 router.get('/overview', getAdminOverview);
 router.get('/collections-queue', getCollectionsQueue);
+router.get('/finance-overview', getFinanceOverview);
 router.get('/company-details', getCompanyDetails);
 router.get('/recent-superadmin-audit', getRecentSuperadminAudit);
 router.get('/company-audit', getCompanyAudit);

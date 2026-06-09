@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { getEffectiveEmployeeLimit, PLAN_EMPLOYEE_LIMITS } = require('../services/employeeService');
 const { computeNextAmcDueDate } = require('../services/companyService');
+const { recordPaymentsFromBillingChange } = require('../services/paymentLedgerService');
 const auditService = require('../services/auditService');
 const authService = require('../services/authService');
 
@@ -233,7 +234,12 @@ async function updateCompanyBilling(req, res, next) {
     }
 
     const existingResult = await pool.query(
-      `SELECT created_at, status, subscription_start_date, subscription_end_date
+      `SELECT
+         id, created_at, status, plan_code,
+         subscription_start_date, subscription_end_date,
+         onetime_fee_paid, onetime_fee_amount, amc_amount,
+         onetime_payment_status, amc_payment_status,
+         last_onetime_payment_date, last_amc_payment_date
        FROM companies
        WHERE id = $1`,
       [companyId]
@@ -311,6 +317,8 @@ async function updateCompanyBilling(req, res, next) {
         message: 'Company not found',
       });
     }
+
+    await recordPaymentsFromBillingChange(existing, updated, 'admin_billing');
 
     res.status(200).json({
       success: true,
@@ -518,10 +526,12 @@ async function approveCompany(req, res, next) {
         message: 'Company not found or already approved',
       });
     }
+    const approved = result.rows[0];
+    await recordPaymentsFromBillingChange(null, approved, 'approval');
     res.status(200).json({
       success: true,
-      data: result.rows[0],
-      message: `Company "${result.rows[0].name}" is now active. They can log in.`,
+      data: approved,
+      message: `Company "${approved.name}" is now active. They can log in.`,
     });
     await logSuperadminAction(companyId, 'admin.company.approve', 'company', companyId, {
       plan_code,
@@ -1105,6 +1115,220 @@ async function deleteCompany(req, res, next) {
 }
 
 /**
+ * GET /api/admin/finance-overview?month=YYYY-MM&forecast_months=12
+ * Revenue summary, payment ledger (from recorded dates on companies), and AMC forecast.
+ */
+async function getFinanceOverview(req, res, next) {
+  try {
+    const monthParam = String(req.query?.month || '').trim();
+    const forecastMonths = Math.min(24, Math.max(1, Number(req.query?.forecast_months) || 12));
+    const historyMonths = Math.min(24, Math.max(6, Number(req.query?.history_months) || 12));
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    let year = now.getFullYear();
+    let month = now.getMonth() + 1;
+    if (/^\d{4}-\d{2}$/.test(monthParam)) {
+      const [y, m] = monthParam.split('-').map(Number);
+      if (m >= 1 && m <= 12) {
+        year = y;
+        month = m;
+      }
+    }
+
+    const toMonthKey = (dateLike) => {
+      if (!dateLike) return null;
+      const d = new Date(dateLike);
+      if (Number.isNaN(d.getTime())) return null;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    const monthLabel = (y, m) =>
+      new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+
+    const companiesResult = await pool.query(
+      `SELECT
+         id, name, status, plan_code,
+         onetime_fee_amount, amc_amount,
+         onetime_payment_status, amc_payment_status,
+         last_onetime_payment_date, last_amc_payment_date,
+         subscription_start_date, subscription_end_date
+       FROM companies
+       WHERE status IN ('active', 'locked')
+       ORDER BY name ASC, id ASC`
+    );
+
+    const ledgerResult = await pool.query(
+      `SELECT
+         l.id AS ledger_id,
+         l.company_id,
+         c.name AS company_name,
+         c.status AS company_status,
+         COALESCE(l.plan_code, c.plan_code) AS plan_code,
+         l.payment_type,
+         l.amount,
+         l.payment_date,
+         l.payment_status,
+         l.source,
+         l.created_at AS recorded_at
+       FROM company_payment_ledger l
+       INNER JOIN companies c ON c.id = l.company_id
+       ORDER BY l.payment_date DESC, l.id DESC`
+    );
+
+    const paymentEvents = ledgerResult.rows.map((row) => ({
+      ledger_id: row.ledger_id,
+      company_id: row.company_id,
+      company_name: row.company_name,
+      company_status: row.company_status,
+      plan_code: row.plan_code,
+      payment_type: row.payment_type,
+      amount: Number(row.amount || 0),
+      payment_date: row.payment_date,
+      payment_status: row.payment_status,
+      source: row.source,
+      recorded_at: row.recorded_at,
+    }));
+
+    const selectedMonthKey = `${year}-${String(month).padStart(2, '0')}`;
+    const monthPayments = paymentEvents.filter((p) => toMonthKey(p.payment_date) === selectedMonthKey);
+
+    const sumAmount = (rows) => rows.reduce((s, p) => s + Number(p.amount || 0), 0);
+    const monthOnetime = monthPayments.filter((p) => p.payment_type === 'onetime');
+    const monthAmc = monthPayments.filter((p) => p.payment_type === 'amc');
+
+    const monthlyHistory = [];
+    for (let i = historyMonths - 1; i >= 0; i -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      const rows = paymentEvents.filter((p) => toMonthKey(p.payment_date) === key);
+      const onetime = sumAmount(rows.filter((p) => p.payment_type === 'onetime'));
+      const amc = sumAmount(rows.filter((p) => p.payment_type === 'amc'));
+      monthlyHistory.push({
+        month: key,
+        month_label: monthLabel(y, m),
+        onetime_received: onetime,
+        amc_received: amc,
+        total_received: onetime + amc,
+        payment_count: rows.length,
+      });
+    }
+
+    const forecastStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const forecastEnd = new Date(forecastStart);
+    forecastEnd.setMonth(forecastEnd.getMonth() + forecastMonths);
+
+    const forecastBuckets = new Map();
+    const forecastCompanies = [];
+
+    for (const row of companiesResult.rows) {
+      const amcAmt = Number(row.amc_amount || 0);
+      if (amcAmt <= 0) continue;
+      const nextDue = computeNextAmcDueDate(row);
+      if (!nextDue) continue;
+      const due = new Date(nextDue);
+      due.setHours(0, 0, 0, 0);
+      if (due >= forecastEnd) continue;
+
+      const monthKey = toMonthKey(nextDue);
+      const entry = {
+        company_id: row.id,
+        company_name: row.name,
+        plan_code: row.plan_code,
+        amc_amount: amcAmt,
+        next_amc_due_date: nextDue,
+        amc_payment_status: row.amc_payment_status,
+        days_until_due: Math.floor((due.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
+      };
+      forecastCompanies.push(entry);
+
+      if (!forecastBuckets.has(monthKey)) {
+        const [fy, fm] = monthKey.split('-').map(Number);
+        forecastBuckets.set(monthKey, {
+          month: monthKey,
+          month_label: monthLabel(fy, fm),
+          expected_amc_total: 0,
+          company_count: 0,
+          companies: [],
+        });
+      }
+      const bucket = forecastBuckets.get(monthKey);
+      bucket.expected_amc_total += amcAmt;
+      bucket.company_count += 1;
+      bucket.companies.push(entry);
+    }
+
+    const amcForecast = Array.from(forecastBuckets.values())
+      .filter((b) => {
+        const [fy, fm] = b.month.split('-').map(Number);
+        const bucketDate = new Date(fy, fm - 1, 1);
+        return bucketDate >= forecastStart && bucketDate < forecastEnd;
+      })
+      .sort((a, b) => a.month.localeCompare(b.month));
+
+    const allTimeOnetime = sumAmount(paymentEvents.filter((p) => p.payment_type === 'onetime'));
+    const allTimeAmc = sumAmount(paymentEvents.filter((p) => p.payment_type === 'amc'));
+    const next12ForecastTotal = amcForecast.reduce((s, b) => s + b.expected_amc_total, 0);
+
+    const outstanding = {
+      unpaid_onetime_count: companiesResult.rows.filter(
+        (r) => (r.onetime_payment_status || 'unpaid') !== 'paid' && Number(r.onetime_fee_amount || 0) > 0
+      ).length,
+      unpaid_onetime_value: companiesResult.rows
+        .filter((r) => (r.onetime_payment_status || 'unpaid') !== 'paid')
+        .reduce((s, r) => s + Number(r.onetime_fee_amount || 0), 0),
+      amc_due_soon_count: forecastCompanies.filter((c) => c.days_until_due <= 30).length,
+      amc_due_soon_value: forecastCompanies
+        .filter((c) => c.days_until_due <= 30)
+        .reduce((s, c) => s + c.amc_amount, 0),
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        selected_month: {
+          year,
+          month,
+          month_key: selectedMonthKey,
+          month_label: monthLabel(year, month),
+        },
+        summary: {
+          onetime_received: sumAmount(monthOnetime),
+          amc_received: sumAmount(monthAmc),
+          total_received: sumAmount(monthPayments),
+          onetime_payment_count: monthOnetime.length,
+          amc_payment_count: monthAmc.length,
+          payment_count: monthPayments.length,
+        },
+        all_time: {
+          onetime_received: allTimeOnetime,
+          amc_received: allTimeAmc,
+          total_received: allTimeOnetime + allTimeAmc,
+          payment_count: paymentEvents.length,
+        },
+        outstanding,
+        monthly_history: monthlyHistory,
+        payments_in_month: monthPayments,
+        payment_ledger: paymentEvents,
+        amc_forecast: amcForecast,
+        forecast_meta: {
+          months: forecastMonths,
+          total_expected_amc: next12ForecastTotal,
+        },
+        notes: [
+          'Amounts are as recorded when payments are marked (typically excl. GST).',
+          'Payment history is stored in the ledger; each AMC renewal creates a new row when marked received.',
+        ],
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/admin/collections-queue?days=30
  * Returns companies at risk for renewal collections.
  */
@@ -1402,6 +1626,7 @@ module.exports = {
   setCompanyEmployeeLimit,
   setCompanyBranchLimit,
   getCollectionsQueue,
+  getFinanceOverview,
   renewCompanySubscription,
   getRecentSuperadminAudit,
   getCompanyAudit,
