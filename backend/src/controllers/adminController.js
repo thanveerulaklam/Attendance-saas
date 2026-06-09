@@ -1017,6 +1017,94 @@ async function setCompanyBranchLimit(req, res, next) {
 }
 
 /**
+ * POST /api/admin/delete-company
+ * Body: { company_id, confirm_name, confirm_phrase }
+ * Permanently deletes a tenant and all cascaded data. Requires confirm_name (exact company name)
+ * and confirm_phrase === "DELETE".
+ */
+async function deleteCompany(req, res, next) {
+  try {
+    const companyId = req.body.company_id != null ? Number(req.body.company_id) : null;
+    const confirmName = String(req.body.confirm_name || '').trim();
+    const confirmPhrase = String(req.body.confirm_phrase || '').trim();
+
+    if (!companyId || !Number.isInteger(companyId) || companyId < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'company_id (positive integer) is required',
+      });
+    }
+    if (confirmPhrase !== 'DELETE') {
+      return res.status(400).json({
+        success: false,
+        message: 'confirm_phrase must be exactly DELETE',
+      });
+    }
+    if (!confirmName) {
+      return res.status(400).json({
+        success: false,
+        message: 'confirm_name is required',
+      });
+    }
+
+    const companyResult = await pool.query(
+      `SELECT id, name, email, status FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    if (companyResult.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Company not found' });
+    }
+    const company = companyResult.rows[0];
+    const expectedName = String(company.name || '').trim();
+    if (!expectedName || confirmName.toLowerCase() !== expectedName.toLowerCase()) {
+      return res.status(400).json({
+        success: false,
+        message: 'confirm_name must match the company name exactly',
+      });
+    }
+
+    const statsResult = await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM users WHERE company_id = $1) AS users,
+         (SELECT COUNT(*)::int FROM employees WHERE company_id = $1) AS employees,
+         (SELECT COUNT(*)::int FROM branches WHERE company_id = $1) AS branches,
+         (SELECT COUNT(*)::int FROM devices WHERE company_id = $1) AS devices`,
+      [companyId]
+    );
+    const stats = statsResult.rows[0] || {};
+
+    await logSuperadminAction(companyId, 'admin.company.delete', 'company', companyId, {
+      company_name: company.name,
+      company_email: company.email,
+      status: company.status,
+      users: Number(stats.users || 0),
+      employees: Number(stats.employees || 0),
+      branches: Number(stats.branches || 0),
+      devices: Number(stats.devices || 0),
+    });
+
+    await pool.query(`DELETE FROM companies WHERE id = $1`, [companyId]);
+
+    res.status(200).json({
+      success: true,
+      message: `Company "${company.name}" and all related data were permanently deleted.`,
+      data: {
+        id: company.id,
+        name: company.name,
+        deleted: {
+          users: Number(stats.users || 0),
+          employees: Number(stats.employees || 0),
+          branches: Number(stats.branches || 0),
+          devices: Number(stats.devices || 0),
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/admin/collections-queue?days=30
  * Returns companies at risk for renewal collections.
  */
@@ -1311,4 +1399,5 @@ module.exports = {
   getRecentSuperadminAudit,
   getCompanyAudit,
   resetCompanyAdminPassword,
+  deleteCompany,
 };

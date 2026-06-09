@@ -19,6 +19,7 @@ const {
   getRecentSuperadminAudit,
   getCompanyAudit,
   resetCompanyAdminPassword,
+  deleteCompany,
 } = require('../controllers/adminController');
 const { requireApprovalSecret } = require('../middleware/approvalSecret');
 
@@ -65,5 +66,6 @@ router.post('/decline-company', declineCompany);
 router.post('/lock-company', lockCompany);
 router.post('/unlock-company', unlockCompany);
 router.post('/reset-company-admin-password', resetCompanyAdminPassword);
+router.post('/delete-company', deleteCompany);
 
 module.exports = router;

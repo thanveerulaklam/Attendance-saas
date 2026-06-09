@@ -162,6 +162,12 @@ export default function AdminPage() {
     confirm_new_password: '',
   });
   const [resetSaving, setResetSaving] = useState(false);
+  const [deleteCompanyTarget, setDeleteCompanyTarget] = useState(null);
+  const [deleteStep, setDeleteStep] = useState(1);
+  const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState('');
+  const [deleteConfirmPhrase, setDeleteConfirmPhrase] = useState('');
+  const [deleteSaving, setDeleteSaving] = useState(false);
   const [lockBusyId, setLockBusyId] = useState(null);
   const [detailsCompany, setDetailsCompany] = useState(null);
   const [collectionsQueue, setCollectionsQueue] = useState([]);
@@ -990,6 +996,73 @@ export default function AdminPage() {
     }
   };
 
+  const openDeleteModal = (company) => {
+    if (!company) return;
+    setDeleteCompanyTarget(company);
+    setDeleteStep(1);
+    setDeleteAcknowledged(false);
+    setDeleteConfirmName('');
+    setDeleteConfirmPhrase('');
+    setDeleteSaving(false);
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteCompanyTarget(null);
+    setDeleteStep(1);
+    setDeleteAcknowledged(false);
+    setDeleteConfirmName('');
+    setDeleteConfirmPhrase('');
+    setDeleteSaving(false);
+  };
+
+  const deleteTargetName = deleteCompanyTarget?.name ? String(deleteCompanyTarget.name).trim() : '';
+  const deleteNameMatches =
+    deleteTargetName !== '' &&
+    deleteConfirmName.trim().toLowerCase() === deleteTargetName.toLowerCase();
+  const deletePhraseMatches = deleteConfirmPhrase.trim() === 'DELETE';
+
+  const handleDeleteCompany = async () => {
+    if (!deleteCompanyTarget?.id || deleteSaving || deleteStep !== 2) return;
+    if (!deleteAcknowledged || !deleteNameMatches || !deletePhraseMatches) {
+      setToast({ type: 'error', message: 'Complete all confirmation steps before deleting.' });
+      return;
+    }
+    setDeleteSaving(true);
+    try {
+      const res = await adminFetch(
+        '/delete-company',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            company_id: deleteCompanyTarget.id,
+            confirm_name: deleteConfirmName.trim(),
+            confirm_phrase: deleteConfirmPhrase.trim(),
+          }),
+        },
+        adminKey
+      );
+      const text = await res.text();
+      if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
+      let json = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+      setToast({ type: 'success', message: json.message || 'Company deleted.' });
+      closeDeleteModal();
+      setDetailsCompany(null);
+      loadOverview();
+      loadPending();
+      loadCollectionsQueue();
+      loadDashboardAudit();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to delete company' });
+    } finally {
+      setDeleteSaving(false);
+    }
+  };
+
   // Gate: require admin key
   if (!adminKey) {
     return (
@@ -1216,6 +1289,14 @@ export default function AdminPage() {
                             className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
                           >
                             Decline
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openDeleteModal(row)}
+                            disabled={busyId === row.id || deleteSaving}
+                            className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-800 hover:bg-rose-50 disabled:opacity-50"
+                          >
+                            Delete
                           </button>
                         </div>
                       </td>
@@ -1938,8 +2019,156 @@ export default function AdminPage() {
                       {limitsSaving ? 'Saving…' : 'Save limits'}
                     </button>
                   </section>
+
+                  <section className="rounded-xl border border-rose-200 bg-rose-50/40 px-4 py-4 sm:px-5">
+                    <h3 className="text-sm font-semibold text-rose-900">Danger zone</h3>
+                    <p className="mt-1 text-xs text-rose-800/90 leading-relaxed">
+                      Permanently remove this tenant and all associated data (staff, payroll, attendance,
+                      devices, branches, and logins). This cannot be undone.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => openDeleteModal(detailsCompany)}
+                      className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-medium text-rose-800 hover:bg-rose-50"
+                    >
+                      Delete company…
+                    </button>
+                  </section>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {deleteCompanyTarget && (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/55 p-3 sm:p-6"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-company-title"
+            onClick={closeDeleteModal}
+          >
+            <div
+              className="w-full max-w-lg rounded-2xl bg-white shadow-2xl border border-rose-200 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="border-b border-rose-100 bg-rose-50 px-5 py-4">
+                <p className="text-xs font-medium uppercase tracking-wider text-rose-700">
+                  Step {deleteStep} of 2
+                </p>
+                <h2 id="delete-company-title" className="mt-1 text-lg font-semibold text-rose-950">
+                  Delete company permanently
+                </h2>
+                <p className="mt-1 text-sm text-rose-900/80">
+                  {deleteCompanyTarget.name || `Company #${deleteCompanyTarget.id}`}
+                  <span className="ml-2 font-mono text-xs text-rose-700">ID {deleteCompanyTarget.id}</span>
+                </p>
+              </div>
+
+              {deleteStep === 1 ? (
+                <div className="px-5 py-4 space-y-4">
+                  <p className="text-sm text-slate-700">
+                    You are about to delete this tenant from PunchPay. The following will be removed
+                    immediately and cannot be recovered:
+                  </p>
+                  <ul className="list-disc pl-5 text-sm text-slate-700 space-y-1">
+                    <li>All user accounts (admin and HR logins)</li>
+                    <li>Employees, shifts, and branch locations</li>
+                    <li>Attendance logs and biometric device links</li>
+                    <li>Payroll records, advances, and loans</li>
+                    <li>Billing profile and subscription history for this tenant</li>
+                  </ul>
+                  <label className="flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50/50 px-3 py-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={deleteAcknowledged}
+                      onChange={(e) => setDeleteAcknowledged(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-rose-300 text-rose-600 focus:ring-rose-500"
+                    />
+                    <span className="text-sm text-slate-800">
+                      I understand this action is permanent and all data for this company will be lost.
+                    </span>
+                  </label>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={closeDeleteModal}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!deleteAcknowledged}
+                      onClick={() => setDeleteStep(2)}
+                      className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:opacity-50"
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-5 py-4 space-y-4">
+                  <p className="text-sm text-slate-700">
+                    To confirm, type the company name exactly and enter{' '}
+                    <span className="font-mono font-semibold text-rose-800">DELETE</span> below.
+                  </p>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      Company name
+                    </label>
+                    <input
+                      type="text"
+                      value={deleteConfirmName}
+                      onChange={(e) => setDeleteConfirmName(e.target.value)}
+                      placeholder={deleteTargetName || 'Company name'}
+                      autoComplete="off"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                    {deleteConfirmName.trim() !== '' && !deleteNameMatches && (
+                      <p className="mt-1 text-xs text-rose-600">Name does not match.</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1.5">
+                      Type DELETE to confirm
+                    </label>
+                    <input
+                      type="text"
+                      value={deleteConfirmPhrase}
+                      onChange={(e) => setDeleteConfirmPhrase(e.target.value)}
+                      placeholder="DELETE"
+                      autoComplete="off"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
+                    />
+                    {deleteConfirmPhrase.trim() !== '' && !deletePhraseMatches && (
+                      <p className="mt-1 text-xs text-rose-600">Must be exactly DELETE (all caps).</p>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeleteStep(1);
+                        setDeleteConfirmName('');
+                        setDeleteConfirmPhrase('');
+                      }}
+                      disabled={deleteSaving}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeleteCompany}
+                      disabled={deleteSaving || !deleteNameMatches || !deletePhraseMatches}
+                      className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-medium text-white hover:bg-rose-800 disabled:opacity-50"
+                    >
+                      {deleteSaving ? 'Deleting…' : 'Delete permanently'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
