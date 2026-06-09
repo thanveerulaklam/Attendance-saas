@@ -45,6 +45,14 @@ function formatTimeForInput(d) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+function editPunchRowKey(edit) {
+  return edit.isNew ? edit.tempId : edit.id;
+}
+
+function matchesEditPunchRow(row, edit) {
+  return edit.isNew ? row.tempId === edit.tempId : row.id === edit.id;
+}
+
 function getMonthYear(offset = 0) {
   const d = new Date();
   d.setMonth(d.getMonth() + offset);
@@ -95,8 +103,8 @@ export default function AttendancePage() {
   const [presentModalOpen, setPresentModalOpen] = useState(false);
   const [fullDayModalOpen, setFullDayModalOpen] = useState(false);
   const [leftLunchModalOpen, setLeftLunchModalOpen] = useState(false);
-  const [editPunchData, setEditPunchData] = useState(null); // { employeeName, date, punches: [{ id, punch_time, punch_type }] }
-  const [editPunchEdits, setEditPunchEdits] = useState([]); // [{ id, time, punch_type }] for form
+  const [editPunchData, setEditPunchData] = useState(null); // { employeeId, employeeName, date, punches }
+  const [editPunchEdits, setEditPunchEdits] = useState([]); // [{ id?, tempId?, isNew?, time, punch_type }]
   const [manualForm, setManualForm] = useState({
     employee_id: '',
     date: todayStr(),
@@ -781,6 +789,7 @@ export default function AttendancePage() {
                                   punch_type: (p.punch_type || 'in').toLowerCase(),
                                 }));
                                 setEditPunchData({
+                                  employeeId: row.employee_id,
                                   employeeName: row.name,
                                   date: dateStr,
                                   punches: punchesList,
@@ -1267,7 +1276,7 @@ export default function AttendancePage() {
               )}
               {editPunchEdits.map((edit, idx) => (
                 <div
-                  key={edit.id}
+                  key={editPunchRowKey(edit)}
                   className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50/50 p-3"
                 >
                   <span className="text-[11px] font-medium text-slate-500 w-16">Punch {idx + 1}</span>
@@ -1276,7 +1285,9 @@ export default function AttendancePage() {
                     value={edit.time}
                     onChange={(e) => {
                       setEditPunchEdits((prev) =>
-                        prev.map((p) => (p.id === edit.id ? { ...p, time: e.target.value } : p))
+                        prev.map((p) =>
+                          matchesEditPunchRow(p, edit) ? { ...p, time: e.target.value } : p
+                        )
                       );
                     }}
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-800 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
@@ -1285,7 +1296,9 @@ export default function AttendancePage() {
                     value={edit.punch_type}
                     onChange={(e) => {
                       setEditPunchEdits((prev) =>
-                        prev.map((p) => (p.id === edit.id ? { ...p, punch_type: e.target.value } : p))
+                        prev.map((p) =>
+                          matchesEditPunchRow(p, edit) ? { ...p, punch_type: e.target.value } : p
+                        )
                       );
                     }}
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[12px] text-slate-800 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
@@ -1297,6 +1310,10 @@ export default function AttendancePage() {
                     type="button"
                     disabled={editPunchSubmitting}
                     onClick={async () => {
+                      if (edit.isNew) {
+                        setEditPunchEdits((prev) => prev.filter((p) => !matchesEditPunchRow(p, edit)));
+                        return;
+                      }
                       if (!window.confirm('Delete this punch? This cannot be undone.')) return;
                       setEditPunchSubmitting(true);
                       setEditPunchError(null);
@@ -1323,6 +1340,31 @@ export default function AttendancePage() {
                   </button>
                 </div>
               ))}
+              <button
+                type="button"
+                disabled={editPunchSubmitting}
+                onClick={() => {
+                  const last = editPunchEdits[editPunchEdits.length - 1];
+                  const defaultType =
+                    last?.punch_type === 'in'
+                      ? 'out'
+                      : last?.punch_type === 'out'
+                        ? 'in'
+                        : 'in';
+                  setEditPunchEdits((prev) => [
+                    ...prev,
+                    {
+                      isNew: true,
+                      tempId: `new-${Date.now()}`,
+                      time: last?.time || '09:00',
+                      punch_type: defaultType,
+                    },
+                  ]);
+                }}
+                className="w-full rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-[12px] font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 disabled:opacity-60"
+              >
+                + Add timing
+              </button>
             </div>
             <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-5 py-4 flex gap-3">
               <button
@@ -1341,17 +1383,29 @@ export default function AttendancePage() {
                   try {
                     for (const edit of editPunchEdits) {
                       const punchTime = new Date(`${editPunchData.date}T${edit.time}`).toISOString();
-                      const res = await authFetch(`/api/attendance/logs/${edit.id}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          punch_time: punchTime,
-                          punch_type: edit.punch_type,
-                        }),
-                      });
+                      const res = edit.isNew
+                        ? await authFetch('/api/attendance/manual-punch', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              employee_id: Number(editPunchData.employeeId),
+                              punch_time: punchTime,
+                              punch_type: edit.punch_type,
+                            }),
+                          })
+                        : await authFetch(`/api/attendance/logs/${edit.id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              punch_time: punchTime,
+                              punch_type: edit.punch_type,
+                            }),
+                          });
                       if (!res.ok) {
                         const j = await res.json().catch(() => ({}));
-                        throw new Error(j?.message || 'Failed to update punch');
+                        throw new Error(
+                          j?.message || (edit.isNew ? 'Failed to add punch' : 'Failed to update punch')
+                        );
                       }
                     }
                     refreshAfterManual();
