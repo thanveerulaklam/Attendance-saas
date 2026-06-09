@@ -112,6 +112,127 @@ function formatCurrencyInr(n) {
   }
 }
 
+function formatDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function toDateInputValue(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
+function daysUntil(iso) {
+  if (!iso) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return Math.floor((d.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function getDateUrgency(iso, warnDays = 30) {
+  const daysLeft = daysUntil(iso);
+  if (daysLeft === null) return { text: 'Not set', level: 'none', daysLeft: null };
+  if (daysLeft < 0) {
+    return { text: `${Math.abs(daysLeft)}d overdue`, level: 'critical', daysLeft };
+  }
+  if (daysLeft <= warnDays) {
+    return { text: daysLeft === 0 ? 'Due today' : `${daysLeft}d left`, level: 'warn', daysLeft };
+  }
+  return { text: `${daysLeft}d left`, level: 'ok', daysLeft };
+}
+
+function urgencyRowClass(level) {
+  if (level === 'critical') return 'bg-rose-50/80';
+  if (level === 'warn') return 'bg-amber-50/50';
+  return '';
+}
+
+function urgencyTextClass(level) {
+  if (level === 'critical') return 'text-rose-700 font-semibold';
+  if (level === 'warn') return 'text-amber-800 font-medium';
+  return 'text-slate-700';
+}
+
+function paymentNeedsAttention(status) {
+  return ['unpaid', 'overdue', 'pending'].includes(status || 'unpaid');
+}
+
+function getBillingAttentionReasons(company) {
+  const reasons = [];
+  const accessEnd = company.subscription_end_date || deriveSubscriptionDates(company).end?.toISOString?.();
+  const access = getSubscriptionUrgency(accessEnd);
+  const amcDue = getDateUrgency(company.next_amc_due_date, 30);
+  const otc = company.onetime_payment_status || 'unpaid';
+  const amc = company.amc_payment_status || 'unpaid';
+
+  if (access.isExpired) reasons.push('Access expired');
+  else if (access.isUrgent && access.daysLeft != null) reasons.push(`Access ends in ${access.daysLeft}d`);
+  if (amcDue.level === 'critical') reasons.push(`AMC overdue (${amcDue.text})`);
+  else if (amcDue.level === 'warn') reasons.push(`AMC due soon (${amcDue.text})`);
+  if (paymentNeedsAttention(otc)) reasons.push(`One-time ${otc}`);
+  if (paymentNeedsAttention(amc)) reasons.push(`AMC ${amc}`);
+  if (company.status === 'locked') reasons.push('Account locked');
+  return reasons;
+}
+
+function companyNeedsBillingAttention(company) {
+  return getBillingAttentionReasons(company).length > 0;
+}
+
+function computeNextAmcDueDateClient(company) {
+  if (!company) return null;
+  const addYear = (dateLike) => {
+    if (!dateLike) return null;
+    const d = new Date(dateLike);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+  if (company.last_amc_payment_date) return addYear(company.last_amc_payment_date);
+  if (company.last_onetime_payment_date) return addYear(company.last_onetime_payment_date);
+  if (company.subscription_start_date) return addYear(company.subscription_start_date);
+  return null;
+}
+
+function buildBillingPayloadFromCompany(company, patch = {}) {
+  const derived = deriveSubscriptionDates(company);
+  return {
+    company_id: company.id,
+    plan_code: company.plan_code || 'starter',
+    billing_notes: company.billing_notes || '',
+    subscription_start_date: toDateInputValue(company.subscription_start_date || derived.start),
+    subscription_end_date: toDateInputValue(company.subscription_end_date || derived.end),
+    is_active: company.is_active !== false,
+    onetime_payment_status: company.onetime_payment_status || 'unpaid',
+    amc_payment_status: company.amc_payment_status || 'unpaid',
+    onetime_fee_paid: company.onetime_fee_paid === true || company.onetime_payment_status === 'paid',
+    onetime_fee_amount: company.onetime_fee_amount ?? '',
+    amc_amount: company.amc_amount ?? '',
+    last_amc_payment_date: toDateInputValue(company.last_amc_payment_date),
+    last_onetime_payment_date: toDateInputValue(company.last_onetime_payment_date),
+    ...patch,
+  };
+}
+
+function PaymentStatusPill({ status, label }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${paymentStatusBadgeClass(
+        status || 'unpaid'
+      )}`}
+      title={label}
+    >
+      {status || 'unpaid'}
+    </span>
+  );
+}
+
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [keyInput, setKeyInput] = useState('');
@@ -173,7 +294,9 @@ export default function AdminPage() {
   const [collectionsQueue, setCollectionsQueue] = useState([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueFilter, setQueueFilter] = useState('all');
+  const [customerBillingFilter, setCustomerBillingFilter] = useState('all');
   const [renewBusyId, setRenewBusyId] = useState(null);
+  const [billingQuickBusyId, setBillingQuickBusyId] = useState(null);
   const [dashboardAudit, setDashboardAudit] = useState([]);
   const [limitsSaving, setLimitsSaving] = useState(false);
   const [limitsForm, setLimitsForm] = useState({
@@ -786,11 +909,77 @@ export default function AdminPage() {
       setToast({ type: 'success', message: json.message || 'Renewal updated.' });
       loadOverview();
       loadCollectionsQueue();
+      if (detailsCompany?.id === company.id && json.data) {
+        setDetailsCompany((prev) => {
+          if (!prev) return prev;
+          const merged = { ...prev, ...json.data };
+          return { ...merged, next_amc_due_date: computeNextAmcDueDateClient(merged) };
+        });
+      }
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed renewal action' });
     } finally {
       setRenewBusyId(null);
     }
+  };
+
+  const patchCompanyBilling = async (company, patch, successMessage) => {
+    if (!company?.id) return;
+    setBillingQuickBusyId(company.id);
+    try {
+      const res = await adminFetch(
+        '/company-billing',
+        {
+          method: 'POST',
+          body: JSON.stringify(buildBillingPayloadFromCompany(company, patch)),
+        },
+        adminKey
+      );
+      const text = await res.text();
+      if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
+      let json = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+      setToast({ type: 'success', message: successMessage || json.message || 'Billing updated.' });
+      if (json.data && detailsCompany?.id === company.id) {
+        setDetailsCompany((prev) => {
+          if (!prev) return prev;
+          const merged = { ...prev, ...json.data };
+          return { ...merged, next_amc_due_date: computeNextAmcDueDateClient(merged) };
+        });
+      }
+      loadOverview();
+      loadCollectionsQueue();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to update billing' });
+    } finally {
+      setBillingQuickBusyId(null);
+    }
+  };
+
+  const quickMarkAmcPaid = (company) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return patchCompanyBilling(
+      company,
+      { amc_payment_status: 'paid', last_amc_payment_date: today },
+      'AMC marked as received today.'
+    );
+  };
+
+  const quickMarkOtcPaid = (company) => {
+    const today = new Date().toISOString().slice(0, 10);
+    return patchCompanyBilling(
+      company,
+      {
+        onetime_payment_status: 'paid',
+        onetime_fee_paid: true,
+        last_onetime_payment_date: today,
+      },
+      'One-time fee marked as received today.'
+    );
   };
 
   const handleBillingChange = (e) => {
@@ -909,9 +1098,11 @@ export default function AdminPage() {
       }
       setToast({ type: 'success', message: json.message || 'Billing updated.' });
       if (json.data && typeof json.data === 'object') {
-        setDetailsCompany((prev) =>
-          prev && prev.id === json.data.id ? { ...prev, ...json.data } : prev
-        );
+        setDetailsCompany((prev) => {
+          if (!prev || prev.id !== json.data.id) return prev;
+          const merged = { ...prev, ...json.data };
+          return { ...merged, next_amc_due_date: computeNextAmcDueDateClient(merged) };
+        });
       }
       loadOverview();
       loadCollectionsQueue();
@@ -1121,6 +1312,10 @@ export default function AdminPage() {
   const customers = companies.filter((c) => c.status === 'active' || c.status === 'locked');
   const filteredQueue = collectionsQueue.filter((item) => {
     if (queueFilter === 'expired') return getSubscriptionUrgency(item.subscription_end_date).isExpired;
+    if (queueFilter === 'amc_due') {
+      const u = getDateUrgency(item.next_amc_due_date, 30);
+      return u.level === 'critical' || u.level === 'warn';
+    }
     if (queueFilter === 'overdue') {
       return (
         item.onetime_payment_status === 'overdue' || item.amc_payment_status === 'overdue'
@@ -1136,6 +1331,50 @@ export default function AdminPage() {
     }
     return true;
   });
+
+  const billingMetrics = {
+    needAction: collectionsQueue.length,
+    accessExpiring: customers.filter((c) => {
+      const d = daysUntil(c.subscription_end_date);
+      return d != null && d <= 30;
+    }).length,
+    amcDueSoon: customers.filter((c) => {
+      const u = getDateUrgency(c.next_amc_due_date, 30);
+      return u.level === 'critical' || u.level === 'warn';
+    }).length,
+    unpaidOtc: customers.filter((c) => paymentNeedsAttention(c.onetime_payment_status)).length,
+    unpaidAmc: customers.filter((c) => paymentNeedsAttention(c.amc_payment_status)).length,
+  };
+
+  const sortedCustomers = [...customers].sort((a, b) => {
+    const aNeeds = companyNeedsBillingAttention(a) ? 0 : 1;
+    const bNeeds = companyNeedsBillingAttention(b) ? 0 : 1;
+    if (aNeeds !== bNeeds) return aNeeds - bNeeds;
+    const aAccess = daysUntil(a.subscription_end_date);
+    const bAccess = daysUntil(b.subscription_end_date);
+    if (aAccess != null && bAccess != null && aAccess !== bAccess) return aAccess - bAccess;
+    const aAmc = daysUntil(a.next_amc_due_date);
+    const bAmc = daysUntil(b.next_amc_due_date);
+    if (aAmc != null && bAmc != null && aAmc !== bAmc) return aAmc - bAmc;
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  const displayedCustomers = sortedCustomers.filter((c) => {
+    if (customerBillingFilter === 'all') return true;
+    if (customerBillingFilter === 'action') return companyNeedsBillingAttention(c);
+    if (customerBillingFilter === 'renewal') {
+      const access = getSubscriptionUrgency(c.subscription_end_date);
+      const amc = getDateUrgency(c.next_amc_due_date, 30);
+      return access.isUrgent || amc.level === 'critical' || amc.level === 'warn';
+    }
+    if (customerBillingFilter === 'payments') {
+      return (
+        paymentNeedsAttention(c.onetime_payment_status) ||
+        paymentNeedsAttention(c.amc_payment_status)
+      );
+    }
+    return true;
+  });
   const detailsDerived = detailsCompany ? deriveSubscriptionDates(detailsCompany) : { start: null, end: null };
   const detailsEndLabel = detailsDerived.end ? detailsDerived.end.toLocaleDateString() : null;
   const billingPlanHints = detailsCompany
@@ -1144,7 +1383,7 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-slate-100 px-4 py-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">Business dashboard</h1>
@@ -1214,6 +1453,209 @@ export default function AdminPage() {
               </article>
             );
           })}
+        </div>
+
+        {/* Billing & renewals at a glance */}
+        <div className="rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50/90 via-white to-amber-50/40 shadow-sm p-4 mb-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Billing & renewals</h2>
+              <p className="text-xs text-slate-600 mt-0.5 max-w-2xl">
+                One-time fee unlocks the first year; AMC renews access each year after that. Use the action queue
+                below to collect payments and extend access.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setCustomerBillingFilter('action');
+                document.getElementById('billing-action-queue')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700"
+            >
+              View action queue ({billingMetrics.needAction})
+            </button>
+          </div>
+          <div className="mt-4 grid gap-3 grid-cols-2 lg:grid-cols-5">
+            {[
+              {
+                key: 'needAction',
+                label: 'Needs attention',
+                value: billingMetrics.needAction,
+                tone: billingMetrics.needAction > 0 ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white',
+                valueTone: billingMetrics.needAction > 0 ? 'text-rose-700' : 'text-slate-900',
+              },
+              {
+                key: 'accessExpiring',
+                label: 'Access ≤ 30 days',
+                value: billingMetrics.accessExpiring,
+                tone: billingMetrics.accessExpiring > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white',
+                valueTone: billingMetrics.accessExpiring > 0 ? 'text-amber-800' : 'text-slate-900',
+              },
+              {
+                key: 'amcDueSoon',
+                label: 'AMC due ≤ 30 days',
+                value: billingMetrics.amcDueSoon,
+                tone: billingMetrics.amcDueSoon > 0 ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white',
+                valueTone: billingMetrics.amcDueSoon > 0 ? 'text-amber-800' : 'text-slate-900',
+              },
+              {
+                key: 'unpaidOtc',
+                label: 'One-time unpaid+',
+                value: billingMetrics.unpaidOtc,
+                tone: billingMetrics.unpaidOtc > 0 ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white',
+                valueTone: 'text-slate-900',
+              },
+              {
+                key: 'unpaidAmc',
+                label: 'AMC unpaid+',
+                value: billingMetrics.unpaidAmc,
+                tone: billingMetrics.unpaidAmc > 0 ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white',
+                valueTone: 'text-slate-900',
+              },
+            ].map((card) => (
+              <div key={card.key} className={`rounded-xl border px-3 py-3 ${card.tone}`}>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{card.label}</p>
+                <p className={`mt-1 text-2xl font-semibold tabular-nums ${card.valueTone}`}>{card.value}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Action queue — collections */}
+        <div
+          id="billing-action-queue"
+          className="rounded-xl border-2 border-amber-200 bg-white shadow-sm overflow-hidden mb-6"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-amber-100 bg-amber-50/60">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Action queue</h2>
+              <p className="text-xs text-slate-600">
+                Expiring access, AMC due, or payment not received — take action without opening each tenant first.
+              </p>
+            </div>
+            <select
+              value={queueFilter}
+              onChange={(e) => setQueueFilter(e.target.value)}
+              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+            >
+              <option value="all">All flagged</option>
+              <option value="expired">Access expired</option>
+              <option value="amc_due">AMC due soon</option>
+              <option value="overdue">Payment overdue</option>
+              <option value="pending">Payment pending</option>
+              <option value="unpaid">Unpaid</option>
+            </select>
+          </div>
+          {queueLoading ? (
+            <div className="p-6 text-sm text-slate-500">Loading action queue…</div>
+          ) : filteredQueue.length === 0 ? (
+            <div className="p-6 text-sm text-emerald-700 bg-emerald-50/50">
+              No tenants need billing action right now.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1100px] text-sm text-slate-900">
+                <thead className="bg-slate-50 border-b border-slate-200 text-xs">
+                  <tr>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-700">Company</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-700">Why flagged</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-700">Access valid until</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-700">One-time</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-700">AMC</th>
+                    <th className="px-4 py-2.5 text-left font-medium text-slate-700 min-w-[220px]">Quick actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredQueue.map((q) => {
+                    const reasons = getBillingAttentionReasons(q);
+                    const accessUrgency = getDateUrgency(q.subscription_end_date, 30);
+                    const amcUrgency = getDateUrgency(q.next_amc_due_date, 30);
+                    const busy = renewBusyId === q.id || billingQuickBusyId === q.id;
+                    return (
+                      <tr key={q.id} className={urgencyRowClass(accessUrgency.level === 'critical' ? 'critical' : amcUrgency.level)}>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => setDetailsCompany(q)}
+                            className="font-medium text-slate-900 hover:text-indigo-600 hover:underline text-left"
+                          >
+                            {q.name || `Company #${q.id}`}
+                          </button>
+                          <div className="text-[11px] text-slate-500 capitalize">{q.status}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {reasons.map((r) => (
+                              <span
+                                key={r}
+                                className="inline-flex rounded-md bg-white border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-700"
+                              >
+                                {r}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className={urgencyTextClass(accessUrgency.level)}>{formatDateShort(q.subscription_end_date)}</div>
+                          <div className="text-[11px] text-slate-500">{accessUrgency.text}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <PaymentStatusPill status={q.onetime_payment_status} />
+                          <div className="mt-1 text-xs text-slate-600">{formatCurrencyInr(q.onetime_fee_amount)}</div>
+                          {q.last_onetime_payment_date && (
+                            <div className="text-[11px] text-slate-500">Paid {formatDateShort(q.last_onetime_payment_date)}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <PaymentStatusPill status={q.amc_payment_status} />
+                          <div className={`mt-1 text-xs ${urgencyTextClass(amcUrgency.level)}`}>
+                            Due {formatDateShort(q.next_amc_due_date)}
+                          </div>
+                          <div className="text-[11px] text-slate-500">{formatCurrencyInr(q.amc_amount)} / yr</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleRenewAction(q, 'renew_1_year')}
+                              className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                            >
+                              +1 yr access
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => quickMarkAmcPaid(q)}
+                              className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                            >
+                              AMC received
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => quickMarkOtcPaid(q)}
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              OTC received
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDetailsCompany(q)}
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+                            >
+                              Details
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Create company */}
@@ -1308,218 +1750,159 @@ export default function AdminPage() {
           )}
         </div>
 
-        {/* Customers (approved tenants) */}
+        {/* All customers — billing register */}
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">Customers</h2>
+              <h2 className="text-sm font-semibold text-slate-900">All customers — billing register</h2>
               <p className="text-xs text-slate-500">
-                Payment types are one-time fee and AMC only. Access dates are separate (validity window, not a payment line item).
+                Sorted by urgency. Click a row for full billing form, limits, and account controls.
               </p>
             </div>
-            {overviewLoading && (
-              <span className="text-xs text-slate-500">Refreshing…</span>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {overviewLoading && <span className="text-xs text-slate-500">Refreshing…</span>}
+              <select
+                value={customerBillingFilter}
+                onChange={(e) => setCustomerBillingFilter(e.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
+              >
+                <option value="all">All customers</option>
+                <option value="action">Needs attention</option>
+                <option value="renewal">Renewal / access due</option>
+                <option value="payments">Payment issues</option>
+              </select>
+            </div>
           </div>
           {overviewLoading && !overview ? (
             <div className="p-6 text-sm text-slate-500">Loading overview…</div>
-          ) : customers.length === 0 ? (
+          ) : displayedCustomers.length === 0 ? (
             <div className="p-6 text-sm text-slate-500">
-              No customers yet. Create a company above or approve a pending request.
+              {customers.length === 0
+                ? 'No customers yet. Create a company above or approve a pending request.'
+                : 'No customers match this filter.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[980px] text-sm text-slate-900">
-                <thead className="bg-slate-50 border-b border-slate-200">
+              <table className="w-full min-w-[1080px] text-sm text-slate-900">
+                <thead className="bg-slate-50 border-b border-slate-200 text-xs">
                   <tr>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Company</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Account</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">OTC pay</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">AMC pay</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Plan & limits</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Valid until</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">One-time</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Next AMC</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 w-[200px]">Actions</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Access</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">One-time fee</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">AMC (annual)</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Plan</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700 min-w-[200px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {customers.map((c) => {
-                    const derived = deriveSubscriptionDates(c);
-                    const subEnd = derived.end ? derived.end.toLocaleDateString() : '—';
-                    const urgency = getSubscriptionUrgency(derived.end ? derived.end.toISOString() : null);
+                  {displayedCustomers.map((c) => {
+                    const accessUrgency = getDateUrgency(c.subscription_end_date, 30);
+                    const amcUrgency = getDateUrgency(c.next_amc_due_date, 30);
+                    const rowLevel =
+                      accessUrgency.level === 'critical' || amcUrgency.level === 'critical'
+                        ? 'critical'
+                        : accessUrgency.level === 'warn' || amcUrgency.level === 'warn'
+                          ? 'warn'
+                          : 'none';
                     const statusPillClasses =
                       c.status === 'active'
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
                         : c.status === 'locked'
                           ? 'bg-slate-100 text-slate-800 border-slate-200'
                           : 'bg-slate-50 text-slate-700 border-slate-200';
-                    const amcDueLabel = c.next_amc_due_date
-                      ? new Date(c.next_amc_due_date).toLocaleDateString()
-                      : '—';
+                    const busy = renewBusyId === c.id || billingQuickBusyId === c.id;
                     return (
                       <tr
                         key={c.id}
-                        className="hover:bg-slate-50/60 cursor-pointer"
+                        className={`hover:bg-slate-50/60 cursor-pointer ${urgencyRowClass(rowLevel)}`}
                         onClick={() => setDetailsCompany(c)}
                       >
                         <td className="px-4 py-2.5">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDetailsCompany(c);
-                            }}
-                            className="font-medium text-slate-900 hover:text-indigo-600 hover:underline text-left"
-                          >
-                            {c.name || '—'}
-                          </button>
-                          <div className="text-xs text-slate-500">ID {c.id}</div>
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusPillClasses}`}
-                          >
-                            {c.status}
-                          </span>
-                          <div className="text-xs text-slate-500 mt-1">
-                            {c.active_staff}/{c.total_staff} staff
+                          <div className="font-medium text-slate-900">{c.name || '—'}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[11px] text-slate-500">ID {c.id}</span>
+                            <span
+                              className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium capitalize ${statusPillClasses}`}
+                            >
+                              {c.status}
+                            </span>
                           </div>
                         </td>
                         <td className="px-4 py-2.5">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${paymentStatusBadgeClass(
-                              c.onetime_payment_status || 'unpaid'
-                            )}`}
-                          >
-                            {c.onetime_payment_status || 'unpaid'}
-                          </span>
+                          <div className={urgencyTextClass(accessUrgency.level)}>
+                            {formatDateShort(c.subscription_end_date)}
+                          </div>
+                          <div className="text-[11px] text-slate-500">{accessUrgency.text}</div>
                         </td>
                         <td className="px-4 py-2.5">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${paymentStatusBadgeClass(
-                              c.amc_payment_status || 'unpaid'
-                            )}`}
-                          >
-                            {c.amc_payment_status || 'unpaid'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-slate-700 leading-snug max-w-[220px]">
-                          {formatPlanWithLimits(c)}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <span className={`text-xs ${urgency.isUrgent ? 'text-rose-700 font-medium' : 'text-slate-700'}`}>
-                            {subEnd}
-                          </span>
-                          {urgency.isUrgent && (
-                            <div className="text-[11px] text-rose-600">
-                              {urgency.isExpired ? 'Expired' : `${urgency.daysLeft}d left`}
+                          <PaymentStatusPill status={c.onetime_payment_status} />
+                          <div className="mt-1 text-xs font-medium text-slate-800">
+                            {formatCurrencyInr(c.onetime_fee_amount)}
+                          </div>
+                          {c.last_onetime_payment_date && (
+                            <div className="text-[11px] text-slate-500">
+                              Received {formatDateShort(c.last_onetime_payment_date)}
                             </div>
                           )}
                         </td>
                         <td className="px-4 py-2.5">
-                          <span
-                            className={`inline-flex rounded-md px-2 py-0.5 text-[11px] font-medium ${
-                              c.onetime_fee_paid ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {c.onetime_fee_paid ? 'Paid' : 'Unpaid'}
-                          </span>
+                          <PaymentStatusPill status={c.amc_payment_status} />
+                          <div className={`mt-1 text-xs ${urgencyTextClass(amcUrgency.level)}`}>
+                            Next due {formatDateShort(c.next_amc_due_date)}
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {formatCurrencyInr(c.amc_amount)} / yr
+                            {c.last_amc_payment_date && (
+                              <> · last {formatDateShort(c.last_amc_payment_date)}</>
+                            )}
+                          </div>
                         </td>
-                        <td className="px-4 py-2.5 text-xs text-slate-700">
-                          <div>{amcDueLabel}</div>
-                          <div className="text-slate-500">{formatCurrencyInr(c.amc_amount)}</div>
+                        <td className="px-4 py-2.5 text-xs text-slate-700 leading-snug max-w-[200px]">
+                          {formatPlanWithLimits(c)}
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {c.active_staff}/{c.total_staff} staff
+                          </div>
                         </td>
                         <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleRenewAction(c, 'renew_1_year')}
+                              className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-800 disabled:opacity-50"
+                            >
+                              +1 yr
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => quickMarkAmcPaid(c)}
+                              className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800 disabled:opacity-50"
+                            >
+                              AMC paid
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDetailsCompany(c)}
+                              className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700"
+                            >
+                              Billing
+                            </button>
                             <button
                               type="button"
                               onClick={() =>
                                 handleLockToggle(c, c.status === 'locked' ? 'unlock' : 'lock')
                               }
                               disabled={lockBusyId === c.id}
-                              className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              className="rounded border border-slate-200 bg-white px-2 py-1 text-[11px] text-slate-600 disabled:opacity-50"
                             >
                               {c.status === 'locked' ? 'Unlock' : 'Lock'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openResetModal(c)}
-                              className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800"
-                            >
-                              Reset password
                             </button>
                           </div>
                         </td>
                       </tr>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900">Collections queue</h2>
-              <p className="text-xs text-slate-500">Expiring access, or one-time / AMC unpaid, pending, or overdue.</p>
-            </div>
-            <select
-              value={queueFilter}
-              onChange={(e) => setQueueFilter(e.target.value)}
-              className="rounded border border-slate-300 px-2 py-1 text-xs"
-            >
-              <option value="all">All</option>
-              <option value="expired">Expired</option>
-              <option value="overdue">Overdue</option>
-              <option value="pending">Pending</option>
-              <option value="unpaid">Unpaid</option>
-            </select>
-          </div>
-          {queueLoading ? (
-            <div className="p-4 text-sm text-slate-500">Loading queue…</div>
-          ) : filteredQueue.length === 0 ? (
-            <div className="p-4 text-sm text-slate-500">No companies in collections queue.</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm text-slate-900">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-2 text-left">Company</th>
-                    <th className="px-4 py-2 text-left">Access valid until</th>
-                    <th className="px-4 py-2 text-left">OTC / AMC</th>
-                    <th className="px-4 py-2 text-left">Active staff</th>
-                    <th className="px-4 py-2 text-left">Quick action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredQueue.map((q) => (
-                    <tr key={q.id}>
-                      <td className="px-4 py-2">{q.name || `Company #${q.id}`}</td>
-                      <td className="px-4 py-2">{q.subscription_end_date ? new Date(q.subscription_end_date).toLocaleDateString() : 'Not set'}</td>
-                      <td className="px-4 py-2 text-xs text-slate-700">
-                        <span className="block">
-                          OTC: {q.onetime_payment_status || 'unpaid'}
-                        </span>
-                        <span className="block text-slate-500">
-                          AMC: {q.amc_payment_status || 'unpaid'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2">{q.active_staff || 0}</td>
-                      <td className="px-4 py-2">
-                        <button
-                          type="button"
-                          onClick={() => handleRenewAction(q, 'renew_1_year')}
-                          disabled={renewBusyId === q.id}
-                          className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700 disabled:opacity-50"
-                        >
-                          Renew year
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
                 </tbody>
               </table>
             </div>
@@ -1693,6 +2076,98 @@ export default function AdminPage() {
               </div>
 
               <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5 space-y-5">
+                <section className="rounded-xl border-2 border-indigo-200 bg-gradient-to-br from-indigo-50/80 to-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">Payments & renewal snapshot</h3>
+                      <p className="mt-0.5 text-xs text-slate-600">
+                        One-time covers year one; AMC renews each following year.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={renewBusyId === detailsCompany.id || billingQuickBusyId === detailsCompany.id}
+                        onClick={() => handleRenewAction(detailsCompany, 'renew_1_year')}
+                        className="rounded-lg border border-indigo-300 bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        Extend access +1 year
+                      </button>
+                      <button
+                        type="button"
+                        disabled={billingQuickBusyId === detailsCompany.id}
+                        onClick={() => quickMarkAmcPaid(detailsCompany)}
+                        className="rounded-lg border border-emerald-300 bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        AMC received today
+                      </button>
+                      <button
+                        type="button"
+                        disabled={billingQuickBusyId === detailsCompany.id}
+                        onClick={() => quickMarkOtcPaid(detailsCompany)}
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        One-time received today
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Software access</p>
+                      <p className={`mt-1 text-sm font-semibold ${urgencyTextClass(getDateUrgency(detailsCompany.subscription_end_date, 30).level)}`}>
+                        Valid until {formatDateShort(detailsCompany.subscription_end_date)}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {getDateUrgency(detailsCompany.subscription_end_date, 30).text}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Started {formatDateShort(detailsCompany.subscription_start_date)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">One-time fee</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <PaymentStatusPill status={detailsCompany.onetime_payment_status} />
+                        <span className="text-sm font-semibold text-slate-900">
+                          {formatCurrencyInr(detailsCompany.onetime_fee_amount)}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">
+                        Last received {formatDateShort(detailsCompany.last_onetime_payment_date)}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">AMC (annual)</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <PaymentStatusPill status={detailsCompany.amc_payment_status} />
+                        <span className="text-sm font-semibold text-slate-900">
+                          {formatCurrencyInr(detailsCompany.amc_amount)}
+                        </span>
+                      </div>
+                      <p className={`text-xs mt-1 ${urgencyTextClass(getDateUrgency(detailsCompany.next_amc_due_date, 30).level)}`}>
+                        Next due {formatDateShort(detailsCompany.next_amc_due_date)}
+                        {' · '}
+                        {getDateUrgency(detailsCompany.next_amc_due_date, 30).text}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Last AMC {formatDateShort(detailsCompany.last_amc_payment_date)}
+                      </p>
+                    </div>
+                  </div>
+                  {getBillingAttentionReasons(detailsCompany).length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {getBillingAttentionReasons(detailsCompany).map((r) => (
+                        <span
+                          key={r}
+                          className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-900"
+                        >
+                          {r}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
                 {/* Quick stats */}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 text-center sm:text-left">

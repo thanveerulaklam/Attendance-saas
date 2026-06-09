@@ -1114,9 +1114,13 @@ async function getCollectionsQueue(req, res, next) {
     const result = await pool.query(
       `SELECT
          c.id, c.name, c.email, c.phone, c.status,
-         c.subscription_end_date, c.payment_status, c.plan_code, c.billing_cycle,
+         c.subscription_start_date, c.subscription_end_date,
+         c.payment_status, c.plan_code, c.billing_cycle,
          c.last_payment_date, c.next_billing_date,
          c.onetime_payment_status, c.amc_payment_status,
+         c.onetime_fee_paid, c.onetime_fee_amount, c.amc_amount,
+         c.last_amc_payment_date, c.last_onetime_payment_date,
+         c.is_active,
          COUNT(e.id) FILTER (WHERE e.status = 'active')::int AS active_staff
        FROM companies c
        LEFT JOIN employees e ON e.company_id = c.id
@@ -1133,7 +1137,10 @@ async function getCollectionsQueue(req, res, next) {
     );
     res.status(200).json({
       success: true,
-      data: result.rows,
+      data: result.rows.map((row) => ({
+        ...row,
+        next_amc_due_date: computeNextAmcDueDate(row),
+      })),
       meta: { days },
     });
   } catch (err) {
