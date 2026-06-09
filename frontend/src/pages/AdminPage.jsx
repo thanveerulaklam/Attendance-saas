@@ -7,6 +7,12 @@ import {
   planOptionsForAdminSelect,
 } from '../constants/pricingPlans';
 import AdminFinanceSection from './AdminFinanceSection';
+import {
+  DEMO_ENQUIRY_STATUSES,
+  DEMO_ENQUIRY_STATUS_BUTTON_STYLES,
+  DEMO_ENQUIRY_STATUS_STYLES,
+  demoEnquiryStatusLabel,
+} from '../constants/demoEnquiryStatus';
 
 const ADMIN_KEY_STORAGE = 'attendance_saas_admin_key';
 const ADMIN_PLAN_OPTIONS = planOptionsForAdminSelect();
@@ -266,6 +272,8 @@ export default function AdminPage() {
   const [enquiries, setEnquiries] = useState([]);
   const [enquiriesLoading, setEnquiriesLoading] = useState(false);
   const [enquiriesError, setEnquiriesError] = useState('');
+  const [enquiryStatusFilter, setEnquiryStatusFilter] = useState('all');
+  const [enquiryBusyId, setEnquiryBusyId] = useState(null);
   const [billingForm, setBillingForm] = useState({
     plan_code: 'starter',
     billing_cycle: 'annual',
@@ -406,7 +414,11 @@ export default function AdminPage() {
     setEnquiriesLoading(true);
     setEnquiriesError('');
     try {
-      const res = await adminFetch(`/demo-enquiries?page=1&limit=20`, {}, adminKey);
+      const statusQuery =
+        enquiryStatusFilter && enquiryStatusFilter !== 'all'
+          ? `&status=${encodeURIComponent(enquiryStatusFilter)}`
+          : '';
+      const res = await adminFetch(`/demo-enquiries?page=1&limit=20${statusQuery}`, {}, adminKey);
       if (res.status === 401) {
         setKeyError('Invalid admin key');
         sessionStorage.removeItem(ADMIN_KEY_STORAGE);
@@ -429,12 +441,52 @@ export default function AdminPage() {
     } finally {
       setEnquiriesLoading(false);
     }
-  }, [adminKey]);
+  }, [adminKey, enquiryStatusFilter]);
 
   useEffect(() => {
     if (!adminKey) return;
     loadEnquiries();
   }, [adminKey, loadEnquiries]);
+
+  const updateEnquiryStatus = async (enquiryId, status) => {
+    if (!enquiryId || !status) return;
+    setEnquiryBusyId(enquiryId);
+    try {
+      const res = await adminFetch(
+        '/demo-enquiry-status',
+        {
+          method: 'POST',
+          body: JSON.stringify({ enquiry_id: enquiryId, status }),
+        },
+        adminKey
+      );
+      const text = await res.text();
+      if (res.status === 401) {
+        setKeyError('Invalid admin key');
+        sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+        setAdminKey('');
+        return;
+      }
+      if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
+      let json = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+      const updated = json.data;
+      if (updated?.id) {
+        setEnquiries((prev) => prev.map((q) => (q.id === updated.id ? { ...q, ...updated } : q)));
+      } else {
+        loadEnquiries();
+      }
+      setToast({ type: 'success', message: `Marked as ${demoEnquiryStatusLabel(status)}.` });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to update enquiry status' });
+    } finally {
+      setEnquiryBusyId(null);
+    }
+  };
 
   const loadCollectionsQueue = useCallback(async () => {
     if (!adminKey) return;
@@ -1959,9 +2011,38 @@ export default function AdminPage() {
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mt-6">
-          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
-            <h2 className="text-sm font-semibold text-slate-900">Demo enquiries</h2>
-            <p className="text-xs text-slate-500">Latest free-demo requests from the landing page.</p>
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900">Demo enquiries</h2>
+              <p className="text-xs text-slate-500">Latest free-demo requests from the landing page.</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setEnquiryStatusFilter('all')}
+                className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                  enquiryStatusFilter === 'all'
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                All
+              </button>
+              {DEMO_ENQUIRY_STATUSES.map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setEnquiryStatusFilter(status)}
+                  className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                    enquiryStatusFilter === status
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {demoEnquiryStatusLabel(status)}
+                </button>
+              ))}
+            </div>
           </div>
           {enquiriesLoading ? (
             <div className="p-8 text-center text-slate-500">Loading…</div>
@@ -1971,38 +2052,75 @@ export default function AdminPage() {
             <div className="p-8 text-center text-slate-500">No enquiries yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-sm text-slate-900">
+              <table className="w-full min-w-[980px] text-sm text-slate-900">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Name</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Business</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Phone</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Employees</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700">Status</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Created</th>
                     <th className="text-left px-4 py-3 font-medium text-slate-700">Notes</th>
+                    <th className="text-left px-4 py-3 font-medium text-slate-700 min-w-[280px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {enquiries.map((q) => (
-                    <tr key={q.id} className="hover:bg-slate-50/50">
-                      <td className="px-4 py-3 font-medium text-slate-900">{q.full_name || '—'}</td>
-                      <td className="px-4 py-3 text-slate-600">{q.business_name || '—'}</td>
-                      <td className="px-4 py-3 text-slate-600">{q.phone_number || '—'}</td>
-                      <td className="px-4 py-3 text-slate-600">{q.employees_range || '—'}</td>
-                      <td className="px-4 py-3 text-slate-500">
-                        {q.created_at
-                          ? new Date(q.created_at).toLocaleString(undefined, {
-                              year: 'numeric',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })
-                          : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">{q.notes || '—'}</td>
-                    </tr>
-                  ))}
+                  {enquiries.map((q) => {
+                    const currentStatus = q.status || 'not_contacted';
+                    const busy = enquiryBusyId === q.id;
+                    return (
+                      <tr key={q.id} className="hover:bg-slate-50/50 align-top">
+                        <td className="px-4 py-3 font-medium text-slate-900">{q.full_name || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600">{q.business_name || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600">{q.phone_number || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600">{q.employees_range || '—'}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                              DEMO_ENQUIRY_STATUS_STYLES[currentStatus] || DEMO_ENQUIRY_STATUS_STYLES.not_contacted
+                            }`}
+                          >
+                            {demoEnquiryStatusLabel(currentStatus)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">
+                          {q.created_at
+                            ? new Date(q.created_at).toLocaleString(undefined, {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 max-w-[180px]">{q.notes || '—'}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {DEMO_ENQUIRY_STATUSES.map((status) => {
+                              const isActive = currentStatus === status;
+                              return (
+                                <button
+                                  key={status}
+                                  type="button"
+                                  disabled={busy || isActive}
+                                  onClick={() => updateEnquiryStatus(q.id, status)}
+                                  className={`rounded border px-2 py-0.5 text-[10px] font-medium disabled:opacity-50 ${
+                                    isActive
+                                      ? 'border-slate-900 bg-slate-900 text-white'
+                                      : DEMO_ENQUIRY_STATUS_BUTTON_STYLES[status]
+                                  }`}
+                                >
+                                  {demoEnquiryStatusLabel(status)}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

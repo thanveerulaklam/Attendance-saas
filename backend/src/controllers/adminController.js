@@ -176,31 +176,37 @@ async function getAdminOverview(req, res, next) {
  */
 async function listDemoEnquiries(req, res, next) {
   try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
     const page = req.query?.page != null ? Number(req.query.page) : 1;
     const limit = req.query?.limit != null ? Number(req.query.limit) : 20;
-    const pageNum = Math.max(1, Number.isFinite(page) ? page : 1);
-    const limitNum = Math.min(100, Math.max(1, Number.isFinite(limit) ? limit : 20));
-    const offset = (pageNum - 1) * limitNum;
-
-    const countResult = await pool.query(`SELECT COUNT(*) AS total FROM demo_enquiries`);
-    const total = Number(countResult.rows[0]?.total || 0);
-
-    const result = await pool.query(
-      `SELECT id, full_name, business_name, phone_number, employees_range, source, notes, created_at
-       FROM demo_enquiries
-       ORDER BY created_at DESC
-       LIMIT $1 OFFSET $2`,
-      [limitNum, offset]
-    );
+    const status = req.query?.status;
+    const data = await demoEnquiryService.listDemoEnquiries(null, { page, limit, status });
 
     res.status(200).json({
       success: true,
-      data: {
-        data: result.rows,
-        page: pageNum,
-        limit: limitNum,
-        total,
-      },
+      data,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiry-status
+ * Body: { enquiry_id, status }
+ */
+async function updateDemoEnquiryStatus(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    const { status } = req.body || {};
+
+    const updated = await demoEnquiryService.updateDemoEnquiryStatus(enquiryId, status);
+
+    res.status(200).json({
+      success: true,
+      data: updated,
+      message: 'Enquiry status updated.',
     });
   } catch (err) {
     next(err);
@@ -1615,6 +1621,7 @@ module.exports = {
   listPendingCompanies,
   getAdminOverview,
   listDemoEnquiries,
+  updateDemoEnquiryStatus,
   updateCompanyBilling,
   createCompanyProvisioned,
   approveCompany,

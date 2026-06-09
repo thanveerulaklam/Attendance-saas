@@ -4,6 +4,7 @@ const {
   listPendingCompanies,
   getAdminOverview,
   listDemoEnquiries,
+  updateDemoEnquiryStatus,
   updateCompanyBilling,
   createCompanyProvisioned,
   approveCompany,
@@ -61,6 +62,7 @@ router.post('/set-company-employee-limit', setCompanyEmployeeLimit);
 router.post('/set-company-branch-limit', setCompanyBranchLimit);
 router.post('/renew-company-subscription', renewCompanySubscription);
 router.get('/demo-enquiries', listDemoEnquiries);
+router.post('/demo-enquiry-status', updateDemoEnquiryStatus);
 router.post('/company-billing', updateCompanyBilling);
 router.post('/create-company', createCompanyProvisioned);
 router.post('/approve-company', approveCompany);

@@ -42,6 +42,22 @@ function requireRole(allowedRoles) {
   };
 }
 
+function isSuperAdminUser(user) {
+  if (!user || user.role !== 'admin') return false;
+  const companyId = user.company_id;
+  return companyId == null || Number(companyId) === 0;
+}
+
+function requireSuperAdmin(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Authentication required' });
+  }
+  if (!isSuperAdminUser(req.user)) {
+    return res.status(403).json({ success: false, message: 'Super admin access required' });
+  }
+  return next();
+}
+
 /**
  * Strip company_id from body so it can never be trusted. Use after authenticate.
  * Ensures all handlers use req.companyId from JWT only.
@@ -160,6 +176,8 @@ function requireHrBranchForMutation(req, res, next) {
 module.exports = {
   authenticate,
   requireRole,
+  requireSuperAdmin,
+  isSuperAdminUser,
   enforceCompanyFromToken,
   optionalAuth,
   signToken,

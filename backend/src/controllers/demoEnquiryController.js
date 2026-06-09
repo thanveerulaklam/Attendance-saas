@@ -12,13 +12,24 @@ async function create(req, res, next) {
 
 async function list(req, res, next) {
   try {
-    const { page, limit } = req.query || {};
-    const data = await demoEnquiryService.listDemoEnquiries(null, { page, limit });
+    const { page, limit, status } = req.query || {};
+    const data = await demoEnquiryService.listDemoEnquiries(null, { page, limit, status });
     return res.json({ success: true, data });
   } catch (err) {
     return next(err);
   }
 }
 
-module.exports = { create, list };
+async function updateStatus(req, res, next) {
+  try {
+    const enquiryId = req.params?.id != null ? Number(req.params.id) : null;
+    const { status } = req.body || {};
+    const data = await demoEnquiryService.updateDemoEnquiryStatus(enquiryId, status);
+    return res.json({ success: true, data, message: 'Enquiry status updated.' });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+module.exports = { create, list, updateStatus };
 
