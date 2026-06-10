@@ -21,6 +21,19 @@ function adminFetch(path, options = {}, key) {
   return fetch(`/api/admin${path}`, { ...options, headers });
 }
 
+function adminFetchErrorMessage(res, text) {
+  if (res.status === 502 || res.status === 503) {
+    return 'API server is unavailable. On the VPS run: pm2 logs attendance-api — then pm2 restart attendance-api';
+  }
+  if (res.status === 403) {
+    return 'Admin access blocked from this network (check ADMIN_IP_ALLOWLIST on the server).';
+  }
+  if (res.status === 429) {
+    return 'Too many requests. Wait a few minutes and refresh.';
+  }
+  return messageFromAdminErrorResponse(text, res.status);
+}
+
 /** Rate limits and some proxies return JSON as a bare string; parse so we never show a blank message. */
 function messageFromAdminErrorResponse(text, status) {
   if (!text || !String(text).trim()) {
@@ -353,12 +366,15 @@ export default function AdminPage() {
         setPending([]);
         return;
       }
-      if (!res.ok) throw new Error('Failed to load');
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(adminFetchErrorMessage(res, text));
+      }
       const json = await res.json();
       const list = Array.isArray(json.data) ? json.data : [];
       setPending(list);
-    } catch {
-      setKeyError('Failed to load pending registrations');
+    } catch (err) {
+      setKeyError(err.message || 'Failed to load pending registrations');
       setPending([]);
     } finally {
       setLoading(false);
@@ -382,10 +398,14 @@ export default function AdminPage() {
         setOverview(null);
         return;
       }
-      if (!res.ok) throw new Error('Failed to load overview');
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(adminFetchErrorMessage(res, text));
+      }
       const json = await res.json();
       setOverview(json.data || null);
-    } catch {
+    } catch (err) {
+      setKeyError((prev) => prev || err.message || 'Failed to load company overview');
       setOverview(null);
     } finally {
       setOverviewLoading(false);
