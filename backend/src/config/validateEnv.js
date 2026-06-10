@@ -35,6 +35,26 @@ function validateEnv() {
     console.warn(`[validateEnv] ${message}`);
   }
 
+  const adminSecret = String(process.env.ADMIN_APPROVAL_SECRET || '').trim();
+  if (isProd) {
+    if (!adminSecret) {
+      console.error(
+        'ADMIN_APPROVAL_SECRET is required in production. Super Admin routes must not run without it.'
+      );
+      process.exit(1);
+    }
+    if (adminSecret.length < 32) {
+      console.error(
+        'ADMIN_APPROVAL_SECRET must be at least 32 characters in production. Generate with: openssl rand -hex 32'
+      );
+      process.exit(1);
+    }
+  } else if (adminSecret && adminSecret.length < 16) {
+    console.warn(
+      '[validateEnv] ADMIN_APPROVAL_SECRET is short; use at least 32 random characters in production.'
+    );
+  }
+
   if (process.env.WHATSAPP_ENABLED === 'true') {
     const waKeys = [
       'WHATSAPP_ACCESS_TOKEN',

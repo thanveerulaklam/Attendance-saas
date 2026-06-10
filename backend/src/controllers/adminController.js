@@ -110,7 +110,14 @@ async function getAdminOverview(req, res, next) {
            WHERE a.company_id = c.id AND a.action_type = 'auth.login'
          ) AS last_login_at,
          COUNT(e.id) AS total_staff,
-         COUNT(e.id) FILTER (WHERE e.status = 'active') AS active_staff
+         COUNT(e.id) FILTER (WHERE e.status = 'active') AS active_staff,
+         (
+           SELECT de.id
+           FROM demo_enquiries de
+           WHERE de.converted_company_id = c.id
+           ORDER BY de.converted_at DESC NULLS LAST, de.id DESC
+           LIMIT 1
+         ) AS source_lead_id
        FROM companies c
        LEFT JOIN employees e ON e.company_id = c.id
        GROUP BY c.id
@@ -161,6 +168,7 @@ async function getAdminOverview(req, res, next) {
           last_login_at: row.last_login_at,
           total_staff: Number(row.total_staff || 0),
           active_staff: Number(row.active_staff || 0),
+          source_lead_id: row.source_lead_id != null ? Number(row.source_lead_id) : null,
         })),
       },
     });
@@ -171,20 +179,56 @@ async function getAdminOverview(req, res, next) {
 
 /**
  * GET /api/admin/demo-enquiries
- * List stored demo enquiries submitted from the landing page.
- * Requires X-Approval-Secret or Authorization: Bearer <ADMIN_APPROVAL_SECRET>.
+ * List leads (landing + manual). Query: page, limit, status, q, pipeline=open
  */
 async function listDemoEnquiries(req, res, next) {
   try {
     const demoEnquiryService = require('../services/demoEnquiryService');
     const page = req.query?.page != null ? Number(req.query.page) : 1;
     const limit = req.query?.limit != null ? Number(req.query.limit) : 20;
-    const status = req.query?.status;
-    const data = await demoEnquiryService.listDemoEnquiries(null, { page, limit, status });
+    const { status, q, pipeline } = req.query || {};
+    const data = await demoEnquiryService.listDemoEnquiries(null, {
+      page,
+      limit,
+      status,
+      q,
+      pipeline,
+    });
 
     res.status(200).json({
       success: true,
       data,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/demo-enquiry-stats
+ */
+async function getDemoEnquiryStats(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const stats = await demoEnquiryService.getDemoEnquiryStats();
+    res.status(200).json({ success: true, data: stats });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiries
+ * Create a manual lead.
+ */
+async function createAdminDemoEnquiry(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const created = await demoEnquiryService.createAdminLead(req.body || {});
+    res.status(201).json({
+      success: true,
+      data: created,
+      message: 'Lead added.',
     });
   } catch (err) {
     next(err);
@@ -207,6 +251,64 @@ async function updateDemoEnquiryStatus(req, res, next) {
       success: true,
       data: updated,
       message: 'Enquiry status updated.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiry-notes
+ * Body: { enquiry_id, notes }
+ */
+async function updateDemoEnquiryNotes(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    const { notes } = req.body || {};
+    const updated = await demoEnquiryService.updateDemoEnquiryNotes(enquiryId, notes);
+    res.status(200).json({
+      success: true,
+      data: updated,
+      message: 'Notes saved.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/convert-enquiry
+ * Body: { enquiry_id, company, admin, plan_code, ... } (same as create-company)
+ */
+async function convertDemoEnquiry(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    if (!enquiryId || !Number.isInteger(enquiryId)) {
+      return res.status(400).json({ success: false, message: 'enquiry_id (number) is required' });
+    }
+
+    const { enquiry_id: _ignored, ...companyPayload } = req.body || {};
+    const result = await demoEnquiryService.convertEnquiryToCompany(enquiryId, companyPayload);
+
+    res.status(201).json({
+      success: true,
+      data: {
+        enquiry: result.enquiry,
+        company: result.company,
+        user: {
+          id: result.user.id,
+          email: result.user.email,
+          name: result.user.name,
+          role: result.user.role,
+        },
+        admin_password_plaintext_once: result.admin_password_plaintext_once,
+      },
+      message: `Lead converted — company "${result.company.name}" is active.`,
+    });
+    await logSuperadminAction(result.company.id, 'admin.lead.convert', 'company', result.company.id, {
+      enquiry_id: enquiryId,
     });
   } catch (err) {
     next(err);
@@ -1621,7 +1723,11 @@ module.exports = {
   listPendingCompanies,
   getAdminOverview,
   listDemoEnquiries,
+  getDemoEnquiryStats,
+  createAdminDemoEnquiry,
   updateDemoEnquiryStatus,
+  updateDemoEnquiryNotes,
+  convertDemoEnquiry,
   updateCompanyBilling,
   createCompanyProvisioned,
   approveCompany,

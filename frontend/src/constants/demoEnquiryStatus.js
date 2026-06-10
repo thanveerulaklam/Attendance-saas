@@ -4,6 +4,15 @@ export const DEMO_ENQUIRY_STATUSES = [
   'demo_given',
   'sold',
   'lost',
+  'converted',
+];
+
+export const DEMO_ENQUIRY_PIPELINE_STATUSES = [
+  'not_contacted',
+  'contacted',
+  'demo_given',
+  'sold',
+  'lost',
 ];
 
 export const DEMO_ENQUIRY_STATUS_LABELS = {
@@ -12,6 +21,7 @@ export const DEMO_ENQUIRY_STATUS_LABELS = {
   demo_given: 'Demo given',
   sold: 'Sold',
   lost: 'Lost',
+  converted: 'Converted',
 };
 
 export const DEMO_ENQUIRY_STATUS_STYLES = {
@@ -20,6 +30,7 @@ export const DEMO_ENQUIRY_STATUS_STYLES = {
   demo_given: 'bg-indigo-50 text-indigo-800 border-indigo-200',
   sold: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   lost: 'bg-rose-50 text-rose-800 border-rose-200',
+  converted: 'bg-violet-50 text-violet-800 border-violet-200',
 };
 
 export const DEMO_ENQUIRY_STATUS_BUTTON_STYLES = {
@@ -30,6 +41,21 @@ export const DEMO_ENQUIRY_STATUS_BUTTON_STYLES = {
   lost: 'border-rose-200 text-rose-800 hover:bg-rose-50',
 };
 
+export const LEAD_SOURCE_LABELS = {
+  landing: 'Landing page',
+  manual: 'Manual entry',
+  referral: 'Referral',
+  cold_call: 'Cold call',
+  whatsapp: 'WhatsApp',
+  email: 'Email',
+  event: 'Event',
+  other: 'Other',
+};
+
 export function demoEnquiryStatusLabel(status) {
   return DEMO_ENQUIRY_STATUS_LABELS[status] || 'Not contacted';
+}
+
+export function leadSourceLabel(source) {
+  return LEAD_SOURCE_LABELS[source] || source || '—';
 }
