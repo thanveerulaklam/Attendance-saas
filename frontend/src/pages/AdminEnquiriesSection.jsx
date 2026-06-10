@@ -5,6 +5,7 @@ import {
   DEMO_ENQUIRY_STATUS_STYLES,
   demoEnquiryStatusLabel,
   leadSourceLabel,
+  DEFAULT_LEAD_SOURCE_SUGGESTIONS,
 } from '../constants/demoEnquiryStatus';
 import {
   PRICING_PLANS,
@@ -13,7 +14,6 @@ import {
 } from '../constants/pricingPlans';
 
 const PLAN_OPTIONS = planOptionsForAdminSelect();
-const LEAD_SOURCES = ['manual', 'referral', 'cold_call', 'whatsapp', 'email', 'event', 'landing', 'other'];
 const PAGE_SIZE = 25;
 
 function adminFetch(path, options = {}, key) {
@@ -72,7 +72,7 @@ function emptyAddForm() {
     phone_number: '',
     email: '',
     employees_range: '',
-    source: 'manual',
+    source: '',
     expected_plan: 'starter',
     notes: '',
   };
@@ -135,8 +135,30 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
 
   const [notesEditId, setNotesEditId] = useState(null);
   const [notesDraft, setNotesDraft] = useState('');
+  const [sourceSuggestions, setSourceSuggestions] = useState(DEFAULT_LEAD_SOURCE_SUGGESTIONS);
+  const [sourceSuggestionsLoading, setSourceSuggestionsLoading] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  const loadSourceSuggestions = useCallback(async () => {
+    if (!adminKey) return;
+    setSourceSuggestionsLoading(true);
+    try {
+      const res = await adminFetch('/demo-enquiry-suggestions', {}, adminKey);
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json.data?.sources) && json.data.sources.length > 0) {
+        setSourceSuggestions(json.data.sources);
+      }
+    } catch {
+      /* keep defaults */
+    } finally {
+      setSourceSuggestionsLoading(false);
+    }
+  }, [adminKey, onAuthError]);
 
   const loadStats = useCallback(async () => {
     if (!adminKey) return;
@@ -191,7 +213,22 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   useEffect(() => {
     loadStats();
     loadLeads();
-  }, [loadStats, loadLeads]);
+    loadSourceSuggestions();
+  }, [loadStats, loadLeads, loadSourceSuggestions]);
+
+  const filteredSourceSuggestions = useMemo(() => {
+    const q = addForm.source.trim().toLowerCase();
+    if (!q) return sourceSuggestions;
+    return sourceSuggestions.filter((s) => s.toLowerCase().includes(q));
+  }, [addForm.source, sourceSuggestions]);
+
+  const quickSourcePicks = useMemo(() => {
+    const q = addForm.source.trim().toLowerCase();
+    const pool = q
+      ? sourceSuggestions.filter((s) => s.toLowerCase().includes(q))
+      : sourceSuggestions;
+    return pool.slice(0, 8);
+  }, [addForm.source, sourceSuggestions]);
 
   const refreshAll = () => {
     loadStats();
@@ -253,8 +290,16 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const handleAddSubmit = async (e) => {
     e.preventDefault();
     if (addSaving) return;
-    if (!addForm.full_name.trim() || !addForm.business_name.trim() || !addForm.phone_number.trim()) {
-      setToast?.({ type: 'error', message: 'Contact name, business name, and phone are required.' });
+    if (
+      !addForm.full_name.trim() ||
+      !addForm.business_name.trim() ||
+      !addForm.phone_number.trim() ||
+      !addForm.source.trim()
+    ) {
+      setToast?.({
+        type: 'error',
+        message: 'Contact name, business name, phone, and lead source are required.',
+      });
       return;
     }
     setAddSaving(true);
@@ -271,6 +316,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setStatusFilter('open');
       setPage(1);
       refreshAll();
+      loadSourceSuggestions();
       setToast?.({ type: 'success', message: 'Lead added to pipeline.' });
     } catch (err) {
       setToast?.({ type: 'error', message: err.message || 'Failed to add lead' });
@@ -403,6 +449,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               onClick={() => {
                 setAddForm(emptyAddForm());
                 setAddOpen(true);
+                loadSourceSuggestions();
               }}
               className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 shadow-sm"
             >
@@ -713,6 +760,47 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-700">Where did this lead come from? *</span>
+                  <input
+                    name="source"
+                    value={addForm.source}
+                    onChange={(e) => setAddForm((p) => ({ ...p, source: e.target.value }))}
+                    list="lead-source-suggestions"
+                    placeholder="e.g. Referral, Google search, Chennai expo…"
+                    autoComplete="off"
+                    required
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <datalist id="lead-source-suggestions">
+                    {filteredSourceSuggestions.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                  {sourceSuggestionsLoading ? (
+                    <p className="mt-1 text-[10px] text-slate-400">Loading previous sources…</p>
+                  ) : quickSourcePicks.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {quickSourcePicks.map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setAddForm((p) => ({ ...p, source: s }))}
+                          className={`rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                            addForm.source.trim().toLowerCase() === s.toLowerCase()
+                              ? 'border-violet-700 bg-violet-700 text-white'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-violet-300 hover:bg-violet-50'
+                          }`}
+                        >
+                          {leadSourceLabel(s)}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    Type to search or pick a suggestion — previous entries appear automatically.
+                  </p>
+                </label>
                 <label className="block">
                   <span className="text-xs font-medium text-slate-700">Employees</span>
                   <input
@@ -722,20 +810,6 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     placeholder="e.g. 25–50"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-medium text-slate-700">Source</span>
-                  <select
-                    value={addForm.source}
-                    onChange={(e) => setAddForm((p) => ({ ...p, source: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    {LEAD_SOURCES.map((s) => (
-                      <option key={s} value={s}>
-                        {leadSourceLabel(s)}
-                      </option>
-                    ))}
-                  </select>
                 </label>
                 <label className="block sm:col-span-2">
                   <span className="text-xs font-medium text-slate-700">Expected plan</span>

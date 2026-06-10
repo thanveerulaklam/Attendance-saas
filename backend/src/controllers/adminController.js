@@ -205,6 +205,20 @@ async function listDemoEnquiries(req, res, next) {
 }
 
 /**
+ * GET /api/admin/demo-enquiry-suggestions
+ * Distinct lead sources for autocomplete (defaults + previously used values).
+ */
+async function getDemoEnquirySuggestions(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const data = await demoEnquiryService.getDemoEnquirySuggestions();
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/admin/demo-enquiry-stats
  */
 async function getDemoEnquiryStats(req, res, next) {
@@ -1724,6 +1738,7 @@ module.exports = {
   getAdminOverview,
   listDemoEnquiries,
   getDemoEnquiryStats,
+  getDemoEnquirySuggestions,
   createAdminDemoEnquiry,
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,

@@ -70,6 +70,11 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'demo_enquiries' AND column_name = 'converted_company_id'
   )`,
+  '062_demo_enquiry_source_text.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'demo_enquiries'
+      AND column_name = 'source' AND character_maximum_length >= 120
+  )`,
 };
 
 async function hasExistingSchema(client) {

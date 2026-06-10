@@ -52,6 +52,21 @@ export const LEAD_SOURCE_LABELS = {
   other: 'Other',
 };
 
+export const DEFAULT_LEAD_SOURCE_SUGGESTIONS = [
+  'Referral',
+  'Cold call',
+  'WhatsApp',
+  'Email',
+  'Event / expo',
+  'Google search',
+  'Instagram',
+  'Facebook',
+  'Walk-in',
+  'Existing customer',
+  'Partner',
+  'Other',
+];
+
 export function demoEnquiryStatusLabel(status) {
   return DEMO_ENQUIRY_STATUS_LABELS[status] || 'Not contacted';
 }

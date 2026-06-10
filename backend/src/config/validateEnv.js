@@ -45,7 +45,9 @@ function validateEnv() {
     }
     if (adminSecret.length < 32) {
       console.error(
-        'ADMIN_APPROVAL_SECRET must be at least 32 characters in production. Generate with: openssl rand -hex 32'
+        `ADMIN_APPROVAL_SECRET must be at least 32 characters in production (currently ${adminSecret.length}). ` +
+          'Check backend/.env for duplicate lines, # in the value, or edit the file on the VPS (not only locally). ' +
+          'Generate with: openssl rand -hex 32'
       );
       process.exit(1);
     }

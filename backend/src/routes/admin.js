@@ -5,6 +5,7 @@ const {
   getAdminOverview,
   listDemoEnquiries,
   getDemoEnquiryStats,
+  getDemoEnquirySuggestions,
   createAdminDemoEnquiry,
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
@@ -82,6 +83,7 @@ router.post('/set-company-branch-limit', setCompanyBranchLimit);
 router.post('/renew-company-subscription', renewCompanySubscription);
 router.get('/demo-enquiries', listDemoEnquiries);
 router.get('/demo-enquiry-stats', getDemoEnquiryStats);
+router.get('/demo-enquiry-suggestions', getDemoEnquirySuggestions);
 router.post('/demo-enquiries', createAdminDemoEnquiry);
 router.post('/demo-enquiry-status', updateDemoEnquiryStatus);
 router.post('/demo-enquiry-notes', updateDemoEnquiryNotes);

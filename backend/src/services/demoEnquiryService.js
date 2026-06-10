@@ -10,16 +10,27 @@ const DEMO_ENQUIRY_STATUSES = [
   'converted',
 ];
 
-const LEAD_SOURCES = [
-  'landing',
-  'manual',
-  'referral',
-  'cold_call',
-  'whatsapp',
-  'email',
-  'event',
-  'other',
+/** Built-in suggestions (stored value → same or mapped label). */
+const DEFAULT_LEAD_SOURCE_SUGGESTIONS = [
+  'Referral',
+  'Cold call',
+  'WhatsApp',
+  'Email',
+  'Event / expo',
+  'Google search',
+  'Instagram',
+  'Facebook',
+  'Walk-in',
+  'Existing customer',
+  'Partner',
+  'Other',
 ];
+
+function normalizeLeadSource(raw) {
+  const text = normText(raw);
+  if (!text) return 'Manual entry';
+  return text.length > 120 ? text.slice(0, 120) : text;
+}
 
 const ENQUIRY_LIST_COLUMNS = `de.id, de.full_name, de.business_name, de.phone_number, de.email,
   de.employees_range, de.source, de.expected_plan, de.notes,
@@ -69,8 +80,10 @@ async function createAdminLead(data) {
   const email = normText(data.email) || null;
   const employeesRange = normText(data.employees_range) || 'Not specified';
   const notes = data.notes ? normText(data.notes) : null;
-  const sourceRaw = normText(data.source).toLowerCase() || 'manual';
-  const source = LEAD_SOURCES.includes(sourceRaw) ? sourceRaw : 'manual';
+  const source = normalizeLeadSource(data.source);
+  if (!normText(data.source)) {
+    throw new AppError('Lead source is required (where did this lead come from?)', 400);
+  }
   const expectedPlan =
     typeof data.expected_plan === 'string' && data.expected_plan.trim()
       ? data.expected_plan.trim().toLowerCase()
@@ -183,6 +196,39 @@ async function listDemoEnquiries(
     limit: limitNum,
     total,
   };
+}
+
+async function getDemoEnquirySuggestions() {
+  const result = await pool.query(
+    `SELECT TRIM(source) AS source, COUNT(*)::int AS use_count
+     FROM demo_enquiries
+     WHERE source IS NOT NULL AND TRIM(source) <> ''
+     GROUP BY TRIM(source)
+     ORDER BY use_count DESC, source ASC
+     LIMIT 40`
+  );
+
+  const seen = new Set();
+  const sources = [];
+
+  for (const label of DEFAULT_LEAD_SOURCE_SUGGESTIONS) {
+    const key = label.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      sources.push(label);
+    }
+  }
+
+  for (const row of result.rows) {
+    const label = normText(row.source);
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push(label);
+  }
+
+  return { sources };
 }
 
 async function getDemoEnquiryStats() {
@@ -327,6 +373,7 @@ module.exports = {
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   convertEnquiryToCompany,
+  getDemoEnquirySuggestions,
   DEMO_ENQUIRY_STATUSES,
-  LEAD_SOURCES,
+  DEFAULT_LEAD_SOURCE_SUGGESTIONS,
 };
