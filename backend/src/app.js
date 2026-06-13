@@ -94,6 +94,22 @@ app.use('/api/advances', advancesRouter);
 app.use('/api/advance-loans', advanceLoansRouter);
 app.use('/api/demo-enquiries', demoEnquiriesRouter);
 // ZKTeco/eSSL ADMS endpoints (outside /api for device compatibility)
+// Fingerprint devices sync wall clock from HTTP Date on each poll. After bad TimeZone PUSH
+// experiments, many units apply GMT as UTC+5 (not IST +5:30) → 30 min behind. Strip Date on /iclock.
+app.use('/iclock', (_req, res, next) => {
+  const end = res.end.bind(res);
+  res.end = function stripDateHeader(...args) {
+    if (!res.headersSent) {
+      try {
+        res.removeHeader('Date');
+      } catch {
+        // ignore
+      }
+    }
+    return end(...args);
+  };
+  next();
+});
 app.use('/iclock', express.text({ type: '*/*', limit: '10mb' }), admsRouter);
 
 // 404
