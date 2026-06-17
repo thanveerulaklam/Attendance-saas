@@ -1580,7 +1580,7 @@ export default function PayrollPage() {
             department: e?.department || null,
             join_date: e?.join_date || null,
             shift_name: e?.shift_name || null,
-            phone: e?.phone || null,
+            phone: e?.phone_number || null,
             absentDates: [],
             halfDayDates: [],
             lateDetails: [],
