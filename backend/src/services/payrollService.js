@@ -17,6 +17,11 @@ const {
   computePermissionOffset,
   computePaidLeaveEncashment,
 } = require('./payrollMath');
+const {
+  computeEsiDeduction,
+  computePfDeduction,
+  normalizeMode,
+} = require('../utils/statutoryDeductions');
 
 const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
 
@@ -1486,6 +1491,82 @@ function getDaysInMonth(year, month1to12) {
   return new Date(year, month1to12, 0).getDate(); // month1to12: 1=Jan..12=Dec
 }
 
+function resolveEmployeeStatutoryDeductions(employee, { earnedBasic = 0, grossSalary = 0 } = {}) {
+  return {
+    esiDeduction: computeEsiDeduction(employee, { grossSalary }),
+    pfDeduction: computePfDeduction(employee, { earnedBasic }),
+  };
+}
+
+async function computePayrollWageBasesForRange(
+  companyId,
+  employeeId,
+  employee,
+  rangeStart,
+  rangeEnd,
+  payrollOptions = {}
+) {
+  const {
+    includeOvertime = true,
+    treatHolidayAdjacentAbsenceAsWorking = false,
+    asOfDate = null,
+  } = payrollOptions;
+
+  const { y, m } = parseYmd(rangeStart);
+  const basicSalary = Number(employee.basic_salary || 0);
+  const daysInMonth = getDaysInMonth(y, m);
+  const salaryType = String(employee.salary_type || 'monthly').toLowerCase();
+  const dailyRate =
+    salaryType === 'per_day'
+      ? basicSalary
+      : daysInMonth > 0
+        ? basicSalary / daysInMonth
+        : 0;
+
+  const summary = await getAttendanceSummaryForRange(companyId, employeeId, rangeStart, rangeEnd, {
+    treatHolidayAdjacentAbsenceAsWorking,
+    asOfDate,
+    disablePaidLeave: true,
+    holidayCountAsPresent: true,
+  });
+
+  const shiftClient = await pool.connect();
+  let shiftConfig;
+  try {
+    shiftConfig = await getShiftForEmployee(shiftClient, companyId, employeeId);
+  } finally {
+    shiftClient.release();
+  }
+
+  const shiftHoursForRate =
+    summary.attendanceMode === 'hours_based'
+      ? Number(summary.requiredHoursPerDay || 8)
+      : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
+
+  const effectiveOvertimeRate =
+    shiftConfig.overtimeRateMode === 'auto'
+      ? shiftHoursForRate > 0
+        ? dailyRate / shiftHoursForRate
+        : 0
+      : Number(shiftConfig.overtimeRatePerHour || 0);
+
+  const overtimePay =
+    includeOvertime && shiftConfig.allowOvertime
+      ? summary.overtimeHours * effectiveOvertimeRate
+      : 0;
+  const travelAllowance =
+    Number(employee.daily_travel_allowance || 0) * (summary.presentWorkingDays ?? 0);
+
+  const earnedBasic =
+    salaryType === 'per_day'
+      ? dailyRate * (summary.presentWorkingDays ?? 0)
+      : dailyRate * (summary.presentDays ?? 0);
+
+  const grossSalary = earnedBasic + overtimePay + travelAllowance;
+
+  return { earnedBasic, grossSalary };
+}
+
 /**
  * Generate weekly payroll for one employee (Sun–Sat).
  */
@@ -1519,7 +1600,8 @@ async function generateWeeklyPayroll(
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, daily_travel_allowance, esi_amount, pf_amount, salary_type
+      `SELECT id, basic_salary, status, daily_travel_allowance,
+              esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1610,8 +1692,36 @@ async function generateWeeklyPayroll(
       lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
     }
 
-    const esiDeduction = shouldDeductEsi ? Number(employee.esi_amount || 0) : 0;
-    const pfDeduction = shouldDeductEsi ? Number(employee.pf_amount || 0) : 0;
+    const grossSalary = earnedBasic + overtimePay + travelAllowance;
+    let statutoryEarnedBasic = earnedBasic;
+    let statutoryGross = grossSalary;
+    if (
+      shouldDeductEsi &&
+      (normalizeMode(employee.esi_mode) === 'percentage' ||
+        normalizeMode(employee.pf_mode) === 'percentage')
+    ) {
+      const monthStart = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+      const monthBases = await computePayrollWageBasesForRange(
+        companyId,
+        employeeId,
+        employee,
+        monthStart,
+        weekEnd,
+        {
+          includeOvertime,
+          treatHolidayAdjacentAbsenceAsWorking,
+          asOfDate,
+        }
+      );
+      statutoryEarnedBasic = monthBases.earnedBasic;
+      statutoryGross = monthBases.grossSalary;
+    }
+    const { esiDeduction, pfDeduction } = shouldDeductEsi
+      ? resolveEmployeeStatutoryDeductions(employee, {
+          earnedBasic: statutoryEarnedBasic,
+          grossSalary: statutoryGross,
+        })
+      : { esiDeduction: 0, pfDeduction: 0 };
     const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
 
     const salaryAdvanceBase = applySalaryAdvances
@@ -1649,7 +1759,6 @@ async function generateWeeklyPayroll(
 
     const salaryAdvance = salaryAdvanceBase + monthRepaymentAdvance;
 
-    const grossSalary = earnedBasic + overtimePay + travelAllowance;
     const netSalary = grossSalary - deductions - salaryAdvance;
 
     const weeklyOvertimeHoursBillable = shiftConfig.allowOvertime
@@ -1952,7 +2061,8 @@ async function getWeeklyPayrollBreakdown(
   const isWeekComplete = !isCurrentWeek || todayStr >= weekEnd;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, pf_amount, salary_type
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance,
+            esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -2040,10 +2150,37 @@ async function getWeeklyPayrollBreakdown(
   const monthLastDay = getDaysInMonth(endYear, endMonth);
   const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
   const shouldDeductEsi = weekEnd === monthLastDayStr;
-  const esiDeduction = shouldDeductEsi ? Number(employee.esi_amount || 0) : 0;
-  const pfDeduction = shouldDeductEsi ? Number(employee.pf_amount || 0) : 0;
-
   const grossSalary = earnedBasic + overtimePay + travelAllowance;
+  let statutoryEarnedBasic = earnedBasic;
+  let statutoryGross = grossSalary;
+  if (
+    shouldDeductEsi &&
+    (normalizeMode(employee.esi_mode) === 'percentage' ||
+      normalizeMode(employee.pf_mode) === 'percentage')
+  ) {
+    const monthStart = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
+    const monthBases = await computePayrollWageBasesForRange(
+      companyId,
+      employeeId,
+      employee,
+      monthStart,
+      weekEnd,
+      {
+        includeOvertime,
+        treatHolidayAdjacentAbsenceAsWorking,
+        asOfDate,
+      }
+    );
+    statutoryEarnedBasic = monthBases.earnedBasic;
+    statutoryGross = monthBases.grossSalary;
+  }
+  const { esiDeduction, pfDeduction } = shouldDeductEsi
+    ? resolveEmployeeStatutoryDeductions(employee, {
+        earnedBasic: statutoryEarnedBasic,
+        grossSalary: statutoryGross,
+      })
+    : { esiDeduction: 0, pfDeduction: 0 };
+
   const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
 
   // Weekly payroll records currently don't store permission allocation/offset fields,
@@ -2145,7 +2282,9 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, esi_amount, pf_amount, payroll_frequency, salary_type, permission_hours_override
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance,
+              esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
+              payroll_frequency, salary_type, permission_hours_override
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -2271,8 +2410,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     }
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentAmount;
-    const esiDeduction = Number(employee.esi_amount || 0);
-    const pfDeduction = Number(employee.pf_amount || 0);
+    const { esiDeduction, pfDeduction } = resolveEmployeeStatutoryDeductions(employee, {
+      earnedBasic,
+      grossSalary,
+    });
     const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
     const effectivePermissionHours =
       employee.permission_hours_override != null
@@ -2478,7 +2619,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, esi_amount, pf_amount, shift_id, salary_type, permission_hours_override
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance,
+            esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
+            shift_id, salary_type, permission_hours_override
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -2605,8 +2748,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   }
 
   const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentComputed;
-  const esiDeduction = Number(employee.esi_amount || 0);
-  const pfDeduction = Number(employee.pf_amount || 0);
+  const { esiDeduction, pfDeduction } = resolveEmployeeStatutoryDeductions(employee, {
+    earnedBasic,
+    grossSalary: grossSalaryComputed,
+  });
   const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
   const permissionOffsetComputed = computePermissionOffset({
     allocatedHours: isMonthComplete ? effectivePermissionHours : 0,

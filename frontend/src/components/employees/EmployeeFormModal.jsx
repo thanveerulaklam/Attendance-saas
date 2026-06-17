@@ -25,7 +25,11 @@ export default function EmployeeFormModal({
   const [esiNumber, setEsiNumber] = useState('');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
+  const [esiMode, setEsiMode] = useState('fixed');
+  const [esiPercent, setEsiPercent] = useState('');
   const [pfAmount, setPfAmount] = useState('');
+  const [pfMode, setPfMode] = useState('fixed');
+  const [pfPercent, setPfPercent] = useState('');
   const [permissionHoursOverride, setPermissionHoursOverride] = useState('');
   const [joinDate, setJoinDate] = useState('');
   const [status, setStatus] = useState('active');
@@ -99,8 +103,16 @@ export default function EmployeeFormModal({
         setEsiAmount(
           employee.esi_amount != null ? String(employee.esi_amount) : ''
         );
+        setEsiMode(employee.esi_mode === 'percentage' ? 'percentage' : 'fixed');
+        setEsiPercent(
+          employee.esi_percent != null ? String(employee.esi_percent) : ''
+        );
         setPfAmount(
           employee.pf_amount != null ? String(employee.pf_amount) : ''
+        );
+        setPfMode(employee.pf_mode === 'percentage' ? 'percentage' : 'fixed');
+        setPfPercent(
+          employee.pf_percent != null ? String(employee.pf_percent) : ''
         );
         setPermissionHoursOverride(
           employee.permission_hours_override != null
@@ -131,7 +143,11 @@ export default function EmployeeFormModal({
         setBasicSalary('');
         setDailyTravelAllowance('');
         setEsiAmount('');
+        setEsiMode('fixed');
+        setEsiPercent('');
         setPfAmount('');
+        setPfMode('fixed');
+        setPfPercent('');
         setPermissionHoursOverride('');
         setJoinDate('');
         setStatus('active');
@@ -201,11 +217,31 @@ export default function EmployeeFormModal({
       nextErrors.dailyTravelAllowance = 'Daily travel allowance must be 0 or more';
     }
 
-    if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
-      nextErrors.esiAmount = 'ESI amount must be 0 or more';
+    if (esiMode === 'fixed') {
+      if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
+        nextErrors.esiAmount = 'ESI amount must be 0 or more';
+      }
+    } else if (esiPercent.trim() === '') {
+      nextErrors.esiPercent = 'ESI percentage is required';
+    } else if (
+      Number.isNaN(Number(esiPercent)) ||
+      Number(esiPercent) < 0 ||
+      Number(esiPercent) > 100
+    ) {
+      nextErrors.esiPercent = 'ESI percentage must be between 0 and 100';
     }
-    if (pfAmount.trim() !== '' && (Number.isNaN(Number(pfAmount)) || Number(pfAmount) < 0)) {
-      nextErrors.pfAmount = 'PF amount must be 0 or more';
+    if (pfMode === 'fixed') {
+      if (pfAmount.trim() !== '' && (Number.isNaN(Number(pfAmount)) || Number(pfAmount) < 0)) {
+        nextErrors.pfAmount = 'PF amount must be 0 or more';
+      }
+    } else if (pfPercent.trim() === '') {
+      nextErrors.pfPercent = 'PF percentage is required';
+    } else if (
+      Number.isNaN(Number(pfPercent)) ||
+      Number(pfPercent) < 0 ||
+      Number(pfPercent) > 100
+    ) {
+      nextErrors.pfPercent = 'PF percentage must be between 0 and 100';
     }
     if (
       permissionHoursOverride.trim() !== '' &&
@@ -269,8 +305,22 @@ export default function EmployeeFormModal({
         esi_number: esiNumber.trim() === '' ? null : esiNumber.trim(),
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
-        esi_amount: esiAmount.trim() === '' ? 0 : Number(esiAmount),
-        pf_amount: pfAmount.trim() === '' ? 0 : Number(pfAmount),
+        esi_mode: esiMode,
+        esi_amount: esiMode === 'fixed' ? (esiAmount.trim() === '' ? 0 : Number(esiAmount)) : 0,
+        esi_percent:
+          esiMode === 'percentage'
+            ? esiPercent.trim() === ''
+              ? null
+              : Number(esiPercent)
+            : null,
+        pf_mode: pfMode,
+        pf_amount: pfMode === 'fixed' ? (pfAmount.trim() === '' ? 0 : Number(pfAmount)) : 0,
+        pf_percent:
+          pfMode === 'percentage'
+            ? pfPercent.trim() === ''
+              ? null
+              : Number(pfPercent)
+            : null,
         permission_hours_override:
           permissionHoursOverride.trim() === '' ? null : Number(permissionHoursOverride),
         join_date: joinDate,
@@ -574,44 +624,126 @@ export default function EmployeeFormModal({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-700">
-              ESI (monthly deduction) (₹)
+            <label className="block text-xs font-medium text-slate-700">ESI deduction</label>
+            <div className="mt-1 flex flex-wrap gap-4 text-[11px] text-slate-700">
+              <label className="inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="esiMode"
+                  checked={esiMode === 'fixed'}
+                  onChange={() => setEsiMode('fixed')}
+                  className="border-slate-300 text-blue-600"
+                />
+                Fixed amount (₹/month)
+              </label>
+              <label className="inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="esiMode"
+                  checked={esiMode === 'percentage'}
+                  onChange={() => setEsiMode('percentage')}
+                  className="border-slate-300 text-blue-600"
+                />
+                Percentage of gross wages
+              </label>
+            </div>
+            {esiMode === 'fixed' ? (
               <input
                 type="number"
                 min="0"
                 step="0.01"
                 value={esiAmount}
                 onChange={(e) => setEsiAmount(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
                 placeholder="0 — deducted every month from salary"
               />
-            </label>
+            ) : (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={esiPercent}
+                  onChange={(e) => setEsiPercent(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="e.g. 0.75"
+                />
+                <span className="shrink-0 text-sm text-slate-500">%</span>
+              </div>
+            )}
             <p className="mt-0.5 text-[11px] text-slate-500">
-              This amount is deducted from the employee’s salary every month.
+              {esiMode === 'fixed'
+                ? 'This amount is deducted from the employee’s salary every month.'
+                : 'Calculated on gross wages (basic + overtime + travel allowance) each payroll run. Common rate: 0.75%.'}
             </p>
             {errors.esiAmount && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.esiAmount}</p>
             )}
+            {errors.esiPercent && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.esiPercent}</p>
+            )}
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-700">
-              PF (optional) (monthly deduction) (₹)
+            <label className="block text-xs font-medium text-slate-700">PF deduction (optional)</label>
+            <div className="mt-1 flex flex-wrap gap-4 text-[11px] text-slate-700">
+              <label className="inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="pfMode"
+                  checked={pfMode === 'fixed'}
+                  onChange={() => setPfMode('fixed')}
+                  className="border-slate-300 text-blue-600"
+                />
+                Fixed amount (₹/month)
+              </label>
+              <label className="inline-flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="pfMode"
+                  checked={pfMode === 'percentage'}
+                  onChange={() => setPfMode('percentage')}
+                  className="border-slate-300 text-blue-600"
+                />
+                Percentage of earned basic
+              </label>
+            </div>
+            {pfMode === 'fixed' ? (
               <input
                 type="number"
                 min="0"
                 step="0.01"
                 value={pfAmount}
                 onChange={(e) => setPfAmount(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
                 placeholder="0 — deducted every month from salary"
               />
-            </label>
+            ) : (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={pfPercent}
+                  onChange={(e) => setPfPercent(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="e.g. 12"
+                />
+                <span className="shrink-0 text-sm text-slate-500">%</span>
+              </div>
+            )}
             <p className="mt-0.5 text-[11px] text-slate-500">
-              Optional PF deduction for this employee, applied every month in payroll.
+              {pfMode === 'fixed'
+                ? 'Optional PF deduction for this employee, applied every month in payroll.'
+                : 'Calculated on earned basic salary each payroll run. Common employee rate: 12%.'}
             </p>
             {errors.pfAmount && (
               <p className="mt-1 text-[11px] text-rose-600">{errors.pfAmount}</p>
+            )}
+            {errors.pfPercent && (
+              <p className="mt-1 text-[11px] text-rose-600">{errors.pfPercent}</p>
             )}
           </div>
 

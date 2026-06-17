@@ -1,6 +1,12 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { getMonthlyAttendance, getDailyAttendance } = require('./attendanceService');
+const { getPayrollBreakdown, getWeeklyPayrollBreakdown } = require('./payrollService');
+const {
+  employeeHasEsiConfigured,
+  employeeHasPfConfigured,
+  formatStatutoryModeLabel,
+} = require('../utils/statutoryDeductions');
 
 /**
  * Escape a value for CSV (wrap in quotes if needed, escape internal quotes).
@@ -244,9 +250,192 @@ async function getDailyReportCsv(companyId, dateStr, department = null, allowedB
   return toCsv(header, dataRows);
 }
 
+function getDaysInMonth(year, month1to12) {
+  return new Date(year, month1to12, 0).getDate();
+}
+
+function formatStatutoryRate(employee, kind) {
+  const mode = kind === 'esi' ? employee.esi_mode : employee.pf_mode;
+  const percent = kind === 'esi' ? employee.esi_percent : employee.pf_percent;
+  const amount = kind === 'esi' ? employee.esi_amount : employee.pf_amount;
+  if (String(mode || 'fixed').toLowerCase() === 'percentage') {
+    return percent != null ? `${Number(percent)}%` : '';
+  }
+  return amount != null ? Number(amount) : 0;
+}
+
+async function loadStatutoryReportEmployees(companyId, year, month, kind, allowedBranchIds) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) {
+    throw new AppError('Valid year and month are required', 400);
+  }
+
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    return { year: y, month: m, employees: [] };
+  }
+
+  const params = [companyId];
+  let branchClause = '';
+  if (allowedBranchIds != null) {
+    branchClause = ' AND e.branch_id = ANY($2::bigint[])';
+    params.push(allowedBranchIds);
+  }
+
+  const configuredClause =
+    kind === 'esi'
+      ? `(
+          (COALESCE(e.esi_mode, 'fixed') = 'fixed' AND COALESCE(e.esi_amount, 0) > 0)
+          OR (e.esi_mode = 'percentage' AND COALESCE(e.esi_percent, 0) > 0)
+        )`
+      : `(
+          (COALESCE(e.pf_mode, 'fixed') = 'fixed' AND COALESCE(e.pf_amount, 0) > 0)
+          OR (e.pf_mode = 'percentage' AND COALESCE(e.pf_percent, 0) > 0)
+        )`;
+
+  const result = await pool.query(
+    `SELECT
+        e.id,
+        e.employee_code,
+        e.name,
+        e.esi_number,
+        e.esi_mode,
+        e.esi_percent,
+        e.esi_amount,
+        e.pf_mode,
+        e.pf_percent,
+        e.pf_amount,
+        e.payroll_frequency
+     FROM employees e
+     WHERE e.company_id = $1
+       AND e.status = 'active'
+       AND ${configuredClause}${branchClause}
+     ORDER BY e.name`,
+    params
+  );
+
+  return { year: y, month: m, employees: result.rows };
+}
+
+async function getStatutoryBreakdownForEmployee(companyId, employee, year, month) {
+  const monthLastDay = getDaysInMonth(year, month);
+  const monthLastDayStr = `${year}-${String(month).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
+
+  if (String(employee.payroll_frequency || 'monthly').toLowerCase() === 'weekly') {
+    const weekResult = await pool.query(
+      `SELECT week_start_date
+       FROM weekly_payroll_records
+       WHERE company_id = $1
+         AND employee_id = $2
+         AND week_end_date = $3`,
+      [companyId, employee.id, monthLastDayStr]
+    );
+    if (weekResult.rowCount === 0) return null;
+    const weekStart = String(weekResult.rows[0].week_start_date).slice(0, 10);
+    return getWeeklyPayrollBreakdown(companyId, employee.id, weekStart);
+  }
+
+  const payrollResult = await pool.query(
+    `SELECT id
+     FROM payroll_records
+     WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
+    [companyId, employee.id, year, month]
+  );
+  if (payrollResult.rowCount === 0) return null;
+  return getPayrollBreakdown(companyId, employee.id, year, month);
+}
+
+/**
+ * Monthly ESI statement CSV.
+ */
+async function getEsiReportCsv(companyId, year, month, allowedBranchIds = null) {
+  const { year: y, month: m, employees } = await loadStatutoryReportEmployees(
+    companyId,
+    year,
+    month,
+    'esi',
+    allowedBranchIds
+  );
+
+  const header = [
+    'Employee Code',
+    'Name',
+    'ESI Number',
+    'Type',
+    'Rate',
+    'Gross Wages',
+    'ESI Deduction',
+  ];
+  const rows = [];
+
+  for (const employee of employees) {
+    if (!employeeHasEsiConfigured(employee)) continue;
+    const breakdown = await getStatutoryBreakdownForEmployee(companyId, employee, y, m);
+    if (!breakdown?.breakdown) continue;
+    const b = breakdown.breakdown;
+    const deduction = Number(b.esiDeduction || 0);
+    if (deduction <= 0) continue;
+    rows.push([
+      employee.employee_code,
+      employee.name,
+      employee.esi_number || '',
+      formatStatutoryModeLabel(employee.esi_mode),
+      formatStatutoryRate(employee, 'esi'),
+      b.grossSalary ?? '',
+      deduction,
+    ]);
+  }
+
+  return toCsv(header, rows);
+}
+
+/**
+ * Monthly PF statement CSV.
+ */
+async function getPfReportCsv(companyId, year, month, allowedBranchIds = null) {
+  const { year: y, month: m, employees } = await loadStatutoryReportEmployees(
+    companyId,
+    year,
+    month,
+    'pf',
+    allowedBranchIds
+  );
+
+  const header = [
+    'Employee Code',
+    'Name',
+    'Type',
+    'Rate',
+    'Earned Basic',
+    'PF Deduction',
+  ];
+  const rows = [];
+
+  for (const employee of employees) {
+    if (!employeeHasPfConfigured(employee)) continue;
+    const breakdown = await getStatutoryBreakdownForEmployee(companyId, employee, y, m);
+    if (!breakdown?.breakdown) continue;
+    const b = breakdown.breakdown;
+    const deduction = Number(b.pfDeduction || 0);
+    if (deduction <= 0) continue;
+    rows.push([
+      employee.employee_code,
+      employee.name,
+      formatStatutoryModeLabel(employee.pf_mode),
+      formatStatutoryRate(employee, 'pf'),
+      b.basicSalary ?? '',
+      deduction,
+    ]);
+  }
+
+  return toCsv(header, rows);
+}
+
 module.exports = {
   getAttendanceReportCsv,
   getPayrollReportCsv,
   getOvertimeReportCsv,
   getDailyReportCsv,
+  getEsiReportCsv,
+  getPfReportCsv,
 };

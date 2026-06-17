@@ -3,6 +3,7 @@ const { AppError } = require('../utils/AppError');
 const STATUS_VALUES = ['active', 'inactive'];
 const PAYROLL_FREQUENCY_VALUES = ['monthly', 'weekly'];
 const SALARY_TYPE_VALUES = ['monthly', 'per_day'];
+const DEDUCTION_MODE_VALUES = ['fixed', 'percentage'];
 
 const isValidDate = (value) => {
   const date = new Date(value);
@@ -111,6 +112,35 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_mode')) {
+    const mode = String(payload.esi_mode || 'fixed').toLowerCase();
+    if (!DEDUCTION_MODE_VALUES.includes(mode)) {
+      errors.esi_mode = `esi_mode must be one of: ${DEDUCTION_MODE_VALUES.join(', ')}`;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_mode')) {
+    const mode = String(payload.pf_mode || 'fixed').toLowerCase();
+    if (!DEDUCTION_MODE_VALUES.includes(mode)) {
+      errors.pf_mode = `pf_mode must be one of: ${DEDUCTION_MODE_VALUES.join(', ')}`;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_percent')) {
+    const v = payload.esi_percent;
+    if (v == null || v === '') {
+      // optional
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0 || Number(v) > 100) {
+      errors.esi_percent = 'ESI percent must be between 0 and 100.';
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_percent')) {
+    const v = payload.pf_percent;
+    if (v == null || v === '') {
+      // optional
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0 || Number(v) > 100) {
+      errors.pf_percent = 'PF percent must be between 0 and 100.';
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
     const v = payload.permission_hours_override;
     if (v == null || v === '') {
@@ -194,6 +224,26 @@ const validateCreateEmployee = (payload = {}) => {
   if (Object.prototype.hasOwnProperty.call(payload, 'pf_amount')) {
     const v = payload.pf_amount;
     result.pf_amount = v == null || v === '' ? 0 : Number(v);
+  }
+  result.esi_mode = 'fixed';
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_mode')) {
+    const mode = String(payload.esi_mode || 'fixed').toLowerCase();
+    result.esi_mode = DEDUCTION_MODE_VALUES.includes(mode) ? mode : 'fixed';
+  }
+  result.pf_mode = 'fixed';
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_mode')) {
+    const mode = String(payload.pf_mode || 'fixed').toLowerCase();
+    result.pf_mode = DEDUCTION_MODE_VALUES.includes(mode) ? mode : 'fixed';
+  }
+  result.esi_percent = null;
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_percent')) {
+    const v = payload.esi_percent;
+    result.esi_percent = v == null || v === '' ? null : Number(v);
+  }
+  result.pf_percent = null;
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_percent')) {
+    const v = payload.pf_percent;
+    result.pf_percent = v == null || v === '' ? null : Number(v);
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'permission_hours_override')) {
     const v = payload.permission_hours_override;
@@ -360,6 +410,43 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.pf_amount = 'PF amount must be a non-negative number.';
     } else {
       clean.pf_amount = Number(v);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_mode')) {
+    const mode = String(payload.esi_mode || 'fixed').toLowerCase();
+    if (!DEDUCTION_MODE_VALUES.includes(mode)) {
+      errors.esi_mode = `esi_mode must be one of: ${DEDUCTION_MODE_VALUES.join(', ')}`;
+    } else {
+      clean.esi_mode = mode;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_mode')) {
+    const mode = String(payload.pf_mode || 'fixed').toLowerCase();
+    if (!DEDUCTION_MODE_VALUES.includes(mode)) {
+      errors.pf_mode = `pf_mode must be one of: ${DEDUCTION_MODE_VALUES.join(', ')}`;
+    } else {
+      clean.pf_mode = mode;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'esi_percent')) {
+    const v = payload.esi_percent;
+    if (v == null || v === '') {
+      clean.esi_percent = null;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0 || Number(v) > 100) {
+      errors.esi_percent = 'ESI percent must be between 0 and 100.';
+    } else {
+      clean.esi_percent = Number(v);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_percent')) {
+    const v = payload.pf_percent;
+    if (v == null || v === '') {
+      clean.pf_percent = null;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0 || Number(v) > 100) {
+      errors.pf_percent = 'PF percent must be between 0 and 100.';
+    } else {
+      clean.pf_percent = Number(v);
     }
   }
 

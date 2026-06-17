@@ -36,7 +36,11 @@ const EMPLOYEE_SELECT_FIELDS = `
         shift_id,
         daily_travel_allowance,
         esi_amount,
+        esi_mode,
+        esi_percent,
         pf_amount,
+        pf_mode,
+        pf_percent,
         permission_hours_override,
         created_at`;
 
@@ -193,6 +197,10 @@ async function createEmployee(companyId, data, branchContext = {}) {
     payload.daily_travel_allowance != null ? payload.daily_travel_allowance : 0;
   const esiAmount = payload.esi_amount != null ? payload.esi_amount : 0;
   const pfAmount = payload.pf_amount != null ? payload.pf_amount : 0;
+  const esiMode = payload.esi_mode || 'fixed';
+  const pfMode = payload.pf_mode || 'fixed';
+  const esiPercent = payload.esi_percent != null ? payload.esi_percent : null;
+  const pfPercent = payload.pf_percent != null ? payload.pf_percent : null;
   const permissionHoursOverride =
     payload.permission_hours_override != null ? payload.permission_hours_override : null;
   const department = payload.department != null ? payload.department : null;
@@ -225,10 +233,14 @@ async function createEmployee(companyId, data, branchContext = {}) {
         shift_id,
         daily_travel_allowance,
         esi_amount,
+        esi_mode,
+        esi_percent,
         pf_amount,
+        pf_mode,
+        pf_percent,
         permission_hours_override
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -247,7 +259,11 @@ async function createEmployee(companyId, data, branchContext = {}) {
         shiftId,
         dailyTravelAllowance,
         esiAmount,
+        esiMode,
+        esiPercent,
         pfAmount,
+        pfMode,
+        pfPercent,
         permissionHoursOverride,
       ]
     );

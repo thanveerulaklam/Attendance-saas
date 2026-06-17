@@ -193,6 +193,8 @@ export default function ReportsPage() {
     attendance: 'csv',
     payroll: 'csv',
     overtime: 'csv',
+    esi: 'csv',
+    pf: 'csv',
   });
   const [dayReportDate, setDayReportDate] = useState(todayIstYmd);
   const [dayReportDepartment, setDayReportDepartment] = useState('');
@@ -673,11 +675,15 @@ export default function ReportsPage() {
       attendance: `${base}/attendance.csv?${params}`,
       payroll: `${base}/payroll.csv?${params}`,
       overtime: `${base}/overtime.csv?${params}`,
+      esi: `${base}/esi.csv?${params}`,
+      pf: `${base}/pf.csv?${params}`,
     };
     const names = {
       attendance: `attendance-${year}-${String(month).padStart(2, '0')}.csv`,
       payroll: `payroll-${year}-${String(month).padStart(2, '0')}.csv`,
       overtime: `overtime-${year}-${String(month).padStart(2, '0')}.csv`,
+      esi: `esi-statement-${year}-${String(month).padStart(2, '0')}.csv`,
+      pf: `pf-statement-${year}-${String(month).padStart(2, '0')}.csv`,
     };
     try {
       setLoading(type);
@@ -712,12 +718,18 @@ export default function ReportsPage() {
       }
 
       const monthLabel = MONTHS.find((m) => m.value === month)?.label || '';
+      const reportTitle =
+        type === 'esi'
+          ? 'ESI Statement'
+          : type === 'pf'
+            ? 'PF Statement'
+            : `${type.charAt(0).toUpperCase()}${type.slice(1)} Report`;
       const doc = createPdf({ orientation: 'landscape' });
       const startY = addReportHeader(doc, {
         companyName: company.name,
         companyPhone: company.phone,
         companyAddress: company.address,
-        title: `${type.charAt(0).toUpperCase()}${type.slice(1)} Report`,
+        title: reportTitle,
         periodLabel: `${monthLabel} ${year}`,
         generatedAt: new Date().toLocaleString(),
         totalEmployees: rows.length,
@@ -1254,7 +1266,7 @@ export default function ReportsPage() {
         <p className="mt-5 text-[11px] font-medium text-slate-700">
           Download for {selectedMonthLabel} {year}
         </p>
-        <div className="mt-3 grid gap-4 sm:grid-cols-3">
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
             {
               key: 'attendance',
@@ -1270,6 +1282,16 @@ export default function ReportsPage() {
               key: 'overtime',
               title: 'Overtime',
               blurb: 'Overtime hours for the month.',
+            },
+            {
+              key: 'esi',
+              title: 'ESI statement',
+              blurb: 'Employee-wise ESI deductions for the month.',
+            },
+            {
+              key: 'pf',
+              title: 'PF statement',
+              blurb: 'Employee-wise PF deductions for the month.',
             },
           ].map(({ key, title, blurb }) => {
             const fmt = reportFormats[key];
@@ -1333,6 +1355,8 @@ export default function ReportsPage() {
             <li><strong>Attendance:</strong> Employee code, name, present/absent/late days, overtime hours.</li>
             <li><strong>Payroll:</strong> Employee code, name, present/total days, overtime, gross, deductions, net salary.</li>
             <li><strong>Overtime:</strong> Employee code, name, overtime hours for the month.</li>
+            <li><strong>ESI statement:</strong> Employee code, name, ESI number, type, rate, gross wages, ESI deduction.</li>
+            <li><strong>PF statement:</strong> Employee code, name, type, rate, earned basic, PF deduction.</li>
           </ul>
         </div>
       </SectionShell>

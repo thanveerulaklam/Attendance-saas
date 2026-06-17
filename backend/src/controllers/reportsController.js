@@ -3,6 +3,8 @@ const {
   getPayrollReportCsv,
   getOvertimeReportCsv,
   getDailyReportCsv,
+  getEsiReportCsv,
+  getPfReportCsv,
 } = require('../services/reportsService');
 
 function setCsvHeaders(res, filename) {
@@ -114,9 +116,59 @@ async function dailyCsv(req, res, next) {
   }
 }
 
+/**
+ * GET /api/reports/esi.csv?year=&month=
+ */
+async function esiCsv(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { year, month } = req.query || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const csv = await getEsiReportCsv(companyId, year, month, req.allowedBranchIds);
+    const filename = `esi-statement-${year}-${String(month).padStart(2, '0')}.csv`;
+    setCsvHeaders(res, filename);
+    return res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/reports/pf.csv?year=&month=
+ */
+async function pfCsv(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { year, month } = req.query || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const csv = await getPfReportCsv(companyId, year, month, req.allowedBranchIds);
+    const filename = `pf-statement-${year}-${String(month).padStart(2, '0')}.csv`;
+    setCsvHeaders(res, filename);
+    return res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   attendanceCsv,
   payrollCsv,
   overtimeCsv,
   dailyCsv,
+  esiCsv,
+  pfCsv,
 };

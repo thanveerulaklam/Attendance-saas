@@ -79,6 +79,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'attendance_day_overrides'
   )`,
+  '064_employees_esi_pf_modes.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'employees' AND column_name = 'esi_mode'
+  )`,
 };
 
 async function hasExistingSchema(client) {

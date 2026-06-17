@@ -140,8 +140,24 @@ function rowToPayload(row, headerMap) {
   const esiAmt = pickRaw(row, ['esi_amount'], headerMap);
   if (esiAmt != null && String(esiAmt).trim() !== '') payload.esi_amount = parseNumberish(esiAmt);
 
+  const esiMode = pickRaw(row, ['esi_mode'], headerMap);
+  if (esiMode != null && String(esiMode).trim() !== '') {
+    payload.esi_mode = String(esiMode).trim().toLowerCase();
+  }
+
+  const esiPct = pickRaw(row, ['esi_percent', 'esi_percentage'], headerMap);
+  if (esiPct != null && String(esiPct).trim() !== '') payload.esi_percent = parseNumberish(esiPct);
+
   const pfAmt = pickRaw(row, ['pf_amount', 'pf'], headerMap);
   if (pfAmt != null && String(pfAmt).trim() !== '') payload.pf_amount = parseNumberish(pfAmt);
+
+  const pfMode = pickRaw(row, ['pf_mode'], headerMap);
+  if (pfMode != null && String(pfMode).trim() !== '') {
+    payload.pf_mode = String(pfMode).trim().toLowerCase();
+  }
+
+  const pfPct = pickRaw(row, ['pf_percent', 'pf_percentage'], headerMap);
+  if (pfPct != null && String(pfPct).trim() !== '') payload.pf_percent = parseNumberish(pfPct);
 
   const dta = pickRaw(row, ['daily_travel_allowance', 'travel_allowance', 'ta'], headerMap);
   if (dta != null && String(dta).trim() !== '') payload.daily_travel_allowance = parseNumberish(dta);
@@ -240,7 +256,17 @@ function createPayloadToUpdatePayload(p) {
         : null,
     daily_travel_allowance: p.daily_travel_allowance != null ? p.daily_travel_allowance : 0,
     esi_amount: p.esi_amount != null ? p.esi_amount : 0,
+    esi_mode: p.esi_mode != null && p.esi_mode !== '' ? String(p.esi_mode).toLowerCase() : 'fixed',
+    esi_percent:
+      p.esi_percent != null && p.esi_percent !== '' && !Number.isNaN(Number(p.esi_percent))
+        ? Number(p.esi_percent)
+        : null,
     pf_amount: p.pf_amount != null ? p.pf_amount : 0,
+    pf_mode: p.pf_mode != null && p.pf_mode !== '' ? String(p.pf_mode).toLowerCase() : 'fixed',
+    pf_percent:
+      p.pf_percent != null && p.pf_percent !== '' && !Number.isNaN(Number(p.pf_percent))
+        ? Number(p.pf_percent)
+        : null,
     permission_hours_override:
       p.permission_hours_override != null &&
       p.permission_hours_override !== '' &&
