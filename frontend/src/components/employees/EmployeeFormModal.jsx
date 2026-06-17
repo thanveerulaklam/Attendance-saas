@@ -25,6 +25,7 @@ export default function EmployeeFormModal({
   const [phoneNumber, setPhoneNumber] = useState('');
   const [aadharNumber, setAadharNumber] = useState('');
   const [esiNumber, setEsiNumber] = useState('');
+  const [pfNumber, setPfNumber] = useState('');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
   const [esiMode, setEsiMode] = useState('fixed');
@@ -97,6 +98,7 @@ export default function EmployeeFormModal({
         setPhoneNumber(employee.phone_number || '');
         setAadharNumber(employee.aadhar_number || '');
         setEsiNumber(employee.esi_number || '');
+        setPfNumber(employee.pf_number || '');
         setBasicSalary(
           employee.basic_salary != null ? String(employee.basic_salary) : ''
         );
@@ -144,6 +146,7 @@ export default function EmployeeFormModal({
         setPhoneNumber('');
         setAadharNumber('');
         setEsiNumber('');
+        setPfNumber('');
         setBasicSalary('');
         setDailyTravelAllowance('');
         setEsiAmount('');
@@ -272,6 +275,9 @@ export default function EmployeeFormModal({
     if (esiNumber.trim() !== '' && esiNumber.trim().length > 30) {
       nextErrors.esiNumber = 'ESI number is too long (max 30 characters).';
     }
+    if (pfNumber.trim() !== '' && pfNumber.trim().length > 30) {
+      nextErrors.pfNumber = 'PF number is too long (max 30 characters).';
+    }
 
     if (!joinDate) {
       nextErrors.joinDate = 'Join date is required';
@@ -308,6 +314,7 @@ export default function EmployeeFormModal({
         phone_number: normalizedPhone === '' ? null : normalizedPhone,
         aadhar_number: normalizedAadhar === '' ? null : normalizedAadhar,
         esi_number: esiNumber.trim() === '' ? null : esiNumber.trim(),
+        pf_number: pfNumber.trim() === '' ? null : pfNumber.trim(),
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
         esi_mode: esiMode,
@@ -621,6 +628,24 @@ export default function EmployeeFormModal({
               {errors.esiNumber && (
                 <p className="mt-1 text-[11px] text-rose-600">
                   {errors.esiNumber}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                PF number (optional)
+                <input
+                  type="text"
+                  value={pfNumber}
+                  onChange={(e) => setPfNumber(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="PF / UAN No."
+                />
+              </label>
+              {errors.pfNumber && (
+                <p className="mt-1 text-[11px] text-rose-600">
+                  {errors.pfNumber}
                 </p>
               )}
             </div>

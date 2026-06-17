@@ -29,6 +29,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         phone_number,
         aadhar_number,
         esi_number,
+        pf_number,
         basic_salary,
         join_date,
         status,
@@ -209,6 +210,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
   const phoneNumber = payload.phone_number != null ? payload.phone_number : null;
   const aadharNumber = payload.aadhar_number != null ? payload.aadhar_number : null;
   const esiNumber = payload.esi_number != null ? payload.esi_number : null;
+  const pfNumber = payload.pf_number != null ? payload.pf_number : null;
 
   const branchId = await resolveBranchIdForCreate(companyId, payload, branchContext);
 
@@ -228,6 +230,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         phone_number,
         aadhar_number,
         esi_number,
+        pf_number,
         basic_salary,
         join_date,
         status,
@@ -243,7 +246,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         pf_percent,
         permission_hours_override
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -255,6 +258,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         phoneNumber,
         aadharNumber,
         esiNumber,
+        pfNumber,
         payload.basic_salary,
         payload.join_date,
         payload.status,

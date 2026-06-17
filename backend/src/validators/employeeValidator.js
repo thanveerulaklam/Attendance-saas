@@ -191,6 +191,14 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_number')) {
+    if (payload.pf_number == null || payload.pf_number === '') {
+      // optional: store as NULL
+    } else if (typeof payload.pf_number !== 'string') {
+      errors.pf_number = 'PF number must be a string.';
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'branch_id')) {
     if (payload.branch_id == null || payload.branch_id === '') {
       // optional; resolved server-side for admin/HR
@@ -292,6 +300,13 @@ const validateCreateEmployee = (payload = {}) => {
       payload.esi_number == null || payload.esi_number === ''
         ? null
         : payload.esi_number.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_number')) {
+    result.pf_number =
+      payload.pf_number == null || payload.pf_number === ''
+        ? null
+        : payload.pf_number.trim();
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'branch_id')) {
@@ -527,6 +542,16 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.esi_number = 'ESI number must be a string.';
     } else {
       clean.esi_number = payload.esi_number.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'pf_number')) {
+    if (payload.pf_number == null || payload.pf_number === '') {
+      clean.pf_number = null;
+    } else if (typeof payload.pf_number !== 'string') {
+      errors.pf_number = 'PF number must be a string.';
+    } else {
+      clean.pf_number = payload.pf_number.trim();
     }
   }
 
