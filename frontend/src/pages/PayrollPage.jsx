@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
+import RecordPaymentModal from '../components/payroll/RecordPaymentModal';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 import { buildBulkPayslipsDoc, openBulkPayslipsForPrint } from '../utils/payslipPdf';
 
@@ -20,6 +21,10 @@ const PAYROLL_COLUMNS = [
   { key: 'advance', label: 'Advance' },
   { key: 'incentive', label: 'Incentive' },
   { key: 'netSalary', label: 'Net salary' },
+  { key: 'totalPaid', label: 'Paid' },
+  { key: 'balanceDue', label: 'Balance' },
+  { key: 'paymentStatus', label: 'Payment status' },
+  { key: 'paymentAction', label: 'Payment' },
 ];
 const DEFAULT_VISIBLE_COLUMNS = PAYROLL_COLUMNS.reduce((acc, col) => {
   acc[col.key] = true;
@@ -64,6 +69,20 @@ function getAppliedAdvanceTotal(row) {
   const manual = getManualAdvanceAmount(row);
   const loan = isLoanAdvanceDeducted(row) ? Number(row?.deducted_loan_repayment || 0) : 0;
   return manual + loan;
+}
+
+function paymentStatusBadge(status) {
+  const map = {
+    unpaid: 'bg-rose-50 text-rose-700 border-rose-100',
+    partial: 'bg-amber-50 text-amber-700 border-amber-100',
+    paid: 'bg-emerald-50 text-emerald-700 border-emerald-100',
+  };
+  const label = status === 'partial' ? 'Partial' : status === 'paid' ? 'Paid' : 'Unpaid';
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${map[status] || map.unpaid}`}>
+      {label}
+    </span>
+  );
 }
 
 function attendanceStatusLabel(status) {
@@ -538,6 +557,7 @@ export default function PayrollPage() {
     summary: null,
     savingDate: null,
   });
+  const [recordPaymentModal, setRecordPaymentModal] = useState({ open: false, row: null });
   const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
   const columnMenuRef = useRef(null);
@@ -2369,6 +2389,18 @@ export default function PayrollPage() {
                     {isColumnVisible('netSalary') && (
                       <th className="pb-2 pr-3 font-medium text-right">Net salary</th>
                     )}
+                    {isColumnVisible('totalPaid') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Paid</th>
+                    )}
+                    {isColumnVisible('balanceDue') && (
+                      <th className="pb-2 pr-3 font-medium text-right">Balance</th>
+                    )}
+                    {isColumnVisible('paymentStatus') && (
+                      <th className="pb-2 pr-3 font-medium">Payment status</th>
+                    )}
+                    {isColumnVisible('paymentAction') && (
+                      <th className="pb-2 pr-3 font-medium">Payment</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -2619,6 +2651,33 @@ export default function PayrollPage() {
                       {isColumnVisible('netSalary') && (
                         <td className="py-3 pr-3 text-right font-semibold text-slate-900">
                           {formatMoney(row.net_salary)}
+                        </td>
+                      )}
+                      {isColumnVisible('totalPaid') && (
+                        <td className="py-3 pr-3 text-right text-emerald-700">
+                          {formatMoney(row.total_paid)}
+                        </td>
+                      )}
+                      {isColumnVisible('balanceDue') && (
+                        <td className="py-3 pr-3 text-right font-medium text-amber-700">
+                          {formatMoney(row.balance_due)}
+                        </td>
+                      )}
+                      {isColumnVisible('paymentStatus') && (
+                        <td className="py-3 pr-3">
+                          {paymentStatusBadge(row.payment_status || 'unpaid')}
+                        </td>
+                      )}
+                      {isColumnVisible('paymentAction') && (
+                        <td className="py-3 pr-3" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            disabled={!subscriptionAllowed}
+                            onClick={() => setRecordPaymentModal({ open: true, row })}
+                            className="text-[11px] font-medium text-emerald-700 underline decoration-dotted underline-offset-2 hover:text-emerald-800 disabled:opacity-50"
+                          >
+                            Record payment
+                          </button>
                         </td>
                       )}
                     </tr>
@@ -2956,8 +3015,21 @@ export default function PayrollPage() {
           payrollRow={detailRow}
           breakdown={breakdown}
           attendanceDetails={attendanceMeta}
+          payrollMode={payrollMode}
+          onPaymentRecorded={() => setReloadKey((k) => k + 1)}
         />
       )}
+
+      <RecordPaymentModal
+        open={recordPaymentModal.open}
+        onClose={() => setRecordPaymentModal({ open: false, row: null })}
+        payrollRow={recordPaymentModal.row}
+        payrollMode={payrollMode}
+        onSaved={() => {
+          setRecordPaymentModal({ open: false, row: null });
+          setReloadKey((k) => k + 1);
+        }}
+      />
 
       {manualAdvanceModal.open && manualAdvanceModal.row && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">

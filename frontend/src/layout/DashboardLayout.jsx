@@ -10,6 +10,7 @@ const baseNavItems = [
   { to: '/attendance', label: 'Attendance' },
   { to: '/advances', label: 'Advance' },
   { to: '/payroll', label: 'Payroll' },
+  { to: '/payments', label: 'Payments' },
   { to: '/reports', label: 'Reports' },
   { to: '/employees', label: 'Employee' },
   { to: '/shifts', label: 'Shift' },

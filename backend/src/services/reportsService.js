@@ -431,6 +431,118 @@ async function getPfReportCsv(companyId, year, month, allowedBranchIds = null) {
   return toCsv(header, rows);
 }
 
+const PAYMENT_MODE_LABELS = {
+  cash: 'Cash',
+  bank_transfer: 'Bank transfer',
+  upi: 'UPI',
+  cheque: 'Cheque',
+  other: 'Other',
+};
+
+/**
+ * Salary payment ledger CSV for a month (by payment date within payroll period).
+ */
+async function getSalaryPaymentsReportCsv(companyId, year, month, allowedBranchIds = null) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) {
+    throw new AppError('Valid year and month are required', 400);
+  }
+
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    const header = [
+      'Payment Date',
+      'Employee Code',
+      'Employee Name',
+      'Period',
+      'Amount',
+      'Payment Mode',
+      'Reference',
+      'Notes',
+      'Net Salary',
+      'Total Paid (period)',
+      'Balance Due',
+      'Status',
+    ];
+    return toCsv(header, []);
+  }
+
+  const conditions = ['sp.company_id = $1', '(p.year = $2 AND p.month = $3)'];
+  const params = [companyId, y, m];
+  let paramIndex = 4;
+
+  if (allowedBranchIds != null) {
+    conditions.push(`e.branch_id = ANY($${paramIndex}::bigint[])`);
+    params.push(allowedBranchIds);
+    paramIndex += 1;
+  }
+
+  const result = await pool.query(
+    `SELECT
+        sp.payment_date,
+        e.employee_code,
+        e.name AS employee_name,
+        to_char(make_date(p.year, p.month, 1), 'FMMonth YYYY') AS period_label,
+        sp.amount,
+        sp.payment_mode,
+        sp.reference_number,
+        sp.notes,
+        p.net_salary,
+        (
+          SELECT COALESCE(SUM(sp2.amount), 0)
+          FROM employee_salary_payments sp2
+          WHERE sp2.payroll_record_id = sp.payroll_record_id
+        ) AS payroll_total_paid
+     FROM employee_salary_payments sp
+     INNER JOIN employees e ON e.id = sp.employee_id AND e.company_id = sp.company_id
+     INNER JOIN payroll_records p ON p.id = sp.payroll_record_id
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY sp.payment_date ASC, e.name ASC, sp.id ASC`,
+    params
+  );
+
+  const header = [
+    'Payment Date',
+    'Employee Code',
+    'Employee Name',
+    'Period',
+    'Amount',
+    'Payment Mode',
+    'Reference',
+    'Notes',
+    'Net Salary',
+    'Total Paid (period)',
+    'Balance Due',
+    'Status',
+  ];
+
+  const rows = result.rows.map((row) => {
+    const net = Number(row.net_salary || 0);
+    const totalPaid = Number(row.payroll_total_paid || 0);
+    const balance = Math.max(0, net - totalPaid);
+    let status = 'paid';
+    if (totalPaid <= 0) status = 'unpaid';
+    else if (totalPaid < net) status = 'partial';
+
+    return [
+      String(row.payment_date).slice(0, 10),
+      row.employee_code,
+      row.employee_name,
+      row.period_label,
+      row.amount,
+      PAYMENT_MODE_LABELS[row.payment_mode] || row.payment_mode,
+      row.reference_number || '',
+      row.notes || '',
+      net,
+      totalPaid,
+      balance,
+      status,
+    ];
+  });
+
+  return toCsv(header, rows);
+}
+
 module.exports = {
   getAttendanceReportCsv,
   getPayrollReportCsv,
@@ -438,4 +550,5 @@ module.exports = {
   getDailyReportCsv,
   getEsiReportCsv,
   getPfReportCsv,
+  getSalaryPaymentsReportCsv,
 };

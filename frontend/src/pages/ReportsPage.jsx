@@ -195,6 +195,13 @@ export default function ReportsPage() {
     overtime: 'csv',
     esi: 'csv',
     pf: 'csv',
+    salaryPayments: 'csv',
+  });
+  const [paymentSummary, setPaymentSummary] = useState({
+    total_net: 0,
+    total_paid: 0,
+    total_outstanding: 0,
+    employee_count: 0,
   });
   const [dayReportDate, setDayReportDate] = useState(todayIstYmd);
   const [dayReportDepartment, setDayReportDepartment] = useState('');
@@ -279,7 +286,7 @@ export default function ReportsPage() {
           summaryParams.set('branch_id', reportBranchFilter);
           attendanceParams.set('branch_id', reportBranchFilter);
         }
-        const [employeesRes, payrollRes, attendanceRes] = await Promise.all([
+        const [employeesRes, payrollRes, attendanceRes, paymentSummaryRes] = await Promise.all([
           authFetch('/api/employees?limit=500', {
             headers: { 'Content-Type': 'application/json' },
           }),
@@ -289,11 +296,20 @@ export default function ReportsPage() {
           authFetch(`/api/attendance/monthly?${attendanceParams.toString()}`, {
             headers: { 'Content-Type': 'application/json' },
           }),
+          authFetch(
+            `/api/salary-payments/summary/monthly?year=${currentMonthYear}&month=${currentMonthNumber}${
+              reportBranchFilter ? `&branch_id=${reportBranchFilter}` : ''
+            }`,
+            { headers: { 'Content-Type': 'application/json' } }
+          ),
         ]);
 
         const employeesJson = employeesRes.ok ? await employeesRes.json() : { data: { data: [] } };
         const payrollJson = payrollRes.ok ? await payrollRes.json() : { data: { data: [] } };
         const attendanceJson = attendanceRes.ok ? await attendanceRes.json() : { data: { employees: [] } };
+        const paymentSummaryJson = paymentSummaryRes.ok
+          ? await paymentSummaryRes.json()
+          : { data: { total_net: 0, total_paid: 0, total_outstanding: 0, employee_count: 0 } };
 
         if (!isMounted) return;
         let activeEmployees = (employeesJson.data?.data || []).filter((emp) => emp.status === 'active');
@@ -304,6 +320,12 @@ export default function ReportsPage() {
         setPayrollEmployees(activeEmployees);
         setCurrentMonthPayrollRows(payrollJson.data?.data || []);
         setMonthlyAttendanceEmployees(attendanceJson.data?.employees || []);
+        setPaymentSummary(paymentSummaryJson.data || {
+          total_net: 0,
+          total_paid: 0,
+          total_outstanding: 0,
+          employee_count: 0,
+        });
       } finally {
         if (isMounted) setSummaryLoading(false);
       }
@@ -677,6 +699,7 @@ export default function ReportsPage() {
       overtime: `${base}/overtime.csv?${params}`,
       esi: `${base}/esi.csv?${params}`,
       pf: `${base}/pf.csv?${params}`,
+      salaryPayments: `${base}/salary-payments.csv?${params}`,
     };
     const names = {
       attendance: `attendance-${year}-${String(month).padStart(2, '0')}.csv`,
@@ -684,6 +707,7 @@ export default function ReportsPage() {
       overtime: `overtime-${year}-${String(month).padStart(2, '0')}.csv`,
       esi: `esi-statement-${year}-${String(month).padStart(2, '0')}.csv`,
       pf: `pf-statement-${year}-${String(month).padStart(2, '0')}.csv`,
+      salaryPayments: `salary-payments-${year}-${String(month).padStart(2, '0')}.csv`,
     };
     try {
       setLoading(type);
@@ -1208,6 +1232,22 @@ export default function ReportsPage() {
               View payroll breakdown →
             </p>
           </button>
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-emerald-50/40 px-4 py-4 shadow-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Salary paid (this month)
+            </p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-emerald-700">
+              {summaryLoading ? '...' : `₹${formatMoney(paymentSummary.total_paid)}`}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-amber-50/40 px-4 py-4 shadow-sm">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Outstanding (this month)
+            </p>
+            <p className="mt-2 text-3xl font-semibold tabular-nums text-amber-700">
+              {summaryLoading ? '...' : `₹${formatMoney(paymentSummary.total_outstanding)}`}
+            </p>
+          </div>
         </div>
         <div className="mt-5">
           <MonthOverviewCharts
@@ -1293,7 +1333,13 @@ export default function ReportsPage() {
               title: 'PF statement',
               blurb: 'Employee-wise PF deductions for the month.',
             },
-          ].map(({ key, title, blurb }) => {
+            {
+              key: 'salaryPayments',
+              title: 'Salary payment ledger',
+              blurb: 'Disbursement history — date, mode, reference, amount, balance.',
+              csvOnly: true,
+            },
+          ].map(({ key, title, blurb, csvOnly }) => {
             const fmt = reportFormats[key];
             const busy =
               loading === key || loading === `${key}-pdf`;
@@ -1317,24 +1363,26 @@ export default function ReportsPage() {
                     />
                     CSV
                   </label>
-                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
-                    <input
-                      type="radio"
-                      name={`report-fmt-${key}`}
-                      className="border-slate-300 text-blue-600"
-                      checked={fmt === 'pdf'}
-                      onChange={() =>
-                        setReportFormats((prev) => ({ ...prev, [key]: 'pdf' }))
-                      }
-                    />
-                    PDF
-                  </label>
+                  {!csvOnly && (
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                      <input
+                        type="radio"
+                        name={`report-fmt-${key}`}
+                        className="border-slate-300 text-blue-600"
+                        checked={fmt === 'pdf'}
+                        onChange={() =>
+                          setReportFormats((prev) => ({ ...prev, [key]: 'pdf' }))
+                        }
+                      />
+                      PDF
+                    </label>
+                  )}
                 </div>
                 <button
                   type="button"
                   disabled={loading != null}
                   onClick={() => {
-                    if (fmt === 'csv') {
+                    if (fmt === 'csv' || csvOnly) {
                       void handleDownload(key)();
                     } else {
                       void handleDownloadPdf(key)();
@@ -1357,6 +1405,7 @@ export default function ReportsPage() {
             <li><strong>Overtime:</strong> Employee code, name, overtime hours for the month.</li>
             <li><strong>ESI statement:</strong> Employee code, name, ESI number, type, rate, gross wages, ESI deduction.</li>
             <li><strong>PF statement:</strong> Employee code, name, type, rate, earned basic, PF deduction.</li>
+            <li><strong>Salary payment ledger:</strong> Payment date, employee, period, amount, mode, reference, balance.</li>
           </ul>
         </div>
       </SectionShell>

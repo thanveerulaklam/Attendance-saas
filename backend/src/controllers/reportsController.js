@@ -5,6 +5,7 @@ const {
   getDailyReportCsv,
   getEsiReportCsv,
   getPfReportCsv,
+  getSalaryPaymentsReportCsv,
 } = require('../services/reportsService');
 
 function setCsvHeaders(res, filename) {
@@ -164,6 +165,30 @@ async function pfCsv(req, res, next) {
   }
 }
 
+/**
+ * GET /api/reports/salary-payments.csv?year=&month=
+ */
+async function salaryPaymentsCsv(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const { year, month } = req.query || {};
+
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+
+    const csv = await getSalaryPaymentsReportCsv(companyId, year, month, req.allowedBranchIds);
+    const filename = `salary-payments-${year}-${String(month).padStart(2, '0')}.csv`;
+    setCsvHeaders(res, filename);
+    return res.send(csv);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   attendanceCsv,
   payrollCsv,
@@ -171,4 +196,5 @@ module.exports = {
   dailyCsv,
   esiCsv,
   pfCsv,
+  salaryPaymentsCsv,
 };

@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { downloadCompactPayslipPdf } from '../../utils/payslipPdf';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../../utils/whatsapp';
+import { authFetch } from '../../utils/api';
+import RecordPaymentModal, { paymentModeLabel } from './RecordPaymentModal';
 
 function formatMoney(n) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -199,7 +201,12 @@ export default function PayslipModal({
   payrollRow,
   breakdown,
   attendanceDetails,
+  payrollMode = 'monthly',
+  onPaymentRecorded,
 }) {
+  const [paymentSummary, setPaymentSummary] = useState(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [recordPaymentOpen, setRecordPaymentOpen] = useState(false);
   const dayDetails = Array.isArray(breakdown?.attendance?.dayDetails)
     ? breakdown.attendance.dayDetails
     : [];
@@ -221,6 +228,37 @@ export default function PayslipModal({
     [dayDetails]
   );
   const payrollAsOfYmd = (breakdown?.attendance?.workingDaysUpToDate || '').slice(0, 10);
+
+  useEffect(() => {
+    if (!open || !payrollRow?.id) {
+      setPaymentSummary(null);
+      return undefined;
+    }
+    let cancelled = false;
+    async function loadPayments() {
+      setPaymentLoading(true);
+      try {
+        const path = payrollMode === 'weekly'
+          ? `/api/salary-payments/weekly/${payrollRow.id}`
+          : `/api/salary-payments/payroll/${payrollRow.id}`;
+        const res = await authFetch(path, { headers: { 'Content-Type': 'application/json' } });
+        const json = res.ok ? await res.json() : { data: null };
+        if (!cancelled) setPaymentSummary(json.data || null);
+      } catch {
+        if (!cancelled) setPaymentSummary(null);
+      } finally {
+        if (!cancelled) setPaymentLoading(false);
+      }
+    }
+    loadPayments();
+    return () => { cancelled = true; };
+  }, [open, payrollRow?.id, payrollMode]);
+
+  const balanceDue = paymentSummary != null
+    ? Number(paymentSummary.balance_due || 0)
+    : Math.max(0, Number(payrollRow?.net_salary || 0) - Number(payrollRow?.total_paid || 0));
+  const paymentStatus = paymentSummary?.payment_status || payrollRow?.payment_status || 'unpaid';
+
   const rawAbsentDates = useMemo(() => {
     if (hasDayDetails && fallbackAbsentDates.length > 0) {
       return fallbackAbsentDates;
@@ -699,6 +737,55 @@ export default function PayslipModal({
             )}
           </section>
 
+          <section className="payslip-print-hidden rounded-xl border border-emerald-100 bg-emerald-50/40 px-4 py-3 text-[11px] text-slate-800">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-[11px] font-semibold tracking-wide text-emerald-800">PAYMENT STATUS</h3>
+                <p className="mt-1 text-xs text-slate-600">
+                  Paid: ₹{formatMoneyPrecise(paymentSummary?.total_paid ?? payrollRow?.total_paid ?? 0)}
+                  {' · '}
+                  Balance: <span className="font-semibold text-amber-700">₹{formatMoneyPrecise(balanceDue)}</span>
+                </p>
+                <p className="mt-0.5 text-[10px] capitalize text-slate-500">Status: {paymentStatus}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecordPaymentOpen(true)}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+              >
+                Record payment
+              </button>
+            </div>
+            {paymentLoading ? (
+              <p className="mt-2 text-[10px] text-slate-500">Loading payment history...</p>
+            ) : (paymentSummary?.payments || []).length > 0 ? (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[420px] text-[10px]">
+                  <thead>
+                    <tr className="border-b border-emerald-100 text-left text-slate-600">
+                      <th className="pb-1 pr-2 font-medium">Date</th>
+                      <th className="pb-1 pr-2 font-medium">Mode</th>
+                      <th className="pb-1 pr-2 font-medium">Reference</th>
+                      <th className="pb-1 font-medium text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(paymentSummary.payments || []).map((p) => (
+                      <tr key={p.id} className="border-b border-emerald-50">
+                        <td className="py-1 pr-2">{String(p.payment_date).slice(0, 10)}</td>
+                        <td className="py-1 pr-2">{paymentModeLabel(p.payment_mode)}</td>
+                        <td className="py-1 pr-2">{p.reference_number || '—'}</td>
+                        <td className="py-1 text-right font-medium">₹{formatMoneyPrecise(p.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="mt-2 text-[10px] text-slate-500">No payments recorded yet for this payroll.</p>
+            )}
+          </section>
+
           <section className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-dashed border-slate-200 pt-3 text-[10px] text-slate-500">
             <span>Generated by PunchPay | punchpay.in</span>
           </section>
@@ -748,6 +835,27 @@ export default function PayslipModal({
           </button>
         </div>
       </div>
+
+      <RecordPaymentModal
+        open={recordPaymentOpen}
+        onClose={() => setRecordPaymentOpen(false)}
+        payrollRow={payrollRow}
+        payrollMode={payrollMode}
+        onSaved={async (data) => {
+          setRecordPaymentOpen(false);
+          onPaymentRecorded?.(data);
+          try {
+            const path = payrollMode === 'weekly'
+              ? `/api/salary-payments/weekly/${payrollRow.id}`
+              : `/api/salary-payments/payroll/${payrollRow.id}`;
+            const res = await authFetch(path, { headers: { 'Content-Type': 'application/json' } });
+            const json = res.ok ? await res.json() : { data: null };
+            setPaymentSummary(json.data || null);
+          } catch {
+            // ignore refresh failure
+          }
+        }}
+      />
     </div>
   );
 }

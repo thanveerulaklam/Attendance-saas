@@ -2004,7 +2004,30 @@ async function listWeeklyPayrollRecords(
         WHERE a.company_id = w.company_id
           AND a.employee_id = w.employee_id
           AND a.year = EXTRACT(YEAR FROM w.week_end_date)::int
-          AND a.month = EXTRACT(MONTH FROM w.week_end_date)::int) AS manual_advance_note
+          AND a.month = EXTRACT(MONTH FROM w.week_end_date)::int) AS manual_advance_note,
+       COALESCE((
+         SELECT SUM(sp.amount)
+         FROM employee_salary_payments sp
+         WHERE sp.weekly_payroll_record_id = w.id
+       ), 0) AS total_paid,
+       w.net_salary - COALESCE((
+         SELECT SUM(sp.amount)
+         FROM employee_salary_payments sp
+         WHERE sp.weekly_payroll_record_id = w.id
+       ), 0) AS balance_due,
+       CASE
+         WHEN COALESCE((
+           SELECT SUM(sp.amount)
+           FROM employee_salary_payments sp
+           WHERE sp.weekly_payroll_record_id = w.id
+         ), 0) <= 0 THEN 'unpaid'
+         WHEN COALESCE((
+           SELECT SUM(sp.amount)
+           FROM employee_salary_payments sp
+           WHERE sp.weekly_payroll_record_id = w.id
+         ), 0) < w.net_salary THEN 'partial'
+         ELSE 'paid'
+       END AS payment_status
      FROM weekly_payroll_records w
      INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
      WHERE ${whereClause}
@@ -3073,7 +3096,30 @@ async function listPayrollRecords(
          WHERE a.company_id = p.company_id
            AND a.employee_id = p.employee_id
            AND a.year = p.year
-           AND a.month = p.month) AS manual_advance_note
+           AND a.month = p.month) AS manual_advance_note,
+        COALESCE((
+          SELECT SUM(sp.amount)
+          FROM employee_salary_payments sp
+          WHERE sp.payroll_record_id = p.id
+        ), 0) AS total_paid,
+        p.net_salary - COALESCE((
+          SELECT SUM(sp.amount)
+          FROM employee_salary_payments sp
+          WHERE sp.payroll_record_id = p.id
+        ), 0) AS balance_due,
+        CASE
+          WHEN COALESCE((
+            SELECT SUM(sp.amount)
+            FROM employee_salary_payments sp
+            WHERE sp.payroll_record_id = p.id
+          ), 0) <= 0 THEN 'unpaid'
+          WHEN COALESCE((
+            SELECT SUM(sp.amount)
+            FROM employee_salary_payments sp
+            WHERE sp.payroll_record_id = p.id
+          ), 0) < p.net_salary THEN 'partial'
+          ELSE 'paid'
+        END AS payment_status
      FROM payroll_records p
      INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
      WHERE ${whereClause}

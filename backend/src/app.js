@@ -21,6 +21,7 @@ const dashboardRouter = require('./routes/dashboard');
 const adminRouter = require('./routes/admin');
 const advancesRouter = require('./routes/advances');
 const advanceLoansRouter = require('./routes/advanceLoans');
+const salaryPaymentsRouter = require('./routes/salaryPayments');
 const demoEnquiriesRouter = require('./routes/demoEnquiries');
 const admsRouter = require('./routes/adms');
 
@@ -92,6 +93,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/advances', advancesRouter);
 app.use('/api/advance-loans', advanceLoansRouter);
+app.use('/api/salary-payments', salaryPaymentsRouter);
 app.use('/api/demo-enquiries', demoEnquiriesRouter);
 // ZKTeco/eSSL ADMS endpoints (outside /api for device compatibility)
 // Fingerprint devices sync wall clock from HTTP Date on each poll. After bad TimeZone PUSH
