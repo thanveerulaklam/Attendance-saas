@@ -55,10 +55,14 @@ function isLoanAdvanceDeducted(row) {
   return Number(row?.deducted_loan_repayment || 0) > 0;
 }
 
-function displayAdvanceAmount(row) {
-  const base = Number(row?.salary_advance || 0);
-  if (isLoanAdvanceDeducted(row)) return base;
-  return base + Number(row?.pending_loan_repayment || 0);
+function getManualAdvanceAmount(row) {
+  return Number(row?.manual_advance_amount || 0);
+}
+
+function getAppliedAdvanceTotal(row) {
+  const manual = getManualAdvanceAmount(row);
+  const loan = isLoanAdvanceDeducted(row) ? Number(row?.deducted_loan_repayment || 0) : 0;
+  return manual + loan;
 }
 
 function formatPermissionUsedHours(minutes) {
@@ -598,6 +602,13 @@ export default function PayrollPage() {
   const [selectedPayroll, setSelectedPayroll] = useState(() => new Map());
   const [exporting, setExporting] = useState(false);
   const [advanceUpdatingId, setAdvanceUpdatingId] = useState(null);
+  const [manualAdvanceModal, setManualAdvanceModal] = useState({
+    open: false,
+    row: null,
+    amount: '',
+    note: '',
+  });
+  const [manualAdvanceSaving, setManualAdvanceSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
   const columnMenuRef = useRef(null);
@@ -1625,6 +1636,84 @@ export default function PayrollPage() {
     }
   };
 
+  const openManualAdvanceModal = (row) => {
+    if (!subscriptionAllowed) return;
+    setManualAdvanceModal({
+      open: true,
+      row,
+      amount:
+        getManualAdvanceAmount(row) > 0 ? String(getManualAdvanceAmount(row)) : '',
+      note: row.manual_advance_note || '',
+    });
+  };
+
+  const closeManualAdvanceModal = () => {
+    setManualAdvanceModal({ open: false, row: null, amount: '', note: '' });
+  };
+
+  const saveManualAdvance = async (overrideAmount) => {
+    const row = manualAdvanceModal.row;
+    if (!row || !subscriptionAllowed || manualAdvanceSaving) return;
+    const rawAmount =
+      overrideAmount !== undefined ? overrideAmount : manualAdvanceModal.amount;
+    const amount = Math.max(0, Number(rawAmount) || 0);
+    const url =
+      payrollMode === 'monthly'
+        ? `/api/payroll/${row.id}/manual-advance`
+        : `/api/payroll/weekly/${row.id}/manual-advance`;
+    setManualAdvanceSaving(true);
+    setToast(null);
+    try {
+      const res = await authFetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount,
+          note: manualAdvanceModal.note?.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const msg =
+          errData.code === 'SUBSCRIPTION_EXPIRED'
+            ? errData.message
+            : errData.message || 'Failed to save advance deduction';
+        throw new Error(msg);
+      }
+      const json = await res.json();
+      const updated = json.data?.payroll;
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                salary_advance: updated?.salary_advance ?? r.salary_advance,
+                net_salary: updated?.net_salary ?? r.net_salary,
+                manual_advance_amount: json.data?.manual_advance_amount ?? amount,
+                manual_advance_note: json.data?.manual_advance_note ?? manualAdvanceModal.note,
+              }
+            : r
+        )
+      );
+      closeManualAdvanceModal();
+      setReloadKey((k) => k + 1);
+      setToast({
+        type: 'success',
+        message:
+          amount > 0
+            ? `Diary advance of ₹${formatMoney(amount)} deducted for ${row.employee_name || 'employee'}.`
+            : `Diary advance removed for ${row.employee_name || 'employee'}.`,
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to save advance deduction',
+      });
+    } finally {
+      setManualAdvanceSaving(false);
+    }
+  };
+
   const activeCount = employeesEligibleForGenerate.length;
   const canGeneratePayroll = modalEmployeeId ? Boolean(selectedGenerateEmployee) : activeCount > 0;
 
@@ -2221,7 +2310,9 @@ export default function PayrollPage() {
                     {isColumnVisible('advance') && (
                       <th className="pb-2 pr-3 font-medium text-right">
                         Advance
-                        <span className="block text-[10px] font-normal text-slate-400">Deduct loan</span>
+                        <span className="block text-[10px] font-normal text-slate-400">
+                          Diary + loan
+                        </span>
                       </th>
                     )}
                     {isColumnVisible('incentive') && (
@@ -2389,47 +2480,67 @@ export default function PayrollPage() {
                           className="py-3 pr-3 text-right align-middle"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {hasLoanAdvanceRepayment(row) ? (
-                            <label
-                              className={`inline-flex items-center justify-end gap-1.5 ${
-                                subscriptionAllowed && advanceUpdatingId !== row.id
-                                  ? 'cursor-pointer'
-                                  : 'cursor-default'
-                              }`}
-                              title={
-                                isLoanAdvanceDeducted(row)
-                                  ? 'Loan advance deducted from net salary'
-                                  : 'Check to deduct loan advance from net salary'
-                              }
+                          <div className="flex flex-col items-end gap-1">
+                            <button
+                              type="button"
+                              disabled={!subscriptionAllowed || manualAdvanceSaving}
+                              onClick={() => openManualAdvanceModal(row)}
+                              className={`text-[11px] font-medium underline decoration-dotted underline-offset-2 ${
+                                getManualAdvanceAmount(row) > 0
+                                  ? 'text-amber-700 hover:text-amber-800'
+                                  : 'text-blue-700 hover:text-blue-800'
+                              } disabled:opacity-50`}
+                              title="Enter advance amount from your diary"
                             >
-                              <input
-                                type="checkbox"
-                                checked={isLoanAdvanceDeducted(row)}
-                                disabled={
-                                  !subscriptionAllowed ||
-                                  advanceUpdatingId === row.id
-                                }
-                                onChange={(e) => void toggleAdvanceDeduction(row, e.target.checked)}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                aria-label={`Deduct loan advance for ${row.employee_name || 'employee'}`}
-                              />
-                              <span
-                                className={`font-medium ${
-                                  isLoanAdvanceDeducted(row)
-                                    ? 'text-amber-700'
-                                    : 'text-slate-500'
+                              {getManualAdvanceAmount(row) > 0
+                                ? `Diary −${formatMoney(getManualAdvanceAmount(row))}`
+                                : '+ Diary advance'}
+                            </button>
+                            {hasLoanAdvanceRepayment(row) && (
+                              <label
+                                className={`inline-flex items-center justify-end gap-1.5 ${
+                                  subscriptionAllowed && advanceUpdatingId !== row.id
+                                    ? 'cursor-pointer'
+                                    : 'cursor-default'
                                 }`}
+                                title={
+                                  isLoanAdvanceDeducted(row)
+                                    ? 'Loan advance deducted from net salary'
+                                    : 'Check to deduct loan advance from net salary'
+                                }
                               >
-                                −{formatMoney(displayAdvanceAmount(row))}
+                                <input
+                                  type="checkbox"
+                                  checked={isLoanAdvanceDeducted(row)}
+                                  disabled={
+                                    !subscriptionAllowed ||
+                                    advanceUpdatingId === row.id
+                                  }
+                                  onChange={(e) => void toggleAdvanceDeduction(row, e.target.checked)}
+                                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                  aria-label={`Deduct loan advance for ${row.employee_name || 'employee'}`}
+                                />
+                                <span
+                                  className={`text-[11px] font-medium ${
+                                    isLoanAdvanceDeducted(row)
+                                      ? 'text-amber-700'
+                                      : 'text-slate-500'
+                                  }`}
+                                >
+                                  Loan −{formatMoney(
+                                    isLoanAdvanceDeducted(row)
+                                      ? Number(row.deducted_loan_repayment || 0)
+                                      : Number(row.pending_loan_repayment || 0)
+                                  )}
+                                </span>
+                              </label>
+                            )}
+                            {getAppliedAdvanceTotal(row) > 0 && (
+                              <span className="text-[10px] font-semibold text-amber-800">
+                                Total −{formatMoney(getAppliedAdvanceTotal(row))}
                               </span>
-                            </label>
-                          ) : Number(row.salary_advance) > 0 ? (
-                            <span className="font-medium text-amber-700">
-                              −{formatMoney(row.salary_advance)}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">—</span>
-                          )}
+                            )}
+                          </div>
                         </td>
                       )}
                       {isColumnVisible('incentive') && (
@@ -2778,6 +2889,89 @@ export default function PayrollPage() {
           breakdown={breakdown}
           attendanceDetails={attendanceMeta}
         />
+      )}
+
+      {manualAdvanceModal.open && manualAdvanceModal.row && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
+          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Diary advance deduction</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {manualAdvanceModal.row.employee_name} ({manualAdvanceModal.row.employee_code})
+              {' — '}
+              {payrollMode === 'monthly'
+                ? new Date(
+                    manualAdvanceModal.row.year,
+                    manualAdvanceModal.row.month - 1,
+                    1
+                  ).toLocaleString('default', { month: 'long', year: 'numeric' })
+                : formatWeekLabel(
+                    manualAdvanceModal.row.week_start_date,
+                    manualAdvanceModal.row.week_end_date
+                  )}
+            </p>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Enter the advance amount noted in your diary. It will be deducted from net salary for this payroll.
+            </p>
+            <div className="mt-4 space-y-3">
+              <div>
+                <label className="text-[11px] font-medium text-slate-700">Amount (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={manualAdvanceModal.amount}
+                  onChange={(e) =>
+                    setManualAdvanceModal((m) => ({ ...m, amount: e.target.value }))
+                  }
+                  placeholder="0"
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Note <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={manualAdvanceModal.note}
+                  onChange={(e) =>
+                    setManualAdvanceModal((m) => ({ ...m, note: e.target.value }))
+                  }
+                  placeholder="e.g. Diary ref, date given"
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              {getManualAdvanceAmount(manualAdvanceModal.row) > 0 && (
+                <button
+                  type="button"
+                  disabled={manualAdvanceSaving}
+                  onClick={() => void saveManualAdvance(0)}
+                  className="mr-auto rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  Remove advance
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={closeManualAdvanceModal}
+                disabled={manualAdvanceSaving}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveManualAdvance()}
+                disabled={manualAdvanceSaving}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {manualAdvanceSaving ? 'Saving…' : 'Save & deduct'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {failureModalOpen && (

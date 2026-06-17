@@ -9,6 +9,8 @@ const {
   getWeeklyPayrollBreakdown,
   setMonthlyPayrollAdvanceDeduction,
   setWeeklyPayrollAdvanceDeduction,
+  setMonthlyPayrollManualAdvance,
+  setWeeklyPayrollManualAdvance,
 } = require('../services/payrollService');
 const auditService = require('../services/auditService');
 const { resolveBranchScope } = require('../utils/branchScope');
@@ -494,6 +496,97 @@ async function updateWeeklyAdvanceDeduction(req, res, next) {
   }
 }
 
+/**
+ * PATCH /api/payroll/:id/manual-advance
+ * Body: { amount, note? }
+ */
+async function updateManualAdvance(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const payrollId = Number(req.params.id);
+    const { amount: amountRaw, note } = req.body || {};
+
+    if (!companyId || !payrollId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and payroll id are required',
+      });
+    }
+    if (amountRaw === undefined || amountRaw === null || String(amountRaw).trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'amount is required',
+      });
+    }
+    const amount = Math.max(0, Number(amountRaw) || 0);
+
+    const result = await setMonthlyPayrollManualAdvance(companyId, payrollId, amount, note, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.manual_advance', 'payroll', payrollId, {
+        employee_id: result.payroll.employee_id,
+        year: result.payroll.year,
+        month: result.payroll.month,
+        amount: result.manual_advance_amount,
+      })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/payroll/weekly/:id/manual-advance
+ * Body: { amount, note? }
+ */
+async function updateWeeklyManualAdvance(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const payrollId = Number(req.params.id);
+    const { amount: amountRaw, note } = req.body || {};
+
+    if (!companyId || !payrollId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and payroll id are required',
+      });
+    }
+    if (amountRaw === undefined || amountRaw === null || String(amountRaw).trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'amount is required',
+      });
+    }
+    const amount = Math.max(0, Number(amountRaw) || 0);
+
+    const result = await setWeeklyPayrollManualAdvance(companyId, payrollId, amount, note, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.manual_advance_weekly', 'payroll', payrollId, {
+        employee_id: result.payroll.employee_id,
+        week_start_date: result.payroll.week_start_date,
+        amount: result.manual_advance_amount,
+      })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   list,
   generate,
@@ -505,6 +598,8 @@ module.exports = {
   breakdownWeekly,
   updateAdvanceDeduction,
   updateWeeklyAdvanceDeduction,
+  updateManualAdvance,
+  updateWeeklyManualAdvance,
 };
 
 

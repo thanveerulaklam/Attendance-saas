@@ -1631,7 +1631,19 @@ async function listWeeklyPayrollRecords(
           AND r.employee_id = w.employee_id
           AND r.year = EXTRACT(YEAR FROM w.week_end_date)::int
           AND r.month = EXTRACT(MONTH FROM w.week_end_date)::int
-          AND r.status = 'deducted') AS deducted_loan_repayment
+          AND r.status = 'deducted') AS deducted_loan_repayment,
+       (SELECT COALESCE(a.amount, 0)
+        FROM employee_advances a
+        WHERE a.company_id = w.company_id
+          AND a.employee_id = w.employee_id
+          AND a.year = EXTRACT(YEAR FROM w.week_end_date)::int
+          AND a.month = EXTRACT(MONTH FROM w.week_end_date)::int) AS manual_advance_amount,
+       (SELECT a.note
+        FROM employee_advances a
+        WHERE a.company_id = w.company_id
+          AND a.employee_id = w.employee_id
+          AND a.year = EXTRACT(YEAR FROM w.week_end_date)::int
+          AND a.month = EXTRACT(MONTH FROM w.week_end_date)::int) AS manual_advance_note
      FROM weekly_payroll_records w
      INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
      WHERE ${whereClause}
@@ -2649,7 +2661,19 @@ async function listPayrollRecords(
            AND r.employee_id = p.employee_id
            AND r.year = p.year
            AND r.month = p.month
-           AND r.status = 'deducted') AS deducted_loan_repayment
+           AND r.status = 'deducted') AS deducted_loan_repayment,
+        (SELECT COALESCE(a.amount, 0)
+         FROM employee_advances a
+         WHERE a.company_id = p.company_id
+           AND a.employee_id = p.employee_id
+           AND a.year = p.year
+           AND a.month = p.month) AS manual_advance_amount,
+        (SELECT a.note
+         FROM employee_advances a
+         WHERE a.company_id = p.company_id
+           AND a.employee_id = p.employee_id
+           AND a.year = p.year
+           AND a.month = p.month) AS manual_advance_note
      FROM payroll_records p
      INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
      WHERE ${whereClause}
@@ -2758,6 +2782,93 @@ function computeNetSalaryFromPayrollRow(payroll, salaryAdvance) {
     Number(salaryAdvance || 0) +
     Number(payroll.no_leave_incentive || 0)
   );
+}
+
+async function getDeductedLoanRepaymentTotal(client, companyId, employeeId, year, month) {
+  const result = await client.query(
+    `SELECT COALESCE(SUM(r.repayment_amount), 0) AS total
+     FROM employee_advance_repayments r
+     INNER JOIN employee_advance_loans l
+       ON l.id = r.loan_id
+      AND l.company_id = r.company_id
+     WHERE r.company_id = $1
+       AND r.employee_id = $2
+       AND r.year = $3
+       AND r.month = $4
+       AND r.status = 'deducted'
+       AND l.status IN ('active', 'on_hold', 'cleared')`,
+    [companyId, employeeId, Number(year), Number(month)]
+  );
+  return Number(result.rows[0]?.total || 0);
+}
+
+async function upsertManualAdvanceInClient(
+  client,
+  companyId,
+  employeeId,
+  year,
+  month,
+  amount,
+  note
+) {
+  const amountNum = Math.max(0, Number(amount) || 0);
+  const noteStr = typeof note === 'string' ? note.trim() : null;
+  const advanceDate = new Date().toISOString().slice(0, 10);
+
+  if (amountNum <= 0) {
+    await client.query(
+      `DELETE FROM employee_advances
+       WHERE company_id = $1
+         AND employee_id = $2
+         AND year = $3
+         AND month = $4`,
+      [companyId, employeeId, Number(year), Number(month)]
+    );
+    return 0;
+  }
+
+  await client.query(
+    `INSERT INTO employee_advances (
+       company_id,
+       employee_id,
+       year,
+       month,
+       amount,
+       note,
+       advance_date
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (company_id, employee_id, year, month)
+     DO UPDATE SET
+       amount = EXCLUDED.amount,
+       note = EXCLUDED.note,
+       advance_date = EXCLUDED.advance_date,
+       updated_at = NOW()`,
+    [companyId, employeeId, Number(year), Number(month), amountNum, noteStr || null, advanceDate]
+  );
+  return amountNum;
+}
+
+async function applyPayrollSalaryAdvance(
+  client,
+  tableName,
+  companyId,
+  payrollId,
+  payroll,
+  manualAdvance,
+  deductedLoanTotal
+) {
+  const salaryAdvance = manualAdvance + deductedLoanTotal;
+  const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
+  const updateResult = await client.query(
+    `UPDATE ${tableName}
+     SET salary_advance = $3,
+         net_salary = $4
+     WHERE company_id = $1 AND id = $2
+     RETURNING *`,
+    [companyId, Number(payrollId), salaryAdvance, netSalary]
+  );
+  return updateResult.rows[0];
 }
 
 /**
@@ -2956,6 +3067,145 @@ async function setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deduct, op
   }
 }
 
+/**
+ * Set diary/manual advance amount on an existing monthly payroll record.
+ * Stores in employee_advances and recalculates salary_advance + net_salary.
+ */
+async function setMonthlyPayrollManualAdvance(companyId, payrollId, amount, note, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const payrollResult = await client.query(
+      `SELECT p.*, e.branch_id
+       FROM payroll_records p
+       INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+       WHERE p.company_id = $1 AND p.id = $2
+       FOR UPDATE OF p`,
+      [companyId, Number(payrollId)]
+    );
+    if (payrollResult.rowCount === 0) {
+      throw new AppError('Payroll record not found', 404);
+    }
+
+    const payroll = payrollResult.rows[0];
+    await assertEmployeePayrollScope(companyId, payroll.employee_id, allowedBranchIds);
+
+    const year = Number(payroll.year);
+    const month = Number(payroll.month);
+    const employeeId = Number(payroll.employee_id);
+
+    const manualAdvance = await upsertManualAdvanceInClient(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month,
+      amount,
+      note
+    );
+    const deductedLoanTotal = await getDeductedLoanRepaymentTotal(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month
+    );
+    const updated = await applyPayrollSalaryAdvance(
+      client,
+      'payroll_records',
+      companyId,
+      payrollId,
+      payroll,
+      manualAdvance,
+      deductedLoanTotal
+    );
+
+    await client.query('COMMIT');
+    return {
+      payroll: updated,
+      manual_advance_amount: manualAdvance,
+      manual_advance_note: typeof note === 'string' ? note.trim() || null : null,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Set diary/manual advance amount on an existing weekly payroll record.
+ */
+async function setWeeklyPayrollManualAdvance(companyId, payrollId, amount, note, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const payrollResult = await client.query(
+      `SELECT w.*, e.branch_id
+       FROM weekly_payroll_records w
+       INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
+       WHERE w.company_id = $1 AND w.id = $2
+       FOR UPDATE OF w`,
+      [companyId, Number(payrollId)]
+    );
+    if (payrollResult.rowCount === 0) {
+      throw new AppError('Payroll record not found', 404);
+    }
+
+    const payroll = payrollResult.rows[0];
+    await assertEmployeePayrollScope(companyId, payroll.employee_id, allowedBranchIds);
+
+    const weekEnd = String(payroll.week_end_date).slice(0, 10);
+    const { y: year, m: month } = parseYmd(weekEnd);
+    const employeeId = Number(payroll.employee_id);
+
+    const manualAdvance = await upsertManualAdvanceInClient(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month,
+      amount,
+      note
+    );
+    const deductedLoanTotal = await getDeductedLoanRepaymentTotal(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month
+    );
+    const updated = await applyPayrollSalaryAdvance(
+      client,
+      'weekly_payroll_records',
+      companyId,
+      payrollId,
+      payroll,
+      manualAdvance,
+      deductedLoanTotal
+    );
+
+    await client.query('COMMIT');
+    return {
+      payroll: updated,
+      manual_advance_amount: manualAdvance,
+      manual_advance_note: typeof note === 'string' ? note.trim() || null : null,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getAdjacentHolidayAbsentKeys,
   getAttendanceSummary,
@@ -2970,5 +3220,7 @@ module.exports = {
   listWeeklyPayrollRecords,
   setMonthlyPayrollAdvanceDeduction,
   setWeeklyPayrollAdvanceDeduction,
+  setMonthlyPayrollManualAdvance,
+  setWeeklyPayrollManualAdvance,
 };
 
