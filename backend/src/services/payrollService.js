@@ -197,6 +197,49 @@ function applyAttendanceOverridesToSummary(
   return summary;
 }
 
+function punchesFromSortedDayLogs(sorted) {
+  return (sorted || []).map((l) => ({
+    punch_time: l.punchTime.toISOString(),
+    punch_type: l.punchType,
+    device_id: l.deviceId || null,
+  }));
+}
+
+function lastOutFromSorted(sorted) {
+  for (let i = (sorted || []).length - 1; i >= 0; i -= 1) {
+    if (sorted[i].punchType === 'out') {
+      return sorted[i].punchTime.toISOString();
+    }
+  }
+  return null;
+}
+
+function buildDayDetailRecord({
+  date,
+  status,
+  sorted = [],
+  firstInTime = null,
+  lastOutTime = null,
+  totalHoursInside = null,
+  late = false,
+  minutesLate = 0,
+}) {
+  const normalized = sorted || [];
+  const resolvedFirstIn =
+    firstInTime ??
+    (normalized.find((l) => l.punchType === 'in')?.punchTime?.toISOString() || null);
+  return {
+    date,
+    firstInTime: resolvedFirstIn,
+    lastOutTime: lastOutTime ?? lastOutFromSorted(normalized),
+    totalHoursInside,
+    late,
+    minutesLate,
+    status,
+    punches: punchesFromSortedDayLogs(normalized),
+  };
+}
+
 function rowToShiftConfig(row) {
   const [startHour, startMinute] = row.start_time.split(':').map(Number);
   const [endHour, endMinute] = row.end_time.split(':').map(Number);
@@ -467,7 +510,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     const [logsResult, holidaySet] = await Promise.all([
       client.query(
-        `SELECT punch_time, punch_type
+        `SELECT punch_time, punch_type, device_id
          FROM attendance_logs
          WHERE company_id = $1
            AND employee_id = $2
@@ -516,6 +559,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       logsByDay.get(key).push({
         punchTime,
         punchType: row.punch_type.toLowerCase(),
+        deviceId: row.device_id || null,
       });
     }
 
@@ -559,17 +603,23 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         const dayLogs = logsByDay.get(dayKey) || [];
 
         if (!dayLogs.length) {
-          if (!isHoliday) {
+          if (isHoliday) {
+            dayDetails.push(
+              buildDayDetailRecord({
+                date: dayKey,
+                status: 'weekly_off',
+              })
+            );
+          } else {
             rawAbsenceDays += 1;
             rawAbsenceHours += required;
-            dayDetails.push({
-              date: dayKey,
-              firstInTime: null,
-              totalHoursInside: 0,
-              late: false,
-              minutesLate: 0,
-              status: 'absent',
-            });
+            dayDetails.push(
+              buildDayDetailRecord({
+                date: dayKey,
+                status: 'absent',
+                totalHoursInside: 0,
+              })
+            );
           }
           continue;
         }
@@ -635,14 +685,17 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           rawAbsenceHours += Math.max(0, required - workedHoursCapped);
         }
 
-        dayDetails.push({
-          date: dayKey,
-          firstInTime: firstInTime ? firstInTime.toISOString() : null,
-          totalHoursInside: hoursInside,
-          late: isLate,
-          minutesLate,
-          status: statusLabel,
-        });
+        dayDetails.push(
+          buildDayDetailRecord({
+            date: dayKey,
+            status: statusLabel,
+            sorted,
+            firstInTime: firstInTime ? firstInTime.toISOString() : null,
+            totalHoursInside: hoursInside,
+            late: isLate,
+            minutesLate,
+          })
+        );
       }
 
       let effectiveWorkingDays = workingDays;
@@ -865,14 +918,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const dayShift = rotationEnabled ? await getDayShift(dayKey) : shift;
 
       if (!dayLogs.length) {
-        dayDetails.push({
-          date: dayKey,
-          firstInTime: null,
-          totalHoursInside: null,
-          late: false,
-          minutesLate: 0,
-          status: isHoliday ? 'weekly_off' : 'absent',
-        });
+        dayDetails.push(
+          buildDayDetailRecord({
+            date: dayKey,
+            status: isHoliday ? 'weekly_off' : 'absent',
+          })
+        );
         continue;
       }
 
@@ -891,14 +942,23 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       );
       const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
 
-      dayDetails.push({
-        date: dayKey,
-        firstInTime: firstInTime ? firstInTime.toISOString() : null,
-        totalHoursInside: null,
-        late: Boolean(status.late && !isHoliday),
-        minutesLate: !isHoliday ? Number(status.minutesLate || 0) : 0,
-        status: isHoliday ? 'weekly_off' : status.present ? (status.halfDay ? 'half_day' : 'present') : 'absent',
-      });
+      dayDetails.push(
+        buildDayDetailRecord({
+          date: dayKey,
+          status: isHoliday
+            ? 'weekly_off'
+            : status.present
+              ? status.halfDay
+                ? 'half_day'
+                : 'present'
+              : 'absent',
+          sorted,
+          firstInTime: firstInTime ? firstInTime.toISOString() : null,
+          lastOutTime: status.lastOutTime ? status.lastOutTime.toISOString() : null,
+          late: Boolean(status.late && !isHoliday),
+          minutesLate: !isHoliday ? Number(status.minutesLate || 0) : 0,
+        })
+      );
     }
 
     for (const detail of dayDetails) {
@@ -1042,7 +1102,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
     const [logsResult, holidaySet] = await Promise.all([
       client.query(
-        `SELECT punch_time, punch_type
+        `SELECT punch_time, punch_type, device_id
          FROM attendance_logs
          WHERE company_id = $1
            AND employee_id = $2
@@ -1074,6 +1134,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       logsByDay.get(key).push({
         punchTime,
         punchType: String(row.punch_type || '').toLowerCase(),
+        deviceId: row.device_id || null,
       });
     }
 
@@ -1107,15 +1168,26 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         if (holidayCountAsPresent && isHoliday) {
           presentDayKeys.add(dayKey);
           presentDays += 1;
-          // Keep holiday days out of presentWorkingDays (travel etc. should be excluded)
-          dayDetails.push({
-            date: dayKey,
-            firstInTime: null,
-            totalHoursInside: 0,
-            late: false,
-            minutesLate: 0,
-            status: 'present',
-          });
+          dayDetails.push(
+            buildDayDetailRecord({
+              date: dayKey,
+              status: 'present',
+              totalHoursInside: 0,
+            })
+          );
+          cur.setUTCDate(cur.getUTCDate() + 1);
+          continue;
+        }
+
+        if (!dayLogs.length) {
+          dayDetails.push(
+            buildDayDetailRecord({
+              date: dayKey,
+              status: isHoliday ? 'weekly_off' : 'absent',
+              totalHoursInside: 0,
+            })
+          );
+          if (!isHoliday) workingDays += 1;
           cur.setUTCDate(cur.getUTCDate() + 1);
           continue;
         }
@@ -1177,22 +1249,41 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           rawAbsenceHours += Math.max(0, required - workedHoursCapped);
         }
 
-        dayDetails.push({
-          date: dayKey,
-          firstInTime: firstInTime ? firstInTime.toISOString() : null,
-          totalHoursInside: hoursInside,
-          late: isLate,
-          minutesLate,
-          status: statusLabel,
-        });
+        dayDetails.push(
+          buildDayDetailRecord({
+            date: dayKey,
+            status: statusLabel,
+            sorted,
+            firstInTime: firstInTime ? firstInTime.toISOString() : null,
+            totalHoursInside: hoursInside,
+            late: isLate,
+            minutesLate,
+          })
+        );
       } else {
         // day_based / shift_based
         if (!isHoliday) workingDays += 1;
 
-        // Holiday/weekly-off is paid: count as present even if there are no valid logs.
         if (holidayCountAsPresent && isHoliday && dayLogs.length === 0) {
           presentDayKeys.add(dayKey);
           presentDays += 1;
+          dayDetails.push(
+            buildDayDetailRecord({
+              date: dayKey,
+              status: 'present',
+            })
+          );
+          cur.setUTCDate(cur.getUTCDate() + 1);
+          continue;
+        }
+
+        if (!dayLogs.length) {
+          dayDetails.push(
+            buildDayDetailRecord({
+              date: dayKey,
+              status: isHoliday ? 'weekly_off' : 'absent',
+            })
+          );
           cur.setUTCDate(cur.getUTCDate() + 1);
           continue;
         }
@@ -1208,6 +1299,15 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         // If it's a holiday but status says absent (e.g. invalid punch pattern), still pay full day.
         const shouldCountPresent = status.present || (holidayCountAsPresent && isHoliday);
         if (!shouldCountPresent) {
+          dayDetails.push(
+            buildDayDetailRecord({
+              date: dayKey,
+              status: isHoliday ? 'weekly_off' : 'absent',
+              sorted,
+              late: Boolean(status.late && !isHoliday),
+              minutesLate: !isHoliday ? Number(status.minutesLate || 0) : 0,
+            })
+          );
           cur.setUTCDate(cur.getUTCDate() + 1);
           continue;
         }
@@ -1248,14 +1348,17 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           lunchOverDays += 1;
         }
 
-        dayDetails.push({
-          date: dayKey,
-          firstInTime: status.firstInTime ? status.firstInTime.toISOString() : null,
-          totalHoursInside: null,
-          late: Boolean(status.late),
-          minutesLate: status.minutesLate ?? 0,
-          status: status.present ? (status.halfDay ? 'half_day' : 'present') : 'present',
-        });
+        dayDetails.push(
+          buildDayDetailRecord({
+            date: dayKey,
+            status: status.present ? (status.halfDay ? 'half_day' : 'present') : 'present',
+            sorted,
+            firstInTime: status.firstInTime ? status.firstInTime.toISOString() : null,
+            lastOutTime: status.lastOutTime ? status.lastOutTime.toISOString() : null,
+            late: Boolean(status.late),
+            minutesLate: status.minutesLate ?? 0,
+          })
+        );
       }
 
       cur.setUTCDate(cur.getUTCDate() + 1);

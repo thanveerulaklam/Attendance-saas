@@ -106,6 +106,23 @@ function canAlterAttendanceDay(status) {
   return status === 'absent' || status === 'half_day' || status === 'on_duty';
 }
 
+function formatPunchDevice(deviceId) {
+  if (!deviceId) return '';
+  if (deviceId === 'manual') return 'Manual';
+  return String(deviceId);
+}
+
+function formatPunchSummary(day) {
+  const punches = Array.isArray(day?.punches) ? day.punches : [];
+  if (punches.length === 0) {
+    if (day?.firstInTime) {
+      return `IN ${formatTimeAmPm(day.firstInTime)}`;
+    }
+    return null;
+  }
+  return punches;
+}
+
 function formatPermissionUsedHours(minutes) {
   const m = Number(minutes || 0);
   if (!Number.isFinite(m) || m <= 0) return '0';
@@ -1052,6 +1069,15 @@ export default function PayrollPage() {
   const openAbsentModal = async (row) => {
     if (!subscriptionAllowed) return;
     try {
+      setBreakdownCache((prev) => {
+        const next = { ...prev };
+        if (payrollMode === 'monthly') {
+          delete next[`${row.employee_id}-${row.year}-${row.month}`];
+        } else {
+          delete next[`w-${row.employee_id}-${row.week_start_date}`];
+        }
+        return next;
+      });
       const periodLabel =
         payrollMode === 'monthly'
           ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
@@ -3145,7 +3171,7 @@ export default function PayrollPage() {
 
       {attendanceAlterModal.open && attendanceAlterModal.row && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-soft">
+          <div className="w-full max-w-4xl rounded-xl bg-white p-4 shadow-soft">
             <h2 className="text-sm font-semibold text-slate-900">Alter attendance</h2>
             <p className="mt-1 text-xs text-slate-600">
               {attendanceAlterModal.row.employee_name} ({attendanceAlterModal.row.employee_code})
@@ -3175,31 +3201,81 @@ export default function PayrollPage() {
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                     <tr className="text-left text-slate-600">
-                      <th className="px-3 py-2">Date</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2 text-right">Alter</th>
+                      <th className="px-3 py-2 w-[110px]">Date</th>
+                      <th className="px-3 py-2 w-[120px]">Status</th>
+                      <th className="px-3 py-2">Punch details</th>
+                      <th className="px-3 py-2 text-right w-[90px]">Alter</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {attendanceAlterModal.days.map((day) => (
+                    {attendanceAlterModal.days.map((day) => {
+                      const punchSummary = formatPunchSummary(day);
+                      return (
                       <tr
                         key={day.date}
                         className={`border-t border-slate-100 ${
                           canAlterAttendanceDay(day.status) ? 'bg-white' : 'bg-slate-50/40'
                         }`}
                       >
-                        <td className="px-3 py-2 font-medium text-slate-800">
+                        <td className="px-3 py-2 font-medium text-slate-800 align-top">
                           {formatDateShort(day.date)}
                         </td>
-                        <td className="px-3 py-2">
+                        <td className="px-3 py-2 align-top">
                           <span className={attendanceStatusClass(day.status)}>
                             {attendanceStatusLabel(day.status)}
                           </span>
+                          {day.late && Number(day.minutesLate || 0) > 0 && (
+                            <span className="block text-[10px] text-amber-600">
+                              Late {day.minutesLate}m
+                            </span>
+                          )}
+                          {day.totalHoursInside != null && Number(day.totalHoursInside) > 0 && (
+                            <span className="block text-[10px] text-slate-500">
+                              {Number(day.totalHoursInside).toFixed(2)}h worked
+                            </span>
+                          )}
                           {day.override_note && (
                             <span className="block text-[10px] text-slate-400">{day.override_note}</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="px-3 py-2 align-top">
+                          {Array.isArray(punchSummary) && punchSummary.length > 0 ? (
+                            <div className="space-y-1">
+                              {punchSummary.map((punch, idx) => (
+                                <div
+                                  key={`${day.date}-${idx}`}
+                                  className="flex flex-wrap items-center gap-x-1.5 text-[10px] text-slate-700"
+                                >
+                                  <span
+                                    className={`inline-flex rounded px-1 py-0.5 font-semibold uppercase ${
+                                      punch.punch_type === 'in'
+                                        ? 'bg-emerald-50 text-emerald-800'
+                                        : 'bg-slate-100 text-slate-700'
+                                    }`}
+                                  >
+                                    {punch.punch_type}
+                                  </span>
+                                  <span>{formatTimeAmPm(punch.punch_time)}</span>
+                                  {punch.device_id && (
+                                    <span className="text-slate-400">
+                                      · {formatPunchDevice(punch.device_id)}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                              {day.lastOutTime && (
+                                <div className="text-[10px] text-slate-400">
+                                  Last out {formatTimeAmPm(day.lastOutTime)}
+                                </div>
+                              )}
+                            </div>
+                          ) : typeof punchSummary === 'string' ? (
+                            <span className="text-[10px] text-slate-600">{punchSummary}</span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">No punches</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right align-top">
                           {day.status === 'on_duty' ? (
                             <button
                               type="button"
@@ -3223,7 +3299,8 @@ export default function PayrollPage() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               )}
