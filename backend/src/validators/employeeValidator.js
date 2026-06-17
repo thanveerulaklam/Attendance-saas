@@ -4,6 +4,7 @@ const STATUS_VALUES = ['active', 'inactive'];
 const PAYROLL_FREQUENCY_VALUES = ['monthly', 'weekly'];
 const SALARY_TYPE_VALUES = ['monthly', 'per_day'];
 const DEDUCTION_MODE_VALUES = ['fixed', 'percentage'];
+const GENDER_VALUES = ['male', 'female', 'other'];
 
 const isValidDate = (value) => {
   const date = new Date(value);
@@ -158,6 +159,14 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'gender')) {
+    if (payload.gender == null || payload.gender === '') {
+      // optional
+    } else if (!GENDER_VALUES.includes(String(payload.gender).toLowerCase())) {
+      errors.gender = `Gender must be one of: ${GENDER_VALUES.join(', ')}.`;
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
     if (payload.phone_number == null || payload.phone_number === '') {
       // optional: store as NULL
@@ -255,6 +264,13 @@ const validateCreateEmployee = (payload = {}) => {
       payload.department == null || payload.department === ''
         ? null
         : payload.department.trim();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'gender')) {
+    result.gender =
+      payload.gender == null || payload.gender === ''
+        ? null
+        : String(payload.gender).toLowerCase();
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
@@ -468,6 +484,19 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.department = 'Department must be a string.';
     } else {
       clean.department = payload.department.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'gender')) {
+    if (payload.gender == null || payload.gender === '') {
+      clean.gender = null;
+    } else {
+      const g = String(payload.gender).toLowerCase();
+      if (!GENDER_VALUES.includes(g)) {
+        errors.gender = `Gender must be one of: ${GENDER_VALUES.join(', ')}.`;
+      } else {
+        clean.gender = g;
+      }
     }
   }
 

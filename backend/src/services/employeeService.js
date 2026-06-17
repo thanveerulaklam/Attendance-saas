@@ -25,6 +25,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         name,
         employee_code,
         department,
+        gender,
         phone_number,
         aadhar_number,
         esi_number,
@@ -204,6 +205,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
   const permissionHoursOverride =
     payload.permission_hours_override != null ? payload.permission_hours_override : null;
   const department = payload.department != null ? payload.department : null;
+  const gender = payload.gender != null ? payload.gender : null;
   const phoneNumber = payload.phone_number != null ? payload.phone_number : null;
   const aadharNumber = payload.aadhar_number != null ? payload.aadhar_number : null;
   const esiNumber = payload.esi_number != null ? payload.esi_number : null;
@@ -222,6 +224,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         name,
         employee_code,
         department,
+        gender,
         phone_number,
         aadhar_number,
         esi_number,
@@ -240,7 +243,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         pf_percent,
         permission_hours_override
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -248,6 +251,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         payload.name,
         payload.employee_code,
         department,
+        gender,
         phoneNumber,
         aadharNumber,
         esiNumber,
@@ -295,12 +299,27 @@ async function createEmployee(companyId, data, branchContext = {}) {
  */
 async function getEmployees(
   companyId,
-  { page = 1, limit = 10, search } = {},
+  {
+    page = 1,
+    limit = 10,
+    search,
+    status,
+    branch_id: branchId,
+    department,
+    gender,
+  } = {},
   allowedBranchIds = null
 ) {
   const pageNumber = Math.max(Number(page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(limit) || 10, 1), 500);
   const offset = (pageNumber - 1) * pageSize;
+
+  const emptyResult = {
+    data: [],
+    page: pageNumber,
+    limit: pageSize,
+    total: 0,
+  };
 
   const baseParams = [companyId];
   let whereClause = 'WHERE company_id = $1';
@@ -310,10 +329,49 @@ async function getEmployees(
   baseParams.push(...bf.params);
   let p = bf.nextIndex;
 
+  if (branchId != null && String(branchId).trim() !== '') {
+    const bid = Number(branchId);
+    if (!Number.isFinite(bid) || bid <= 0) {
+      return emptyResult;
+    }
+    if (allowedBranchIds != null && !allowedBranchIds.includes(bid)) {
+      return emptyResult;
+    }
+    baseParams.push(bid);
+    whereClause += ` AND branch_id = $${p}`;
+    p += 1;
+  }
+
   if (search && String(search).trim() !== '') {
     baseParams.push(`%${String(search).trim()}%`);
     whereClause += ` AND (name ILIKE $${p} OR employee_code ILIKE $${p})`;
     p += 1;
+  }
+
+  if (status && String(status).trim() !== '' && String(status) !== 'all') {
+    const s = String(status).trim().toLowerCase();
+    if (s === 'active' || s === 'inactive') {
+      baseParams.push(s);
+      whereClause += ` AND status = $${p}`;
+      p += 1;
+    }
+  }
+
+  if (department && String(department).trim() !== '') {
+    baseParams.push(String(department).trim());
+    whereClause += ` AND department = $${p}`;
+    p += 1;
+  }
+
+  if (gender && String(gender).trim() !== '' && String(gender) !== 'all') {
+    const g = String(gender).trim().toLowerCase();
+    if (g === 'unset' || g === 'not_specified') {
+      whereClause += ' AND gender IS NULL';
+    } else if (g === 'male' || g === 'female' || g === 'other') {
+      baseParams.push(g);
+      whereClause += ` AND gender = $${p}`;
+      p += 1;
+    }
   }
 
   const countResult = await pool.query(

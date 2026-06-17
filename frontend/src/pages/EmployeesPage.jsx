@@ -27,6 +27,9 @@ export default function EmployeesPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [genderFilter, setGenderFilter] = useState('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(openFromOnboarding);
@@ -66,6 +69,9 @@ export default function EmployeesPage() {
       params.set('limit', String(PAGE_SIZE));
       if (search.trim()) params.set('search', search.trim());
       if (statusFilter !== 'all') params.set('status', statusFilter);
+      if (branchFilter) params.set('branch_id', branchFilter);
+      if (departmentFilter) params.set('department', departmentFilter);
+      if (genderFilter !== 'all') params.set('gender', genderFilter);
 
       const res = await authFetch(`/api/employees?${params.toString()}`, {
         headers: {
@@ -94,7 +100,7 @@ export default function EmployeesPage() {
   useEffect(() => {
     fetchEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, statusFilter]);
+  }, [page, search, statusFilter, branchFilter, departmentFilter, genderFilter]);
 
   useEffect(() => {
     authFetch('/api/shifts?limit=500')
@@ -135,6 +141,21 @@ export default function EmployeesPage() {
   const handleStatusChange = (value) => {
     setPage(1);
     setStatusFilter(value);
+  };
+
+  const handleBranchFilterChange = (value) => {
+    setPage(1);
+    setBranchFilter(value);
+  };
+
+  const handleDepartmentFilterChange = (value) => {
+    setPage(1);
+    setDepartmentFilter(value);
+  };
+
+  const handleGenderFilterChange = (value) => {
+    setPage(1);
+    setGenderFilter(value);
   };
 
   const handleEmployeeCreated = (employee) => {
@@ -287,8 +308,16 @@ export default function EmployeesPage() {
       <EmployeeFilters
         search={search}
         status={statusFilter}
+        branchId={branchFilter}
+        department={departmentFilter}
+        gender={genderFilter}
+        branches={branches}
+        departments={departmentSuggestions}
         onSearchChange={handleSearchChange}
         onStatusChange={handleStatusChange}
+        onBranchChange={handleBranchFilterChange}
+        onDepartmentChange={handleDepartmentFilterChange}
+        onGenderChange={handleGenderFilterChange}
       />
 
       {/* Content */}

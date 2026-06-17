@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../../utils/api';
+import { GENDER_OPTIONS } from '../../utils/employeeGender';
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -20,6 +21,7 @@ export default function EmployeeFormModal({
   const [employeeCode, setEmployeeCode] = useState('');
   const [basicSalary, setBasicSalary] = useState('');
   const [department, setDepartment] = useState('');
+  const [gender, setGender] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [aadharNumber, setAadharNumber] = useState('');
   const [esiNumber, setEsiNumber] = useState('');
@@ -91,6 +93,7 @@ export default function EmployeeFormModal({
         setName(employee.name || '');
         setEmployeeCode(employee.employee_code || '');
         setDepartment(employee.department || '');
+        setGender(employee.gender || '');
         setPhoneNumber(employee.phone_number || '');
         setAadharNumber(employee.aadhar_number || '');
         setEsiNumber(employee.esi_number || '');
@@ -137,6 +140,7 @@ export default function EmployeeFormModal({
         setName('');
         setEmployeeCode('');
         setDepartment('');
+        setGender('');
         setPhoneNumber('');
         setAadharNumber('');
         setEsiNumber('');
@@ -300,6 +304,7 @@ export default function EmployeeFormModal({
         name: name.trim(),
         employee_code: employeeCode.trim(),
         department: department.trim() === '' ? null : department.trim(),
+        gender: gender === '' ? null : gender,
         phone_number: normalizedPhone === '' ? null : normalizedPhone,
         aadhar_number: normalizedAadhar === '' ? null : normalizedAadhar,
         esi_number: esiNumber.trim() === '' ? null : esiNumber.trim(),
@@ -545,6 +550,25 @@ export default function EmployeeFormModal({
               </datalist>
             </div>
 
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Gender (optional)
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                >
+                  {GENDER_OPTIONS.map((opt) => (
+                    <option key={opt.value || 'unset'} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-xs font-medium text-slate-700">
                 Phone number (optional)
