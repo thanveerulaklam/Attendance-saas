@@ -327,7 +327,14 @@ export default function PayslipModal({
     b.isMonthComplete != null ? Boolean(b.isMonthComplete) : (b.isWeekComplete != null ? Boolean(b.isWeekComplete) : true);
 
   const handlePrint = () => {
-    window.print();
+    document.body.classList.add('payslip-printing');
+    const cleanup = () => {
+      document.body.classList.remove('payslip-printing');
+    };
+    window.addEventListener('afterprint', cleanup, { once: true });
+    requestAnimationFrame(() => {
+      window.print();
+    });
   };
 
   const handleDownloadPdf = () => {
@@ -354,14 +361,14 @@ export default function PayslipModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3 print:static print:bg-transparent"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-3xl max-h-[95vh] overflow-y-auto rounded-2xl bg-white shadow-2xl border border-slate-200 print:max-h-none print:shadow-none print:border-0"
+        className="payslip-print-root w-full max-w-3xl max-h-[95vh] overflow-y-auto rounded-2xl bg-white shadow-2xl border border-slate-200"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-6 py-4 backdrop-blur print:hidden">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/95 px-6 py-4 backdrop-blur payslip-print-hidden">
           <div>
             <h2 className="text-base font-semibold text-slate-900">Payslip</h2>
             <p className="text-xs text-slate-500">
@@ -377,7 +384,7 @@ export default function PayslipModal({
           </button>
         </div>
 
-        <div className="px-6 py-5 space-y-4 print:px-10 print:py-8">
+        <div className="px-6 py-5 space-y-4">
           <header className="border-b border-slate-200 pb-3 text-center">
             <h1 className="text-lg font-semibold tracking-wide text-slate-900">
               {company?.name || 'Company'}
@@ -439,7 +446,7 @@ export default function PayslipModal({
               ATTENDANCE SUMMARY
             </h3>
             {breakdown.attendance?.payrollFrozenToRecord === true && breakdown.attendance?.liveAttendanceNote && (
-              <p className="mb-2 rounded-md border border-amber-100 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
+              <p className="payslip-print-hidden mb-2 rounded-md border border-amber-100 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-900">
                 {breakdown.attendance.liveAttendanceNote}
                 {breakdown.attendance?.payrollGeneratedAt && (
                   <span className="mt-0.5 block text-[9px] text-amber-800/90">
@@ -453,7 +460,7 @@ export default function PayslipModal({
               </p>
             )}
             {isHoursBasedPayroll && (
-              <p className="mb-2 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] text-blue-800">
+              <p className="payslip-print-hidden mb-2 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] text-blue-800">
                 Hours-based payroll mode: salary is prorated by hours worked (worked hours / required hours per day).
                 Full-day and half-day buckets are not used for payroll calculation.
               </p>
@@ -499,17 +506,17 @@ export default function PayslipModal({
                 </span>
               </div>
             </div>
-            <p className="mt-2 text-[10px] text-slate-500">
+            <p className="payslip-print-hidden mt-2 text-[10px] text-slate-500">
               {isHoursBasedPayroll
                 ? 'Salary deduction absence is computed from worked-hours shortfall against required hours.'
                 : 'Salary deduction absence = full absent days + (half days x 0.5).'}
             </p>
             {showAbsenceMismatchNote && (
-              <p className="mt-1 text-[10px] text-amber-600">
+              <p className="payslip-print-hidden mt-1 text-[10px] text-amber-600">
                 Attendance buckets and payroll absence differ slightly due to payroll rules (leave/rounding/policy overrides).
               </p>
             )}
-            <div className="mt-3 text-[11px] text-slate-600">
+            <div className="payslip-print-hidden mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
               {payrollAsOfYmd && (
                 <p className="mt-0.5 text-[10px] text-slate-500">
@@ -609,7 +616,7 @@ export default function PayslipModal({
                   </span>
                 </div>
                 {absentDeductFormula && (
-                  <p className="-mt-0.5 text-[10px] text-slate-500">
+                  <p className="payslip-print-hidden -mt-0.5 text-[10px] text-slate-500">
                     {absentDeductFormula}
                   </p>
                 )}
@@ -630,7 +637,7 @@ export default function PayslipModal({
           </section>
 
           {!!(breakdown.advance_repayments || []).length && (
-            <section className="rounded-xl border border-slate-100 bg-white px-4 py-3 text-[11px] text-slate-700">
+            <section className="payslip-print-hidden rounded-xl border border-slate-100 bg-white px-4 py-3 text-[11px] text-slate-700">
               <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">
                 ADVANCE REPAYMENTS
               </h3>
@@ -685,7 +692,7 @@ export default function PayslipModal({
             </div>
             {(Number(breakdown.breakdown?.permissionHoursAllocated || 0) > 0 ||
               Number(breakdown.breakdown?.permissionMinutesUsed || 0) > 0) && (
-              <div className="mt-3 border-t border-slate-200 pt-2 text-[10px] text-slate-600">
+              <div className="payslip-print-hidden mt-3 border-t border-slate-200 pt-2 text-[10px] text-slate-600">
                 Permission allocated: {formatHours(breakdown.breakdown?.permissionHoursAllocated)} hrs | Used:{' '}
                 {formatHours(Number(breakdown.breakdown?.permissionMinutesUsed || 0) / 60)} hrs
               </div>
@@ -697,7 +704,7 @@ export default function PayslipModal({
           </section>
         </div>
 
-        <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white/95 px-6 py-3 backdrop-blur print:hidden">
+        <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 bg-white/95 px-6 py-3 backdrop-blur payslip-print-hidden">
           <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <button
               type="button"

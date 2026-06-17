@@ -4,3 +4,41 @@ body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
 
+/* Payslip modal: print only the payslip card, not the payroll page behind it */
+@media print {
+  body.payslip-printing * {
+    visibility: hidden !important;
+  }
+
+  body.payslip-printing .payslip-print-root,
+  body.payslip-printing .payslip-print-root * {
+    visibility: visible !important;
+  }
+
+  body.payslip-printing .payslip-print-root {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    z-index: 2147483647 !important;
+    page: payslip-page;
+  }
+
+  body.payslip-printing .payslip-print-hidden {
+    display: none !important;
+  }
+
+  @page payslip-page {
+    size: A5 portrait;
+    margin: 8mm;
+  }
+}
+

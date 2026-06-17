@@ -3,7 +3,7 @@ import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
-import { addCompactPayslipPage } from '../utils/payslipPdf';
+import { buildBulkPayslipsDoc, openBulkPayslipsForPrint } from '../utils/payslipPdf';
 
 const PAGE_SIZE = 50;
 const PAYROLL_COLUMN_STORAGE_KEY = 'payroll.visibleColumns.v1';
@@ -475,19 +475,6 @@ function formatPayslipPeriodLabel(row, payrollMode) {
   return new Date(row.year, row.month - 1, 1).toLocaleString('default', {
     month: 'long',
     year: 'numeric',
-  });
-}
-
-function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceMeta, isFirstPage }) {
-  const periodLabel = formatPayslipPeriodLabel(row, payrollMode);
-  addCompactPayslipPage(doc, {
-    company,
-    employeeName: row.employee_name,
-    employeeCode: row.employee_code,
-    periodLabel,
-    breakdown,
-    attendanceDetails: attendanceMeta,
-    isFirstPage,
   });
 }
 
@@ -1335,19 +1322,13 @@ export default function PayrollPage() {
         });
       }
 
-      const doc = createPdf();
-      for (let i = 0; i < rows.length; i += 1) {
-        const row = rows[i];
-        const payload = payloadByIndex[i];
-        addPayslipPage(doc, {
-          company,
-          row,
-          payrollMode,
-          breakdown: payload.breakdown,
-          attendanceMeta: payload.attendanceMeta,
-          isFirstPage: i === 0,
-        });
-      }
+      const doc = buildBulkPayslipsDoc(
+        company,
+        rows,
+        payloadByIndex,
+        payrollMode,
+        formatPayslipPeriodLabel
+      );
       const periodSlug =
         payrollMode === 'monthly'
           ? month
@@ -1377,45 +1358,61 @@ export default function PayrollPage() {
     await downloadPayslipsPdf(rows);
   }
 
-  function printPayrollRows(rows) {
-    if (rows.length === 0) {
+  async function printPayslipsPdf(rows) {
+    if (!rows.length) {
       setToast({ type: 'error', message: 'No payroll records to print' });
       return;
     }
-    const html = buildPayrollPrintDocument(rows, payrollMode, company?.name);
-    const w = window.open('', '_blank');
-    if (!w) {
-      setToast({ type: 'error', message: 'Allow pop-ups to print' });
-      return;
-    }
-    w.document.write(html);
-    w.document.close();
-    setTimeout(() => {
-      try {
-        w.focus();
-        w.print();
-      } catch {
-        /* ignore */
-      }
-    }, 250);
-  }
-
-  async function handlePrintAll() {
+    setExporting(true);
+    setToast(null);
     try {
-      setExporting(true);
-      setToast(null);
-      const rows = await fetchAllPayrollRecordsForExport();
-      printPayrollRows(rows);
+      const chunkSize = 5;
+      const payloadByIndex = new Array(rows.length);
+      for (let start = 0; start < rows.length; start += chunkSize) {
+        const chunk = rows.slice(start, start + chunkSize);
+        const chunkPayloads = await Promise.all(
+          chunk.map((row) => fetchPayslipPayload(row))
+        );
+        chunkPayloads.forEach((payload, idx) => {
+          payloadByIndex[start + idx] = payload;
+        });
+      }
+
+      const doc = buildBulkPayslipsDoc(
+        company,
+        rows,
+        payloadByIndex,
+        payrollMode,
+        formatPayslipPeriodLabel
+      );
+      if (!openBulkPayslipsForPrint(doc)) {
+        setToast({ type: 'error', message: 'Allow pop-ups to print payslips' });
+        return;
+      }
+      setToast({
+        type: 'success',
+        message: `Opened print preview for ${rows.length} payslip${rows.length > 1 ? 's' : ''} (2 per A4 page)`,
+      });
     } catch (err) {
-      setToast({ type: 'error', message: err.message || 'Failed to load payroll' });
+      setToast({ type: 'error', message: err.message || 'Failed to print payslips' });
     } finally {
       setExporting(false);
     }
   }
 
-  function handlePrintSelected() {
+  async function handlePrintAll() {
     setToast(null);
-    printPayrollRows(Array.from(selectedPayroll.values()));
+    try {
+      const rows = await fetchAllPayrollRecordsForExport();
+      await printPayslipsPdf(rows);
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to load payroll' });
+    }
+  }
+
+  async function handlePrintSelected() {
+    setToast(null);
+    await printPayslipsPdf(Array.from(selectedPayroll.values()));
   }
 
   useEffect(() => {
@@ -2289,7 +2286,7 @@ export default function PayrollPage() {
             <button
               type="button"
               disabled={exporting || selectedPayroll.size === 0}
-              onClick={handlePrintSelected}
+              onClick={() => void handlePrintSelected()}
               className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
             >
               Print (selected)
