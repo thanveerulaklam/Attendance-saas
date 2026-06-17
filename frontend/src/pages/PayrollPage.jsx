@@ -971,7 +971,10 @@ export default function PayrollPage() {
     const res = await authFetch(`/api/payroll/breakdown?${params}`, {
       headers: { 'Content-Type': 'application/json' },
     });
-    if (!res.ok) throw new Error('Failed to load payroll details');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to load payroll details');
+    }
     const json = await res.json();
     const data = json?.data || null;
     setBreakdownCache((prev) => ({ ...prev, [cacheKey]: data }));
@@ -991,7 +994,10 @@ export default function PayrollPage() {
     const res = await authFetch(`/api/payroll/weekly/breakdown?${params}`, {
       headers: { 'Content-Type': 'application/json' },
     });
-    if (!res.ok) throw new Error('Failed to load payroll details');
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to load payroll details');
+    }
     const json = await res.json();
     const data = json?.data || null;
     setBreakdownCache((prev) => ({ ...prev, [cacheKey]: data }));
@@ -1042,8 +1048,11 @@ export default function PayrollPage() {
         summary: data?.attendance || null,
         savingDate: null,
       });
-    } catch {
-      setToast({ type: 'error', message: 'Failed to load attendance details' });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err?.message || 'Failed to load attendance details',
+      });
     }
   };
 

@@ -75,6 +75,10 @@ const APPLIED_CHECKS = {
     WHERE table_schema = 'public' AND table_name = 'demo_enquiries'
       AND column_name = 'source' AND character_maximum_length >= 120
   )`,
+  '063_attendance_day_overrides.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'attendance_day_overrides'
+  )`,
 };
 
 async function hasExistingSchema(client) {

@@ -32,40 +32,53 @@ async function assertEmployeeInScope(client, companyId, employeeId, allowedBranc
 }
 
 async function loadOverridesMap(client, companyId, employeeId, startDate, endDate) {
-  const result = await client.query(
-    `SELECT
-       attendance_date::text AS date,
-       override_status,
-       note
-     FROM attendance_day_overrides
-     WHERE company_id = $1
-       AND employee_id = $2
-       AND attendance_date >= $3::date
-       AND attendance_date <= $4::date`,
-    [companyId, Number(employeeId), startDate, endDate]
-  );
-  const map = new Map();
-  for (const row of result.rows) {
-    map.set(String(row.date).slice(0, 10), row);
+  try {
+    const result = await client.query(
+      `SELECT
+         attendance_date::text AS date,
+         override_status,
+         note
+       FROM attendance_day_overrides
+       WHERE company_id = $1
+         AND employee_id = $2
+         AND attendance_date >= $3::date
+         AND attendance_date <= $4::date`,
+      [companyId, Number(employeeId), startDate, endDate]
+    );
+    const map = new Map();
+    for (const row of result.rows) {
+      map.set(String(row.date).slice(0, 10), row);
+    }
+    return map;
+  } catch (err) {
+    // Table not migrated yet (42P01) — treat as no overrides instead of breaking payroll.
+    if (err && err.code === '42P01') {
+      return new Map();
+    }
+    throw err;
   }
-  return map;
 }
 
 async function listOverrides(companyId, employeeId, startDate, endDate, allowedBranchIds = null) {
   const client = await pool.connect();
   try {
     await assertEmployeeInScope(client, companyId, employeeId, allowedBranchIds);
-    const result = await client.query(
-      `SELECT id, employee_id, attendance_date, override_status, note, created_at, updated_at
-       FROM attendance_day_overrides
-       WHERE company_id = $1
-         AND employee_id = $2
-         AND attendance_date >= $3::date
-         AND attendance_date <= $4::date
-       ORDER BY attendance_date ASC`,
-      [companyId, Number(employeeId), startDate, endDate]
-    );
-    return result.rows;
+    try {
+      const result = await client.query(
+        `SELECT id, employee_id, attendance_date, override_status, note, created_at, updated_at
+         FROM attendance_day_overrides
+         WHERE company_id = $1
+           AND employee_id = $2
+           AND attendance_date >= $3::date
+           AND attendance_date <= $4::date
+         ORDER BY attendance_date ASC`,
+        [companyId, Number(employeeId), startDate, endDate]
+      );
+      return result.rows;
+    } catch (err) {
+      if (err && err.code === '42P01') return [];
+      throw err;
+    }
   } finally {
     client.release();
   }
