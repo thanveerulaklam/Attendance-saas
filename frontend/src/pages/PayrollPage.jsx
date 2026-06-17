@@ -82,6 +82,30 @@ function attendanceStatusLabel(status) {
   }
 }
 
+function attendanceStatusClass(status) {
+  switch (status) {
+    case 'on_duty':
+    case 'present':
+      return 'font-medium text-emerald-700';
+    case 'half_day':
+      return 'font-medium text-amber-700';
+    case 'absent':
+      return 'font-medium text-rose-700';
+    case 'weekly_off':
+      return 'text-slate-500';
+    default:
+      return 'text-slate-600';
+  }
+}
+
+function sortDayDetails(details) {
+  return [...(details || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function canAlterAttendanceDay(status) {
+  return status === 'absent' || status === 'half_day' || status === 'on_duty';
+}
+
 function formatPermissionUsedHours(minutes) {
   const m = Number(minutes || 0);
   if (!Number.isFinite(m) || m <= 0) return '0';
@@ -1037,14 +1061,11 @@ export default function PayrollPage() {
           : formatWeekLabel(row.week_start_date, row.week_end_date);
       const data = await getPayrollBreakdownForRow(row);
       const details = Array.isArray(data?.attendance?.dayDetails) ? data.attendance.dayDetails : [];
-      const alterableDays = details.filter((d) =>
-        ['absent', 'half_day', 'on_duty'].includes(d?.status)
-      );
       setAttendanceAlterModal({
         open: true,
         row,
         periodLabel,
-        days: alterableDays,
+        days: sortDayDetails(details),
         summary: data?.attendance || null,
         savingDate: null,
       });
@@ -1109,7 +1130,7 @@ export default function PayrollPage() {
       setAttendanceAlterModal((m) => ({
         ...m,
         row: { ...m.row, ...updatedPayroll },
-        days: details.filter((d) => ['absent', 'half_day', 'on_duty'].includes(d?.status)),
+        days: sortDayDetails(details),
         summary: data?.attendance || null,
         savingDate: null,
       }));
@@ -3141,39 +3162,37 @@ export default function PayrollPage() {
               </p>
             )}
             <p className="mt-1 text-[11px] text-slate-500">
-              Mark an absent or leave day as <strong>On duty (OD)</strong> when the employee worked off-site.
-              Payroll recalculates automatically.
+              Full {payrollMode === 'monthly' ? 'month' : 'week'} attendance below. Mark an absent or
+              leave day as <strong>On duty (OD)</strong> when the employee worked off-site. Payroll
+              recalculates automatically.
             </p>
-            <div className="mt-3 max-h-[360px] overflow-y-auto rounded-lg border border-slate-200">
+            <div className="mt-3 max-h-[min(480px,60vh)] overflow-y-auto rounded-lg border border-slate-200">
               {attendanceAlterModal.days.length === 0 ? (
                 <p className="px-3 py-6 text-center text-xs text-slate-500">
-                  No absent, half-day, or on-duty days in this period.
+                  No attendance days found for this period.
                 </p>
               ) : (
                 <table className="w-full text-xs">
-                  <thead className="sticky top-0 bg-slate-50">
+                  <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                     <tr className="text-left text-slate-600">
                       <th className="px-3 py-2">Date</th>
                       <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2 text-right">Action</th>
+                      <th className="px-3 py-2 text-right">Alter</th>
                     </tr>
                   </thead>
                   <tbody>
                     {attendanceAlterModal.days.map((day) => (
-                      <tr key={day.date} className="border-t border-slate-100">
+                      <tr
+                        key={day.date}
+                        className={`border-t border-slate-100 ${
+                          canAlterAttendanceDay(day.status) ? 'bg-white' : 'bg-slate-50/40'
+                        }`}
+                      >
                         <td className="px-3 py-2 font-medium text-slate-800">
                           {formatDateShort(day.date)}
                         </td>
                         <td className="px-3 py-2">
-                          <span
-                            className={
-                              day.status === 'on_duty'
-                                ? 'font-medium text-emerald-700'
-                                : day.status === 'half_day'
-                                  ? 'text-amber-700'
-                                  : 'text-rose-700'
-                            }
-                          >
+                          <span className={attendanceStatusClass(day.status)}>
                             {attendanceStatusLabel(day.status)}
                           </span>
                           {day.override_note && (
@@ -3190,7 +3209,7 @@ export default function PayrollPage() {
                             >
                               {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Undo OD'}
                             </button>
-                          ) : (
+                          ) : day.status === 'absent' || day.status === 'half_day' ? (
                             <button
                               type="button"
                               disabled={attendanceAlterModal.savingDate === day.date}
@@ -3199,6 +3218,8 @@ export default function PayrollPage() {
                             >
                               {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Mark OD'}
                             </button>
+                          ) : (
+                            <span className="text-slate-300">—</span>
                           )}
                         </td>
                       </tr>
