@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
+import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 import RecordPaymentModal, { paymentModeLabel } from '../components/payroll/RecordPaymentModal';
 
 const TABS = [
@@ -51,6 +52,34 @@ function statusBadge(status) {
   );
 }
 
+function escapeCsvCell(value) {
+  const str = value == null ? '' : String(value);
+  if (/[,"\r\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+}
+
+function buildStatementPeriodLabel(fromDate, toDate) {
+  if (fromDate && toDate) return `${fromDate} to ${toDate}`;
+  if (fromDate) return `From ${fromDate}`;
+  if (toDate) return `Until ${toDate}`;
+  return 'All dates';
+}
+
+function safeFileSlug(value) {
+  return String(value || 'employee').replace(/\s+/g, '_').replace(/[^\w-]/g, '');
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function PaymentsPage() {
   const [tab, setTab] = useState('ledger');
   const [year, setYear] = useState(currentYear());
@@ -71,6 +100,9 @@ export default function PaymentsPage() {
   const [statementRows, setStatementRows] = useState([]);
   const [statementTotal, setStatementTotal] = useState(0);
   const [statementLoading, setStatementLoading] = useState(false);
+  const [statementExportFormat, setStatementExportFormat] = useState('pdf');
+  const [statementExporting, setStatementExporting] = useState(false);
+  const [company, setCompany] = useState(null);
 
   const loadFilterOptions = useCallback(async () => {
     try {
@@ -165,6 +197,12 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     loadFilterOptions();
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json?.data) setCompany(json.data);
+      })
+      .catch(() => {});
   }, [loadFilterOptions]);
 
   useEffect(() => {
@@ -220,6 +258,114 @@ export default function PaymentsPage() {
     if (tab === 'ledger') await loadLedger();
     else if (tab === 'outstanding') await loadOutstanding();
     else if (tab === 'statement') await loadStatement();
+  }
+
+  function buildStatementExportRows() {
+    return statementRows.map((row) => [
+      String(row.payment_date || '').slice(0, 10),
+      row.period_label || '',
+      paymentModeLabel(row.payment_mode),
+      row.reference_number || '',
+      row.notes || '',
+      Number(row.amount || 0),
+      Number(row.running_total || 0),
+    ]);
+  }
+
+  function getStatementExportFilename(ext) {
+    const code = safeFileSlug(statementEmployee?.employee_code || statementEmployeeId);
+    const period = safeFileSlug(buildStatementPeriodLabel(fromDate, toDate));
+    return `payment-ledger-${code}-${period}.${ext}`;
+  }
+
+  async function downloadEmployeeStatementCsv() {
+    if (!statementEmployeeId) return;
+    const header = [
+      'Payment Date',
+      'Period',
+      'Payment Mode',
+      'Reference',
+      'Notes',
+      'Amount',
+      'Running Total',
+    ];
+    const body = buildStatementExportRows();
+    const csv = [
+      header.map(escapeCsvCell).join(','),
+      ...body.map((row) => row.map(escapeCsvCell).join(',')),
+    ].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    triggerBlobDownload(blob, getStatementExportFilename('csv'));
+  }
+
+  async function downloadEmployeeStatementPdf() {
+    if (!statementEmployeeId) return;
+    const header = [
+      'Payment Date',
+      'Period',
+      'Mode',
+      'Reference',
+      'Amount',
+      'Running Total',
+    ];
+    const body = statementRows.map((row) => [
+      String(row.payment_date || '').slice(0, 10),
+      row.period_label || '',
+      paymentModeLabel(row.payment_mode),
+      row.reference_number || '',
+      formatMoney(row.amount),
+      formatMoney(row.running_total),
+    ]);
+
+    const employeeLabel = statementEmployee
+      ? `${statementEmployee.name} (${statementEmployee.employee_code})`
+      : 'Employee';
+    const periodLabel = buildStatementPeriodLabel(fromDate, toDate);
+
+    const doc = createPdf({ orientation: 'landscape' });
+    const startY = addReportHeader(doc, {
+      companyName: company?.name,
+      companyPhone: company?.phone,
+      companyAddress: company?.address,
+      title: 'Employee Payment Ledger',
+      periodLabel: `${employeeLabel} · ${periodLabel}`,
+      generatedAt: new Date().toLocaleString(),
+      totalEmployees: statementRows.length,
+    });
+    addAutoTable(doc, [header], body, {
+      startY,
+      margin: { left: 24, right: 24 },
+      styles: { fontSize: 8 },
+    });
+    if (statementRows.length > 0) {
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const y = doc.internal.pageSize.getHeight() - 44;
+      doc.setFontSize(14);
+      doc.setFont(undefined, 'bold');
+      doc.text(`Total paid: INR ${formatMoney(statementTotal)}`, pageWidth * 0.75, y, { align: 'center' });
+    }
+    savePdf(doc, getStatementExportFilename('pdf'));
+  }
+
+  async function handleDownloadEmployeeStatement() {
+    if (!statementEmployeeId) {
+      setToast({ type: 'error', message: 'Select an employee first' });
+      return;
+    }
+    setStatementExporting(true);
+    setToast(null);
+    try {
+      if (statementExportFormat === 'csv') {
+        await downloadEmployeeStatementCsv();
+      } else {
+        await downloadEmployeeStatementPdf();
+      }
+      setToast({ type: 'success', message: 'Employee ledger downloaded' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Download failed' });
+    } finally {
+      setStatementExporting(false);
+    }
   }
 
   return (
@@ -437,12 +583,51 @@ export default function PaymentsPage() {
           ) : (
             <>
               <div className="border-b border-slate-100 px-4 py-3">
-                <p className="text-sm font-semibold text-slate-900">
-                  {statementEmployee?.name || 'Employee'} — Payment statement
-                </p>
-                <p className="text-[11px] text-slate-600">
-                  Total paid in range: <span className="font-semibold text-emerald-700">₹{formatMoney(statementTotal)}</span>
-                </p>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {statementEmployee?.name || 'Employee'} — Payment statement
+                    </p>
+                    <p className="text-[11px] text-slate-600">
+                      Total paid in range:{' '}
+                      <span className="font-semibold text-emerald-700">₹{formatMoney(statementTotal)}</span>
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:items-end">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                        <input
+                          type="radio"
+                          name="statement-export-fmt"
+                          className="border-slate-300 text-blue-600"
+                          checked={statementExportFormat === 'pdf'}
+                          onChange={() => setStatementExportFormat('pdf')}
+                        />
+                        PDF
+                      </label>
+                      <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                        <input
+                          type="radio"
+                          name="statement-export-fmt"
+                          className="border-slate-300 text-blue-600"
+                          checked={statementExportFormat === 'csv'}
+                          onChange={() => setStatementExportFormat('csv')}
+                        />
+                        CSV
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={statementExporting || statementLoading}
+                      onClick={() => void handleDownloadEmployeeStatement()}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-800 shadow-sm hover:border-primary-200 hover:bg-primary-50 disabled:opacity-50"
+                    >
+                      {statementExporting
+                        ? 'Downloading...'
+                        : `Download ledger (${statementExportFormat.toUpperCase()})`}
+                    </button>
+                  </div>
+                </div>
               </div>
               {statementRows.length === 0 ? (
                 <p className="p-4 text-xs text-slate-500">No payments in selected date range.</p>
