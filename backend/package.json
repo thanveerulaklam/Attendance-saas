@@ -8,6 +8,7 @@
     "dev": "node --watch server.js",
     "postinstall": "patch-package",
     "migrate": "node ./scripts/migrate.js",
+    "repair:salary-payments": "node ./scripts/repair-salary-payments-table.js",
     "seed": "node ./scripts/seed.js",
     "seed:testdata": "node ./scripts/generate-test-data.js",
     "seed:testdata:fresh": "npm run migrate && npm run seed:testdata",

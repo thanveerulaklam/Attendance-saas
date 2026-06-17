@@ -99,6 +99,13 @@ async function hasExistingSchema(client) {
   return result.rows[0]?.exists === true;
 }
 
+async function isSchemaApplied(client, file) {
+  const checkSql = APPLIED_CHECKS[file];
+  if (!checkSql) return null;
+  const result = await client.query(`SELECT ${checkSql} AS applied`);
+  return result.rows[0]?.applied === true;
+}
+
 async function shouldExecuteMigration(client, file, existingSchema) {
   if (!existingSchema) {
     return true;
@@ -107,8 +114,8 @@ async function shouldExecuteMigration(client, file, existingSchema) {
   if (!checkSql) {
     return false;
   }
-  const result = await client.query(`SELECT ${checkSql} AS applied`);
-  return result.rows[0]?.applied !== true;
+  const applied = await isSchemaApplied(client, file);
+  return applied !== true;
 }
 
 async function runMigrations() {
@@ -135,20 +142,27 @@ async function runMigrations() {
 
     let ran = 0;
     let baselined = 0;
+    let repaired = 0;
 
     for (const file of files) {
       const recorded = await client.query(
         'SELECT 1 FROM schema_migrations WHERE filename = $1',
         [file]
       );
-      if (recorded.rowCount > 0) {
-        console.log(`Skipping (already recorded): ${file}`);
-        continue;
-      }
-
       const filePath = path.join(migrationsDir, file);
       const sql = fs.readFileSync(filePath, 'utf8');
       const execute = await shouldExecuteMigration(client, file, existingSchema);
+
+      if (recorded.rowCount > 0) {
+        if (execute && APPLIED_CHECKS[file]) {
+          console.log(`Repairing (recorded but schema missing): ${file}`);
+          await client.query(sql);
+          repaired += 1;
+        } else {
+          console.log(`Skipping (already recorded): ${file}`);
+        }
+        continue;
+      }
 
       await client.query('BEGIN');
       try {
@@ -168,7 +182,9 @@ async function runMigrations() {
       }
     }
 
-    console.log(`Migrations complete. Executed: ${ran}, baselined: ${baselined}, total files: ${files.length}.`);
+    console.log(
+      `Migrations complete. Executed: ${ran}, repaired: ${repaired}, baselined: ${baselined}, total files: ${files.length}.`
+    );
   } catch (err) {
     console.error('Migration failed:', err);
     process.exitCode = 1;
