@@ -12,6 +12,8 @@ const {
   updateWeeklyAdvanceDeduction,
   updateManualAdvance,
   updateWeeklyManualAdvance,
+  setPayrollAttendanceOverride,
+  setWeeklyPayrollAttendanceOverride,
 } = require('../controllers/payrollController');
 const {
   authenticate,
@@ -47,6 +49,13 @@ router.patch(
   requireActiveSubscription,
   updateManualAdvance
 );
+router.post(
+  '/:id/attendance-override',
+  withAuth,
+  requireHrBranchForMutation,
+  requireActiveSubscription,
+  setPayrollAttendanceOverride
+);
 
 // Generate or regenerate payroll (blocked if subscription expired)
 router.post('/generate', withAuth, requireHrBranchForMutation, requireActiveSubscription, generate);
@@ -75,6 +84,13 @@ router.patch(
   requireHrBranchForMutation,
   requireActiveSubscription,
   updateWeeklyManualAdvance
+);
+router.post(
+  '/weekly/:id/attendance-override',
+  withAuth,
+  requireHrBranchForMutation,
+  requireActiveSubscription,
+  setWeeklyPayrollAttendanceOverride
 );
 
 router.post(

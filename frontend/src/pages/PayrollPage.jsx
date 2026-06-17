@@ -65,6 +65,23 @@ function getAppliedAdvanceTotal(row) {
   return manual + loan;
 }
 
+function attendanceStatusLabel(status) {
+  switch (status) {
+    case 'on_duty':
+      return 'On duty (OD)';
+    case 'half_day':
+      return 'Half day';
+    case 'absent':
+      return 'Absent / Leave';
+    case 'present':
+      return 'Present';
+    case 'weekly_off':
+      return 'Weekly off';
+    default:
+      return status || '—';
+  }
+}
+
 function formatPermissionUsedHours(minutes) {
   const m = Number(minutes || 0);
   if (!Number.isFinite(m) || m <= 0) return '0';
@@ -609,6 +626,14 @@ export default function PayrollPage() {
     note: '',
   });
   const [manualAdvanceSaving, setManualAdvanceSaving] = useState(false);
+  const [attendanceAlterModal, setAttendanceAlterModal] = useState({
+    open: false,
+    row: null,
+    periodLabel: '',
+    days: [],
+    summary: null,
+    savingDate: null,
+  });
   const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
   const columnMenuRef = useRef(null);
@@ -953,6 +978,26 @@ export default function PayrollPage() {
     return data;
   };
 
+  const getPayrollBreakdownForRow = async (row) => {
+    if (payrollMode === 'monthly') {
+      return getMonthlyBreakdown(row);
+    }
+    const cacheKey = `w-${row.employee_id}-${row.week_start_date}`;
+    if (breakdownCache[cacheKey]) return breakdownCache[cacheKey];
+    const params = new URLSearchParams({
+      employee_id: String(row.employee_id),
+      week_start_date: String(row.week_start_date),
+    });
+    const res = await authFetch(`/api/payroll/weekly/breakdown?${params}`, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) throw new Error('Failed to load payroll details');
+    const json = await res.json();
+    const data = json?.data || null;
+    setBreakdownCache((prev) => ({ ...prev, [cacheKey]: data }));
+    return data;
+  };
+
   const openOvertimeModal = (row) => {
     const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
       month: 'long',
@@ -975,30 +1020,104 @@ export default function PayrollPage() {
   };
 
   const openAbsentModal = async (row) => {
+    if (!subscriptionAllowed) return;
     try {
-      const periodLabel = new Date(row.year, row.month - 1, 1).toLocaleString('default', {
-        month: 'long',
-        year: 'numeric',
-      });
-      const data = await getMonthlyBreakdown(row);
+      const periodLabel =
+        payrollMode === 'monthly'
+          ? new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+              month: 'long',
+              year: 'numeric',
+            })
+          : formatWeekLabel(row.week_start_date, row.week_end_date);
+      const data = await getPayrollBreakdownForRow(row);
       const details = Array.isArray(data?.attendance?.dayDetails) ? data.attendance.dayDetails : [];
-      const absentRows = details
-        .filter((d) => d?.status === 'absent' || d?.status === 'half_day')
-        .map((d) => [
-          formatDateShort(d?.date),
-          d?.status === 'half_day' ? 'Half day' : 'Full absent',
-          d?.status === 'half_day' ? '0.5 day' : '1 day',
-        ]);
-      if (!absentRows.length) return;
-      setMetricModal({
+      const alterableDays = details.filter((d) =>
+        ['absent', 'half_day', 'on_duty'].includes(d?.status)
+      );
+      setAttendanceAlterModal({
         open: true,
-        title: 'Absent Day Details',
-        subtitle: `${row.employee_name} (${row.employee_code}) — ${periodLabel}`,
-        headers: ['Date', 'Type', 'Counts As'],
-        rows: absentRows,
+        row,
+        periodLabel,
+        days: alterableDays,
+        summary: data?.attendance || null,
+        savingDate: null,
       });
     } catch {
-      setToast({ type: 'error', message: 'Failed to load absent day details' });
+      setToast({ type: 'error', message: 'Failed to load attendance details' });
+    }
+  };
+
+  const closeAttendanceAlterModal = () => {
+    setAttendanceAlterModal({
+      open: false,
+      row: null,
+      periodLabel: '',
+      days: [],
+      summary: null,
+      savingDate: null,
+    });
+  };
+
+  const applyAttendanceOverride = async (date, action) => {
+    const row = attendanceAlterModal.row;
+    if (!row || !subscriptionAllowed || attendanceAlterModal.savingDate) return;
+    const url =
+      payrollMode === 'monthly'
+        ? `/api/payroll/${row.id}/attendance-override`
+        : `/api/payroll/weekly/${row.id}/attendance-override`;
+    setAttendanceAlterModal((m) => ({ ...m, savingDate: date }));
+    setToast(null);
+    try {
+      const res = await authFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, action }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Failed to update attendance');
+      }
+      const json = await res.json();
+      const updatedPayroll = json.data?.payroll;
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                present_days: updatedPayroll?.present_days ?? r.present_days,
+                absence_days: updatedPayroll?.absence_days ?? r.absence_days,
+                gross_salary: updatedPayroll?.gross_salary ?? r.gross_salary,
+                deductions: updatedPayroll?.deductions ?? r.deductions,
+                net_salary: updatedPayroll?.net_salary ?? r.net_salary,
+                overtime_hours: updatedPayroll?.overtime_hours ?? r.overtime_hours,
+              }
+            : r
+        )
+      );
+      setBreakdownCache({});
+      const data = await getPayrollBreakdownForRow(row);
+      const details = Array.isArray(data?.attendance?.dayDetails) ? data.attendance.dayDetails : [];
+      setAttendanceAlterModal((m) => ({
+        ...m,
+        row: { ...m.row, ...updatedPayroll },
+        days: details.filter((d) => ['absent', 'half_day', 'on_duty'].includes(d?.status)),
+        summary: data?.attendance || null,
+        savingDate: null,
+      }));
+      setReloadKey((k) => k + 1);
+      setToast({
+        type: 'success',
+        message:
+          action === 'set_on_duty'
+            ? `Marked ${formatDateShort(date)} as on duty. Payroll updated.`
+            : `Removed on-duty override for ${formatDateShort(date)}. Payroll updated.`,
+      });
+    } catch (err) {
+      setAttendanceAlterModal((m) => ({ ...m, savingDate: null }));
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to update attendance',
+      });
     }
   };
 
@@ -2360,7 +2479,23 @@ export default function PayrollPage() {
                       )}
                       {isColumnVisible('present') && (
                         <td className="py-3 pr-3 text-right text-slate-700">
-                          {row.present_days} / {row.total_days}
+                          <div className="flex flex-col items-end gap-0.5">
+                            <span>
+                              {row.present_days} / {row.total_days}
+                            </span>
+                            {subscriptionAllowed && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void openAbsentModal(row);
+                                }}
+                                className="text-[10px] font-medium text-blue-700 underline decoration-dotted underline-offset-2 hover:text-blue-800"
+                              >
+                                Alter attendance
+                              </button>
+                            )}
+                          </div>
                         </td>
                       )}
                       {isColumnVisible('lateArrivals') && (
@@ -2415,7 +2550,7 @@ export default function PayrollPage() {
                             const value = absentDaysRaw != null ? Number(absentDaysRaw) : fallback;
                             if (!Number.isFinite(value)) return '0';
                             const display = Number.isInteger(value) ? String(value) : value.toFixed(2);
-                            if (value <= 0) return display;
+                            if (value <= 0 && !subscriptionAllowed) return display;
                             return (
                               <button
                                 type="button"
@@ -2423,10 +2558,14 @@ export default function PayrollPage() {
                                   e.stopPropagation();
                                   void openAbsentModal(row);
                                 }}
-                                className="font-semibold text-rose-700 underline decoration-dotted underline-offset-2 hover:text-rose-800"
-                                title="View absent day details"
+                                className={`font-semibold underline decoration-dotted underline-offset-2 ${
+                                  value > 0
+                                    ? 'text-rose-700 hover:text-rose-800'
+                                    : 'text-blue-700 hover:text-blue-800'
+                                }`}
+                                title="Alter attendance — mark absent/leave days as on duty (OD)"
                               >
-                                {display}
+                                {value > 0 ? display : 'Alter'}
                               </button>
                             );
                           })()}
@@ -2968,6 +3107,104 @@ export default function PayrollPage() {
                 className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {manualAdvanceSaving ? 'Saving…' : 'Save & deduct'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {attendanceAlterModal.open && attendanceAlterModal.row && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Alter attendance</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {attendanceAlterModal.row.employee_name} ({attendanceAlterModal.row.employee_code})
+              {' — '}
+              {attendanceAlterModal.periodLabel}
+            </p>
+            {attendanceAlterModal.summary && (
+              <p className="mt-2 text-[11px] text-slate-500">
+                Present: {Number(attendanceAlterModal.summary.presentDays || 0).toFixed(2)} days
+                {' · '}
+                Absent (unpaid): {Number(attendanceAlterModal.summary.absenceDays || 0).toFixed(2)} days
+                {' · '}
+                Paid leave used: {Number(attendanceAlterModal.summary.paidLeaveUsed || 0).toFixed(2)} days
+              </p>
+            )}
+            <p className="mt-1 text-[11px] text-slate-500">
+              Mark an absent or leave day as <strong>On duty (OD)</strong> when the employee worked off-site.
+              Payroll recalculates automatically.
+            </p>
+            <div className="mt-3 max-h-[360px] overflow-y-auto rounded-lg border border-slate-200">
+              {attendanceAlterModal.days.length === 0 ? (
+                <p className="px-3 py-6 text-center text-xs text-slate-500">
+                  No absent, half-day, or on-duty days in this period.
+                </p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-50">
+                    <tr className="text-left text-slate-600">
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2 text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {attendanceAlterModal.days.map((day) => (
+                      <tr key={day.date} className="border-t border-slate-100">
+                        <td className="px-3 py-2 font-medium text-slate-800">
+                          {formatDateShort(day.date)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={
+                              day.status === 'on_duty'
+                                ? 'font-medium text-emerald-700'
+                                : day.status === 'half_day'
+                                  ? 'text-amber-700'
+                                  : 'text-rose-700'
+                            }
+                          >
+                            {attendanceStatusLabel(day.status)}
+                          </span>
+                          {day.override_note && (
+                            <span className="block text-[10px] text-slate-400">{day.override_note}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {day.status === 'on_duty' ? (
+                            <button
+                              type="button"
+                              disabled={attendanceAlterModal.savingDate === day.date}
+                              onClick={() => void applyAttendanceOverride(day.date, 'clear')}
+                              className="rounded border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Undo OD'}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={attendanceAlterModal.savingDate === day.date}
+                              onClick={() => void applyAttendanceOverride(day.date, 'set_on_duty')}
+                              className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                            >
+                              {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Mark OD'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={closeAttendanceAlterModal}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -11,7 +11,14 @@ const {
   setWeeklyPayrollAdvanceDeduction,
   setMonthlyPayrollManualAdvance,
   setWeeklyPayrollManualAdvance,
+  recalculateMonthlyPayrollFromAttendance,
+  recalculateWeeklyPayrollFromAttendance,
 } = require('../services/payrollService');
+const {
+  upsertDayOverride,
+  removeDayOverride,
+} = require('../services/attendanceOverrideService');
+const { pool } = require('../config/database');
 const auditService = require('../services/auditService');
 const { resolveBranchScope } = require('../utils/branchScope');
 
@@ -587,6 +594,136 @@ async function updateWeeklyManualAdvance(req, res, next) {
   }
 }
 
+/**
+ * POST /api/payroll/:id/attendance-override
+ * Body: { date, action: 'set_on_duty' | 'clear', note? }
+ */
+async function setPayrollAttendanceOverride(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const payrollId = Number(req.params.id);
+    const { date, action, note } = req.body || {};
+
+    if (!companyId || !payrollId || !date || !action) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token), payroll id, date, and action are required',
+      });
+    }
+
+    const payrollResult = await pool.query(
+      `SELECT id, employee_id, year, month FROM payroll_records WHERE company_id = $1 AND id = $2`,
+      [companyId, payrollId]
+    );
+    if (payrollResult.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Payroll record not found' });
+    }
+    const payroll = payrollResult.rows[0];
+
+    if (action === 'set_on_duty') {
+      await upsertDayOverride(
+        companyId,
+        {
+          employee_id: payroll.employee_id,
+          date,
+          override_status: 'on_duty',
+          note,
+        },
+        req.user?.user_id,
+        req.allowedBranchIds
+      );
+    } else if (action === 'clear') {
+      await removeDayOverride(companyId, payroll.employee_id, date, req.allowedBranchIds);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'action must be "set_on_duty" or "clear"',
+      });
+    }
+
+    const result = await recalculateMonthlyPayrollFromAttendance(companyId, payrollId, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.attendance_override', 'payroll', payrollId, {
+        employee_id: payroll.employee_id,
+        date,
+        action,
+      })
+      .catch(() => {});
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/payroll/weekly/:id/attendance-override
+ * Body: { date, action: 'set_on_duty' | 'clear', note? }
+ */
+async function setWeeklyPayrollAttendanceOverride(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const payrollId = Number(req.params.id);
+    const { date, action, note } = req.body || {};
+
+    if (!companyId || !payrollId || !date || !action) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token), payroll id, date, and action are required',
+      });
+    }
+
+    const payrollResult = await pool.query(
+      `SELECT id, employee_id, week_start_date FROM weekly_payroll_records WHERE company_id = $1 AND id = $2`,
+      [companyId, payrollId]
+    );
+    if (payrollResult.rowCount === 0) {
+      return res.status(404).json({ success: false, message: 'Payroll record not found' });
+    }
+    const payroll = payrollResult.rows[0];
+
+    if (action === 'set_on_duty') {
+      await upsertDayOverride(
+        companyId,
+        {
+          employee_id: payroll.employee_id,
+          date,
+          override_status: 'on_duty',
+          note,
+        },
+        req.user?.user_id,
+        req.allowedBranchIds
+      );
+    } else if (action === 'clear') {
+      await removeDayOverride(companyId, payroll.employee_id, date, req.allowedBranchIds);
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'action must be "set_on_duty" or "clear"',
+      });
+    }
+
+    const result = await recalculateWeeklyPayrollFromAttendance(companyId, payrollId, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.attendance_override_weekly', 'payroll', payrollId, {
+        employee_id: payroll.employee_id,
+        date,
+        action,
+      })
+      .catch(() => {});
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   list,
   generate,
@@ -600,6 +737,8 @@ module.exports = {
   updateWeeklyAdvanceDeduction,
   updateManualAdvance,
   updateWeeklyManualAdvance,
+  setPayrollAttendanceOverride,
+  setWeeklyPayrollAttendanceOverride,
 };
 
 

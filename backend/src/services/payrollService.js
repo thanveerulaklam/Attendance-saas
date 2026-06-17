@@ -9,6 +9,7 @@ const {
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted, revertRepaymentDeducted, ensureDueRepaymentsForPayrollMonth } = require('./advanceLoanService');
+const { loadOverridesMap } = require('./attendanceOverrideService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
 const { resolveShiftIdForEmployeeOnDate } = require('./shiftAssignmentService');
 const {
@@ -94,6 +95,106 @@ function effectivePaidLeaveDaysAllowed(shiftPaidLeaveDays, rawAbsenceDays, forfe
     allowed = 0;
   }
   return allowed;
+}
+
+function recalculatePaidLeaveFromRawAbsence(summary, shift, plForfeitIfAbsenceGt, disablePaidLeave = false) {
+  if (disablePaidLeave) {
+    summary.paidLeaveDaysAllowed = 0;
+    summary.paidLeaveUsed = 0;
+    summary.absenceDays = Number(summary.rawAbsenceDays || 0);
+    return;
+  }
+
+  if (summary.attendanceMode === 'hours_based') {
+    const required = Number(summary.requiredHoursPerDay || 8);
+    const rawAbsenceDaysByHours = required > 0 ? Number(summary.rawAbsenceHours || 0) / required : 0;
+    summary.rawAbsenceDays = rawAbsenceDaysByHours;
+    const paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+      shift.paidLeaveDays,
+      rawAbsenceDaysByHours,
+      plForfeitIfAbsenceGt
+    );
+    summary.paidLeaveDaysAllowed = paidLeaveDaysAllowed;
+    const paidLeaveHoursAllowed = Math.max(0, paidLeaveDaysAllowed * required);
+    const paidLeaveHoursUsed = Math.min(paidLeaveHoursAllowed, Number(summary.rawAbsenceHours || 0));
+    summary.paidLeaveUsed = required > 0 ? paidLeaveHoursUsed / required : 0;
+    summary.absenceDays =
+      required > 0
+        ? Math.max(0, Number(summary.rawAbsenceHours || 0) - paidLeaveHoursUsed) / required
+        : 0;
+  } else {
+    const paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
+      shift.paidLeaveDays,
+      summary.rawAbsenceDays,
+      plForfeitIfAbsenceGt
+    );
+    summary.paidLeaveDaysAllowed = paidLeaveDaysAllowed;
+    summary.paidLeaveUsed = Math.min(paidLeaveDaysAllowed, Number(summary.rawAbsenceDays || 0));
+    summary.absenceDays = Math.max(0, Number(summary.rawAbsenceDays || 0) - summary.paidLeaveUsed);
+  }
+
+  const requiredHours =
+    summary.attendanceMode === 'hours_based' ? Number(summary.requiredHoursPerDay || 8) : 24;
+  const unusedPaidLeaveDaysRaw = Math.max(
+    0,
+    Number(summary.paidLeaveDaysAllowed || 0) - Number(summary.paidLeaveUsed || 0)
+  );
+  const unusedPaidLeaveHoursRaw = Math.max(0, unusedPaidLeaveDaysRaw * requiredHours);
+  summary.unusedPaidLeaveDays = Number(unusedPaidLeaveDaysRaw.toFixed(2));
+  summary.unusedPaidLeaveHours = Number(unusedPaidLeaveHoursRaw.toFixed(2));
+  summary.unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
+}
+
+function applyAttendanceOverridesToSummary(
+  summary,
+  overridesMap,
+  holidaySet,
+  shift,
+  plForfeitIfAbsenceGt,
+  options = {}
+) {
+  const { disablePaidLeave = false } = options;
+  if (!overridesMap?.size || !summary?.dayDetails) return summary;
+
+  let deltaPresentWorking = 0;
+
+  for (const detail of summary.dayDetails) {
+    const ov = overridesMap.get(detail.date);
+    if (!ov || ov.override_status !== 'on_duty') continue;
+    if (holidaySet?.has(detail.date)) continue;
+    if (detail.status === 'on_duty' || detail.status === 'present') continue;
+
+    if (detail.status === 'absent') {
+      deltaPresentWorking += 1;
+      detail.status = 'on_duty';
+      detail.override_note = ov.note || null;
+    } else if (detail.status === 'half_day') {
+      deltaPresentWorking += 0.5;
+      detail.status = 'on_duty';
+      detail.override_note = ov.note || null;
+    }
+  }
+
+  if (deltaPresentWorking <= 0) return summary;
+
+  summary.presentWorkingDays = Number(summary.presentWorkingDays || 0) + deltaPresentWorking;
+  summary.presentDays = Number(summary.presentDays || 0) + deltaPresentWorking;
+
+  if (summary.attendanceMode === 'hours_based') {
+    const required = Number(summary.requiredHoursPerDay || 8);
+    summary.rawAbsenceHours = Math.max(
+      0,
+      Number(summary.rawAbsenceHours || 0) - deltaPresentWorking * required
+    );
+  } else {
+    const effectiveWorkingDays = Number(
+      summary.effectiveWorkingDays != null ? summary.effectiveWorkingDays : summary.workingDays || 0
+    );
+    summary.rawAbsenceDays = Math.max(0, effectiveWorkingDays - summary.presentWorkingDays);
+  }
+
+  recalculatePaidLeaveFromRawAbsence(summary, shift, plForfeitIfAbsenceGt, disablePaidLeave);
+  return summary;
 }
 
 function rowToShiftConfig(row) {
@@ -598,11 +699,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const overtimeHoursFinal = overtimeHours;
       const lateMinutes = totalLateMs / (60 * 1000);
 
-      return {
+      const hoursBasedSummary = {
         daysInMonth,
         workingDaysUpToDate: lastDateToConsider,
         workingDays,
         workingDaysInMonth,
+        effectiveWorkingDays,
         presentDays,
         presentWorkingDays,
         overtimeHours: overtimeHoursFinal,
@@ -622,11 +724,26 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         unusedPaidLeaveHours,
         unusedPaidLeaveMinutes,
         rawAbsenceDays,
+        rawAbsenceHours,
         absenceDays,
         attendanceMode: 'hours_based',
-        requiredHoursPerDay: required,
+        requiredHoursPerDay: defaultRequired,
         dayDetails,
       };
+      const overridesMap = await loadOverridesMap(
+        client,
+        companyId,
+        employeeId,
+        monthFirstStr,
+        monthLastStr
+      );
+      return applyAttendanceOverridesToSummary(
+        hoursBasedSummary,
+        overridesMap,
+        holidaySet,
+        shift,
+        plForfeitIfAbsenceGt
+      );
     }
 
     for (const [dayKey, dayLogs] of logsByDay.entries()) {
@@ -790,11 +907,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       }
     }
 
-    return {
+    const shiftBasedSummary = {
       daysInMonth,
       workingDaysUpToDate: lastDateToConsider,
       workingDays,
       workingDaysInMonth,
+      effectiveWorkingDays,
       presentDays,
       presentWorkingDays,
       overtimeHours,
@@ -819,6 +937,20 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       requiredHoursPerDay: shift.requiredHoursPerDay || 8,
       dayDetails,
     };
+    const overridesMap = await loadOverridesMap(
+      client,
+      companyId,
+      employeeId,
+      monthFirstStr,
+      monthLastStr
+    );
+    return applyAttendanceOverridesToSummary(
+      shiftBasedSummary,
+      overridesMap,
+      holidaySet,
+      shift,
+      plForfeitIfAbsenceGt
+    );
   } finally {
     client.release();
   }
@@ -1193,10 +1325,11 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       return diffDays + 1;
     })();
 
-    return {
+    const rangeSummary = {
       daysInRange,
       workingDaysUpToDate: lastDateToConsider,
       workingDays,
+      effectiveWorkingDays,
       presentDays,
       presentWorkingDays,
       overtimeHours,
@@ -1216,11 +1349,27 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       unusedPaidLeaveHours,
       unusedPaidLeaveMinutes,
       rawAbsenceDays,
+      rawAbsenceHours,
       absenceDays,
       attendanceMode: shift.attendanceMode || 'day_based',
       requiredHoursPerDay: shift.requiredHoursPerDay || 8,
       dayDetails,
     };
+    const overridesMap = await loadOverridesMap(
+      client,
+      companyId,
+      employeeId,
+      startStr,
+      endStr
+    );
+    return applyAttendanceOverridesToSummary(
+      rangeSummary,
+      overridesMap,
+      holidaySet,
+      shift,
+      plForfeitIfAbsenceGtRange,
+      { disablePaidLeave }
+    );
   } finally {
     client.release();
   }
@@ -2520,6 +2669,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       attendanceMode: summary.attendanceMode,
       requiredHoursPerDay: summary.requiredHoursPerDay,
       treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,
+      paidLeaveDaysAllowed: summary.paidLeaveDaysAllowed,
+      paidLeaveUsed: summary.paidLeaveUsed,
+      rawAbsenceDays: summary.rawAbsenceDays,
       dayDetails: summary.dayDetails,
       payrollFrozenToRecord: payrollRecordSnap != null,
       payrollGeneratedAt: payrollGeneratedAtIso,
@@ -3206,6 +3358,100 @@ async function setWeeklyPayrollManualAdvance(companyId, payrollId, amount, note,
   }
 }
 
+/**
+ * Re-run payroll math from attendance (including day overrides) while preserving advance + incentive.
+ */
+async function recalculateMonthlyPayrollFromAttendance(companyId, payrollId, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const existingResult = await pool.query(
+    `SELECT * FROM payroll_records WHERE company_id = $1 AND id = $2`,
+    [companyId, Number(payrollId)]
+  );
+  if (existingResult.rowCount === 0) {
+    throw new AppError('Payroll record not found', 404);
+  }
+  const existing = existingResult.rows[0];
+  const preservedAdvance = Number(existing.salary_advance || 0);
+  const preservedIncentive = Number(existing.no_leave_incentive || 0);
+
+  const generated = await generateMonthlyPayroll(
+    companyId,
+    existing.employee_id,
+    existing.year,
+    existing.month,
+    {
+      treatHolidayAdjacentAbsenceAsWorking: existing.treat_holiday_adjacent_absence_as_working === true,
+      apply_advance_repayments: false,
+      noLeaveIncentive: preservedIncentive,
+      encashUnusedPaidLeave: Number(existing.paid_leave_encashment_amount || 0) > 0,
+      allowedBranchIds,
+    }
+  );
+
+  const payroll = generated.payroll;
+  const newNet =
+    Number(payroll.gross_salary || 0) -
+    Number(payroll.deductions || 0) -
+    preservedAdvance +
+    preservedIncentive;
+
+  const updateResult = await pool.query(
+    `UPDATE payroll_records
+     SET salary_advance = $3,
+         no_leave_incentive = $4,
+         net_salary = $5
+     WHERE company_id = $1 AND id = $2
+     RETURNING *`,
+    [companyId, Number(payrollId), preservedAdvance, preservedIncentive, newNet]
+  );
+
+  return { summary: generated.summary, payroll: updateResult.rows[0] };
+}
+
+async function recalculateWeeklyPayrollFromAttendance(companyId, payrollId, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const existingResult = await pool.query(
+    `SELECT * FROM weekly_payroll_records WHERE company_id = $1 AND id = $2`,
+    [companyId, Number(payrollId)]
+  );
+  if (existingResult.rowCount === 0) {
+    throw new AppError('Payroll record not found', 404);
+  }
+  const existing = existingResult.rows[0];
+  const preservedAdvance = Number(existing.salary_advance || 0);
+  const preservedIncentive = Number(existing.no_leave_incentive || 0);
+
+  const generated = await generateWeeklyPayroll(
+    companyId,
+    existing.employee_id,
+    existing.week_start_date,
+    {
+      apply_advance_repayments: false,
+      apply_salary_advances: preservedAdvance > 0,
+      allowedBranchIds,
+    }
+  );
+
+  const payroll = generated.payroll;
+  const newNet =
+    Number(payroll.gross_salary || 0) -
+    Number(payroll.deductions || 0) -
+    preservedAdvance +
+    preservedIncentive;
+
+  const updateResult = await pool.query(
+    `UPDATE weekly_payroll_records
+     SET salary_advance = $3,
+         no_leave_incentive = $4,
+         net_salary = $5
+     WHERE company_id = $1 AND id = $2
+     RETURNING *`,
+    [companyId, Number(payrollId), preservedAdvance, preservedIncentive, newNet]
+  );
+
+  return { summary: generated.summary, payroll: updateResult.rows[0] };
+}
+
 module.exports = {
   getAdjacentHolidayAbsentKeys,
   getAttendanceSummary,
@@ -3222,5 +3468,7 @@ module.exports = {
   setWeeklyPayrollAdvanceDeduction,
   setMonthlyPayrollManualAdvance,
   setWeeklyPayrollManualAdvance,
+  recalculateMonthlyPayrollFromAttendance,
+  recalculateWeeklyPayrollFromAttendance,
 };
 
