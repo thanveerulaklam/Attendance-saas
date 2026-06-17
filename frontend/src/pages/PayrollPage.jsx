@@ -106,21 +106,24 @@ function canAlterAttendanceDay(status) {
   return status === 'absent' || status === 'half_day' || status === 'on_duty';
 }
 
-function formatPunchDevice(deviceId) {
-  if (!deviceId) return '';
-  if (deviceId === 'manual') return 'Manual';
-  return String(deviceId);
-}
-
 function formatPunchSummary(day) {
   const punches = Array.isArray(day?.punches) ? day.punches : [];
   if (punches.length === 0) {
     if (day?.firstInTime) {
-      return `IN ${formatTimeAmPm(day.firstInTime)}`;
+      const parts = [`IN ${formatTimeAmPm(day.firstInTime)}`];
+      if (day.lastOutTime) parts.push(`OUT ${formatTimeAmPm(day.lastOutTime)}`);
+      return parts.join(' · ');
     }
     return null;
   }
-  return punches;
+  const parts = punches.map((p) =>
+    `${p.punch_type === 'in' ? 'IN' : 'OUT'} ${formatTimeAmPm(p.punch_time)}`
+  );
+  if (parts.length <= 4) {
+    return parts.join(' · ');
+  }
+  const mid = Math.ceil(parts.length / 2);
+  return { line1: parts.slice(0, mid).join(' · '), line2: parts.slice(mid).join(' · ') };
 }
 
 function formatPermissionUsedHours(minutes) {
@@ -3239,38 +3242,13 @@ export default function PayrollPage() {
                           )}
                         </td>
                         <td className="px-3 py-2 align-top">
-                          {Array.isArray(punchSummary) && punchSummary.length > 0 ? (
-                            <div className="space-y-1">
-                              {punchSummary.map((punch, idx) => (
-                                <div
-                                  key={`${day.date}-${idx}`}
-                                  className="flex flex-wrap items-center gap-x-1.5 text-[10px] text-slate-700"
-                                >
-                                  <span
-                                    className={`inline-flex rounded px-1 py-0.5 font-semibold uppercase ${
-                                      punch.punch_type === 'in'
-                                        ? 'bg-emerald-50 text-emerald-800'
-                                        : 'bg-slate-100 text-slate-700'
-                                    }`}
-                                  >
-                                    {punch.punch_type}
-                                  </span>
-                                  <span>{formatTimeAmPm(punch.punch_time)}</span>
-                                  {punch.device_id && (
-                                    <span className="text-slate-400">
-                                      · {formatPunchDevice(punch.device_id)}
-                                    </span>
-                                  )}
-                                </div>
-                              ))}
-                              {day.lastOutTime && (
-                                <div className="text-[10px] text-slate-400">
-                                  Last out {formatTimeAmPm(day.lastOutTime)}
-                                </div>
-                              )}
+                          {punchSummary && typeof punchSummary === 'object' ? (
+                            <div className="text-[10px] leading-snug text-slate-700">
+                              <div>{punchSummary.line1}</div>
+                              <div>{punchSummary.line2}</div>
                             </div>
-                          ) : typeof punchSummary === 'string' ? (
-                            <span className="text-[10px] text-slate-600">{punchSummary}</span>
+                          ) : punchSummary ? (
+                            <span className="text-[10px] leading-snug text-slate-700">{punchSummary}</span>
                           ) : (
                             <span className="text-[10px] text-slate-400">No punches</span>
                           )}
