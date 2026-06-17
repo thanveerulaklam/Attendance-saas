@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { createPdf, savePdf } from '../../utils/pdfGenerator';
+import { downloadCompactPayslipPdf } from '../../utils/payslipPdf';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../../utils/whatsapp';
 
 function formatMoney(n) {
@@ -33,12 +33,6 @@ function parseDateYMD(value) {
   if (Number.isNaN(year) || Number.isNaN(monthIndex) || Number.isNaN(day)) return null;
   if (monthIndex < 0 || monthIndex > 11) return null;
   return { year, monthIndex, day };
-}
-
-function formatJoinDate(value) {
-  const d = parseDateYMD(value);
-  if (!d) return '—';
-  return `${d.day} ${MONTH_SHORT[d.monthIndex]} ${d.year}`;
 }
 
 function formatHours(value) {
@@ -336,167 +330,16 @@ export default function PayslipModal({
     window.print();
   };
 
-  const handleDownloadPdf = async () => {
-    const doc = createPdf({ orientation: 'p' });
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-    const margin = 30;
-    const frameLeft = margin;
-    const frameRight = pageWidth - margin;
-    const labelX = frameLeft + 8;
-    const valueX = frameRight - 10;
-    const contentWidth = frameRight - frameLeft - 16;
-    let y = 40;
-    const lineGap = 11;
-    const sectionGap = 14;
-    const b = breakdown.breakdown || {};
-    const att = breakdown.attendance || {};
-    const isHoursBasedPayrollPdf =
-      String(att.attendanceMode || '').toLowerCase() === 'hours_based';
-
-    const writeLeft = (text, options = {}) => {
-      doc.text(String(text), labelX, y, options);
-      y += lineGap;
-    };
-
-    const writeKv = (label, value, color = [15, 23, 42]) => {
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(71, 85, 105);
-      doc.text(String(label), labelX, y);
-      doc.setFont(undefined, 'bold');
-      doc.setTextColor(...color);
-      doc.text(String(value), valueX, y, { align: 'right' });
-      y += lineGap;
-    };
-
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(frameLeft, 24, frameRight - frameLeft, pageHeight - 48, 4, 4);
-
-    doc.setFontSize(15);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(15, 23, 42);
-    doc.text(String(company?.name || 'Company'), labelX, y);
-    doc.setFontSize(9);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(100, 116, 139);
-    const companyLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
-    const companyLines = doc.splitTextToSize(companyLine || '—', contentWidth);
-    y += 12;
-    doc.text(companyLines, labelX, y);
-    y += companyLines.length * 10;
-
-    doc.setDrawColor(226, 232, 240);
-    doc.line(labelX, y, valueX, y);
-    y += 10;
-
-    doc.setFontSize(12);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(30, 64, 175);
-    doc.text('PAYSLIP', labelX, y);
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text(`Period: ${periodLabel}`, valueX, y, { align: 'right' });
-    y += sectionGap;
-
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(51, 65, 85);
-    writeLeft('EMPLOYEE DETAILS');
-    doc.setFontSize(9);
-    writeKv('Employee Name', payrollRow.employee_name || '—');
-    writeKv('Employee Code', payrollRow.employee_code || '—');
-    writeKv('Basic Salary', formatInrWithSymbol(attendanceDetails?.basic_salary));
-    writeKv('Department', attendanceDetails?.department || '—');
-    writeKv('Date of Joining', formatJoinDate(attendanceDetails?.join_date));
-    writeKv('Shift', attendanceDetails?.shift_name || '—');
-    y += 4;
-
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(51, 65, 85);
-    writeLeft('ATTENDANCE');
-    if (isHoursBasedPayrollPdf) {
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(37, 99, 235);
-      const hoursModeNote = doc.splitTextToSize(
-        'Hours-based payroll mode: salary is prorated by worked hours/required hours per day. Full-day and half-day buckets are not used for payroll calculation.',
-        contentWidth
-      );
-      doc.text(hoursModeNote, labelX, y);
-      y += hoursModeNote.length * 9;
-    }
-    doc.setFontSize(9);
-    writeKv('Working Days', String(att.workingDays ?? '—'));
-    writeKv('Present', `${formatDayCount(att.presentDays)} days`);
-    writeKv('Salary Deduction Absence', `${formatDayCount(att.absenceDays)} days`, [190, 24, 93]);
-    doc.setFontSize(8);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(100, 116, 139);
-    const payrollAbsentHelp = doc.splitTextToSize(
-      'Salary deduction absence = full absent days + (half days x 0.5).',
-      contentWidth
-    );
-    doc.text(payrollAbsentHelp, labelX, y);
-    y += payrollAbsentHelp.length * 8;
-    doc.setFontSize(9);
-    writeKv('Late', `${effectiveLateDetails.length} times`, [180, 83, 9]);
-    writeKv('Overtime', `${formatHours(att.overtimeHours)} hrs`, [5, 150, 105]);
-    writeKv('Unused Paid Leave', `${formatHours(b.unusedPaidLeaveDays)} days`, [22, 101, 52]);
-    y += 4;
-
-    doc.setFontSize(10);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(51, 65, 85);
-    writeLeft('SALARY');
-    doc.setFontSize(9);
-    writeKv('Gross Salary', `INR ${formatMoney(b.grossSalary)}`);
-    writeKv('Paid Leave Encashment', `INR ${formatMoney(b.paidLeaveEncashmentAmount)}`, [5, 150, 105]);
-    writeKv('Permission Offset', `INR ${formatMoney(b.permissionOffsetAmount)}`);
-    writeKv('Late Deduction', `INR ${formatMoney(b.lateDeduction)}`);
-    writeKv('Lunch Deduction', `INR ${formatMoney(b.lunchOverDeduction)}`);
-    writeKv('Advance Repayment', `INR ${formatMoney(b.salaryAdvance)}`);
-    writeKv('Absent Deduction', `INR ${formatMoney(b.absenceDeduction)}`);
-    if (absentDeductFormula) {
-      doc.setFontSize(8);
-      doc.setFont(undefined, 'normal');
-      doc.setTextColor(100, 116, 139);
-      const absentCalcLines = doc.splitTextToSize(
-        absentDeductFormula,
-        contentWidth
-      );
-      doc.text(absentCalcLines, labelX, y);
-      y += absentCalcLines.length * 8;
-      doc.setFontSize(9);
-    }
-    writeKv('ESI Deduction', `INR ${formatMoney(b.esiDeduction)}`);
-    writeKv('PF Deduction', `INR ${formatMoney(b.pfDeduction)}`);
-    writeKv('Total Deductions', `INR ${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`, [180, 83, 9]);
-
-    y += 2;
-    doc.setDrawColor(226, 232, 240);
-    doc.line(labelX, y, valueX, y);
-    y += 11;
-    doc.setFontSize(12);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(5, 150, 105);
-    doc.text(`NET SALARY: INR ${formatMoney(b.netSalary)}`, valueX, y, { align: 'right' });
-
-    const footerY = pageHeight - 18;
-    doc.setFontSize(8);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(148, 163, 184);
-    doc.text('Generated by PunchPay | punchpay.in', pageWidth / 2, footerY, { align: 'center' });
-
-    const safeName = `${payrollRow.employee_name || 'Employee'}`.replace(/\s+/g, '');
-    const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
-    let filename = `PunchPay_${safeName}_${periodLabel.replace(/\s+/g, '').replace(/[—–-]/g, '_')}.pdf`;
-    if (payrollRow.year && payrollRow.month) {
-      const monthStr = d.toLocaleString('default', { month: 'short', year: 'numeric' }).replace(/\s+/g, '');
-      filename = `PunchPay_${safeName}_${monthStr}.pdf`;
-    }
-    savePdf(doc, filename);
+  const handleDownloadPdf = () => {
+    downloadCompactPayslipPdf({
+      company,
+      employeeName: payrollRow.employee_name,
+      employeeCode: payrollRow.employee_code,
+      periodLabel,
+      breakdown,
+      attendanceDetails,
+      payrollRow,
+    });
   };
 
   const handleSendPayslipWhatsApp = () => {
@@ -572,10 +415,6 @@ export default function PayslipModal({
               </div>
             </div>
             <div className="space-y-1.5">
-              <div className="flex justify-between">
-                <span className="font-medium text-slate-600">Date of Joining</span>
-                <span>{formatJoinDate(attendanceDetails?.join_date)}</span>
-              </div>
               <div className="flex justify-between">
                 <span className="font-medium text-slate-600">Shift</span>
                 <span>{attendanceDetails?.shift_name || '—'}</span>

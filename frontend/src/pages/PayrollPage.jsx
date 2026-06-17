@@ -3,6 +3,7 @@ import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
+import { addCompactPayslipPage } from '../utils/payslipPdf';
 
 const PAGE_SIZE = 50;
 const PAYROLL_COLUMN_STORAGE_KEY = 'payroll.visibleColumns.v1';
@@ -478,144 +479,16 @@ function formatPayslipPeriodLabel(row, payrollMode) {
 }
 
 function addPayslipPage(doc, { company, row, payrollMode, breakdown, attendanceMeta, isFirstPage }) {
-  if (!isFirstPage) doc.addPage();
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const pageHeight = doc.internal.pageSize.getHeight();
-  const margin = 28;
-  const frameLeft = margin;
-  const frameRight = pageWidth - margin;
-  const labelX = frameLeft + 8;
-  const valueX = frameRight - 10;
-  const contentWidth = frameRight - frameLeft - 16;
-  let y = 32;
-  const lineGap = 11;
-  const sectionGap = 14;
-  const b = breakdown?.breakdown || {};
-  const att = breakdown?.attendance || {};
-  const isHoursBasedPayroll = String(att?.attendanceMode || '').toLowerCase() === 'hours_based';
   const periodLabel = formatPayslipPeriodLabel(row, payrollMode);
-
-  const writeLeft = (text, options = {}) => {
-    doc.text(String(text), labelX, y, options);
-    y += lineGap;
-  };
-
-  const writeKv = (label, value, color = [15, 23, 42]) => {
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(71, 85, 105);
-    doc.text(String(label), labelX, y);
-    doc.setFont(undefined, 'bold');
-    doc.setTextColor(...color);
-    doc.text(String(value ?? '—'), valueX, y, { align: 'right' });
-    y += lineGap;
-  };
-
-  doc.setDrawColor(226, 232, 240);
-  doc.roundedRect(frameLeft, 20, frameRight - frameLeft, pageHeight - 40, 4, 4);
-
-  doc.setFontSize(15);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(String(company?.name || 'Company'), labelX, y);
-  doc.setFontSize(9);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(100, 116, 139);
-  const addressLine = [company?.address, company?.phone, company?.email].filter(Boolean).join(' | ');
-  const companyLines = doc.splitTextToSize(addressLine || '—', contentWidth);
-  y += 12;
-  doc.text(companyLines, labelX, y);
-  y += companyLines.length * 10;
-
-  doc.setDrawColor(226, 232, 240);
-  doc.line(labelX, y, valueX, y);
-  y += 10;
-
-  doc.setFontSize(12);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(30, 64, 175);
-  doc.text('PAYSLIP', labelX, y);
-  doc.setFontSize(10);
-  doc.setFont(undefined, 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Period: ${periodLabel}`, valueX, y, { align: 'right' });
-  y += sectionGap;
-
-  doc.setFontSize(10);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(51, 65, 85);
-  writeLeft('EMPLOYEE DETAILS');
-  doc.setFontSize(9);
-  writeKv('Employee Name', row.employee_name || '—');
-  writeKv('Employee Code', row.employee_code || '—');
-  writeKv('Department', attendanceMeta?.department || '—');
-  writeKv(
-    'Date of Joining',
-    attendanceMeta?.join_date
-      ? new Date(attendanceMeta.join_date).toLocaleDateString('en-IN')
-      : '—'
-  );
-  writeKv('Shift', attendanceMeta?.shift_name || '—');
-  writeKv('Payroll Type', payrollMode === 'weekly' ? 'Weekly' : 'Monthly');
-  y += 4;
-
-  doc.setFontSize(10);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(51, 65, 85);
-  writeLeft('ATTENDANCE');
-  if (isHoursBasedPayroll) {
-    doc.setFontSize(8);
-    doc.setFont(undefined, 'normal');
-    doc.setTextColor(37, 99, 235);
-    const hoursModeNote = doc.splitTextToSize(
-      'Hours-based payroll mode: salary is prorated by worked hours/required hours per day. Full-day and half-day buckets are not used for payroll calculation.',
-      contentWidth
-    );
-    doc.text(hoursModeNote, labelX, y);
-    y += hoursModeNote.length * 9;
-  }
-  doc.setFontSize(9);
-  writeKv('Working Days', `${att.workingDays ?? '—'} days`);
-  writeKv('Present', `${att.presentDays ?? '—'} days`);
-  writeKv('Absent', `${att.absenceDays ?? '—'} days`, [190, 24, 93]);
-  writeKv('Late', `${att.lateDays ?? 0} times`, [180, 83, 9]);
-  writeKv('Overtime', `${Number(att.overtimeHours || 0)} hrs`, [5, 150, 105]);
-  writeKv('Unused Paid Leave', `${Number(b.unusedPaidLeaveDays || 0)} days`, [22, 101, 52]);
-  y += 4;
-
-  doc.setFontSize(10);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(51, 65, 85);
-  writeLeft('SALARY');
-  doc.setFontSize(9);
-  writeKv('Gross Salary', `INR ${formatMoney(b.grossSalary)}`);
-  writeKv('Paid Leave Encashment', `INR ${formatMoney(b.paidLeaveEncashmentAmount)}`, [5, 150, 105]);
-  writeKv('Permission Offset', `INR ${formatMoney(b.permissionOffsetAmount)}`);
-  writeKv('Late Deduction', `INR ${formatMoney(b.lateDeduction)}`);
-  writeKv('Lunch Deduction', `INR ${formatMoney(b.lunchOverDeduction)}`);
-  writeKv('Advance Repayment', `INR ${formatMoney(b.salaryAdvance)}`);
-  writeKv('Absent Deduction', `INR ${formatMoney(b.absenceDeduction)}`);
-  writeKv('ESI Deduction', `INR ${formatMoney(b.esiDeduction)}`);
-  writeKv('PF Deduction', `INR ${formatMoney(b.pfDeduction)}`);
-  writeKv(
-    'Total Deductions',
-    `INR ${formatMoney((b.totalDeductions || 0) + (b.salaryAdvance || 0))}`,
-    [180, 83, 9]
-  );
-
-  y += 2;
-  doc.setDrawColor(226, 232, 240);
-  doc.line(labelX, y, valueX, y);
-  y += 11;
-  doc.setFontSize(12);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(5, 150, 105);
-  doc.text(`NET SALARY: INR ${formatMoney(b.netSalary)}`, valueX, y, { align: 'right' });
-
-  const footerY = pageHeight - 18;
-  doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text('Generated by PunchPay | punchpay.in', pageWidth / 2, footerY, { align: 'center' });
+  addCompactPayslipPage(doc, {
+    company,
+    employeeName: row.employee_name,
+    employeeCode: row.employee_code,
+    periodLabel,
+    breakdown,
+    attendanceDetails: attendanceMeta,
+    isFirstPage,
+  });
 }
 
 export default function PayrollPage() {
