@@ -26,6 +26,32 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
 }));
 const PAYROLL_MODAL_PAGE_SIZE = 25;
 
+const REPORT_CSV_SLUG = {
+  attendance: 'attendance',
+  payroll: 'payroll',
+  overtime: 'overtime',
+  esi: 'esi',
+  pf: 'pf',
+  salaryPayments: 'salary-payments',
+};
+
+function getReportTitle(type) {
+  switch (type) {
+    case 'esi':
+      return 'ESI Statement';
+    case 'pf':
+      return 'PF Statement';
+    case 'salaryPayments':
+      return 'Salary Payment Ledger';
+    default:
+      return `${type.charAt(0).toUpperCase()}${type.slice(1)} Report`;
+  }
+}
+
+function getReportFileSlug(type) {
+  return REPORT_CSV_SLUG[type] || type;
+}
+
 function currentYear() {
   return new Date().getFullYear();
 }
@@ -693,26 +719,13 @@ export default function ReportsPage() {
   }, [detailsModal, payrollModalPage, currentMonthYear, currentMonthNumber, reportBranchFilter]);
 
   const handleDownload = (type) => async () => {
-    const urls = {
-      attendance: `${base}/attendance.csv?${params}`,
-      payroll: `${base}/payroll.csv?${params}`,
-      overtime: `${base}/overtime.csv?${params}`,
-      esi: `${base}/esi.csv?${params}`,
-      pf: `${base}/pf.csv?${params}`,
-      salaryPayments: `${base}/salary-payments.csv?${params}`,
-    };
-    const names = {
-      attendance: `attendance-${year}-${String(month).padStart(2, '0')}.csv`,
-      payroll: `payroll-${year}-${String(month).padStart(2, '0')}.csv`,
-      overtime: `overtime-${year}-${String(month).padStart(2, '0')}.csv`,
-      esi: `esi-statement-${year}-${String(month).padStart(2, '0')}.csv`,
-      pf: `pf-statement-${year}-${String(month).padStart(2, '0')}.csv`,
-      salaryPayments: `salary-payments-${year}-${String(month).padStart(2, '0')}.csv`,
-    };
+    const slug = getReportFileSlug(type);
+    const url = `${base}/${slug}.csv?${params}`;
+    const filename = `${slug}-${year}-${String(month).padStart(2, '0')}.csv`;
     try {
       setLoading(type);
       setToast(null);
-      await downloadCsv(urls[type], names[type]);
+      await downloadCsv(url, filename);
       setToast({ type: 'success', message: `${type} report downloaded` });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Download failed' });
@@ -725,9 +738,10 @@ export default function ReportsPage() {
     try {
       setLoading(`${type}-pdf`);
       setToast(null);
+      const slug = getReportFileSlug(type);
       const [companyRes, csvRes] = await Promise.all([
         authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
-        authFetch(`${base}/${type}.csv?${params}`, { headers: { Accept: 'text/csv' } }),
+        authFetch(`${base}/${slug}.csv?${params}`, { headers: { Accept: 'text/csv' } }),
       ]);
       if (!csvRes.ok) {
         const err = await csvRes.json().catch(() => ({}));
@@ -740,14 +754,12 @@ export default function ReportsPage() {
       if (header.length === 0) {
         throw new Error('No data available for selected period');
       }
+      if (rows.length === 0 && type !== 'salaryPayments') {
+        throw new Error('No data available for selected period');
+      }
 
       const monthLabel = MONTHS.find((m) => m.value === month)?.label || '';
-      const reportTitle =
-        type === 'esi'
-          ? 'ESI Statement'
-          : type === 'pf'
-            ? 'PF Statement'
-            : `${type.charAt(0).toUpperCase()}${type.slice(1)} Report`;
+      const reportTitle = getReportTitle(type);
       const doc = createPdf({ orientation: 'landscape' });
       const startY = addReportHeader(doc, {
         companyName: company.name,
@@ -761,7 +773,7 @@ export default function ReportsPage() {
       addAutoTable(doc, [header], rows, {
         startY,
         margin: { left: 24, right: 24 },
-        styles: { fontSize: 7 },
+        styles: { fontSize: type === 'salaryPayments' ? 6 : 7 },
       });
       if (type === 'payroll') {
         const netIdx = header.findIndex((h) => String(h).trim().toLowerCase() === 'net salary');
@@ -778,7 +790,21 @@ export default function ReportsPage() {
         const label = `INR: ${formatMoney(payrollTotal)}`;
         doc.text(label, pageWidth * 0.75, y, { align: 'center' });
       }
-      savePdf(doc, `${type}-${year}-${String(month).padStart(2, '0')}.pdf`);
+      if (type === 'salaryPayments' && rows.length > 0) {
+        const amountIdx = header.findIndex((h) => String(h).trim().toLowerCase() === 'amount');
+        const totalPaid = rows.reduce((sum, row) => {
+          if (amountIdx < 0) return sum;
+          const raw = String(row[amountIdx] ?? '').replace(/,/g, '');
+          const val = Number(raw);
+          return sum + (Number.isFinite(val) ? val : 0);
+        }, 0);
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const y = doc.internal.pageSize.getHeight() - 44;
+        doc.setFontSize(14);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Total disbursed: INR ${formatMoney(totalPaid)}`, pageWidth * 0.75, y, { align: 'center' });
+      }
+      savePdf(doc, `${slug}-${year}-${String(month).padStart(2, '0')}.pdf`);
       setToast({ type: 'success', message: `${type} PDF downloaded` });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'PDF generation failed' });
@@ -1337,9 +1363,8 @@ export default function ReportsPage() {
               key: 'salaryPayments',
               title: 'Salary payment ledger',
               blurb: 'Disbursement history — date, mode, reference, amount, balance.',
-              csvOnly: true,
             },
-          ].map(({ key, title, blurb, csvOnly }) => {
+          ].map(({ key, title, blurb }) => {
             const fmt = reportFormats[key];
             const busy =
               loading === key || loading === `${key}-pdf`;
@@ -1363,26 +1388,24 @@ export default function ReportsPage() {
                     />
                     CSV
                   </label>
-                  {!csvOnly && (
-                    <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
-                      <input
-                        type="radio"
-                        name={`report-fmt-${key}`}
-                        className="border-slate-300 text-blue-600"
-                        checked={fmt === 'pdf'}
-                        onChange={() =>
-                          setReportFormats((prev) => ({ ...prev, [key]: 'pdf' }))
-                        }
-                      />
-                      PDF
-                    </label>
-                  )}
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                    <input
+                      type="radio"
+                      name={`report-fmt-${key}`}
+                      className="border-slate-300 text-blue-600"
+                      checked={fmt === 'pdf'}
+                      onChange={() =>
+                        setReportFormats((prev) => ({ ...prev, [key]: 'pdf' }))
+                      }
+                    />
+                    PDF
+                  </label>
                 </div>
                 <button
                   type="button"
                   disabled={loading != null}
                   onClick={() => {
-                    if (fmt === 'csv' || csvOnly) {
+                    if (fmt === 'csv') {
                       void handleDownload(key)();
                     } else {
                       void handleDownloadPdf(key)();
