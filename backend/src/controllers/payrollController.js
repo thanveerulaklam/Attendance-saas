@@ -7,6 +7,8 @@ const {
   generateWeeklyPayrollForAllActive,
   listWeeklyPayrollRecords,
   getWeeklyPayrollBreakdown,
+  setMonthlyPayrollAdvanceDeduction,
+  setWeeklyPayrollAdvanceDeduction,
 } = require('../services/payrollService');
 const auditService = require('../services/auditService');
 const { resolveBranchScope } = require('../utils/branchScope');
@@ -401,6 +403,108 @@ async function breakdownWeekly(req, res, next) {
   }
 }
 
-module.exports = { list, generate, generateAll, breakdown, listWeekly, generateWeekly, generateAllWeekly, breakdownWeekly };
+/**
+ * PATCH /api/payroll/:id/advance-deduction
+ * Body: { deduct: boolean }
+ */
+async function updateAdvanceDeduction(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const payrollId = Number(req.params.id);
+    const { deduct: deductRaw } = req.body || {};
+
+    if (!companyId || !payrollId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and payroll id are required',
+      });
+    }
+    if (typeof deductRaw !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'deduct (boolean) is required',
+      });
+    }
+
+    const payroll = await setMonthlyPayrollAdvanceDeduction(companyId, payrollId, deductRaw, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.advance_deduction', 'payroll', payrollId, {
+        deduct: deductRaw,
+        employee_id: payroll.employee_id,
+        year: payroll.year,
+        month: payroll.month,
+        salary_advance: payroll.salary_advance,
+      })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      data: payroll,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /api/payroll/weekly/:id/advance-deduction
+ * Body: { deduct: boolean }
+ */
+async function updateWeeklyAdvanceDeduction(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const payrollId = Number(req.params.id);
+    const { deduct: deductRaw } = req.body || {};
+
+    if (!companyId || !payrollId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) and payroll id are required',
+      });
+    }
+    if (typeof deductRaw !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: 'deduct (boolean) is required',
+      });
+    }
+
+    const payroll = await setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deductRaw, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+
+    auditService
+      .log(companyId, req.user?.user_id, 'payroll.advance_deduction_weekly', 'payroll', payrollId, {
+        deduct: deductRaw,
+        employee_id: payroll.employee_id,
+        week_start_date: payroll.week_start_date,
+        salary_advance: payroll.salary_advance,
+      })
+      .catch(() => {});
+
+    return res.json({
+      success: true,
+      data: payroll,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  list,
+  generate,
+  generateAll,
+  breakdown,
+  listWeekly,
+  generateWeekly,
+  generateAllWeekly,
+  breakdownWeekly,
+  updateAdvanceDeduction,
+  updateWeeklyAdvanceDeduction,
+};
 
 

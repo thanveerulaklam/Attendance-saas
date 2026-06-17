@@ -8,7 +8,7 @@ const {
 } = require('./attendanceService');
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
-const { markRepaymentDeducted } = require('./advanceLoanService');
+const { markRepaymentDeducted, revertRepaymentDeducted, ensureDueRepaymentsForPayrollMonth } = require('./advanceLoanService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
 const { resolveShiftIdForEmployeeOnDate } = require('./shiftAssignmentService');
 const {
@@ -1617,7 +1617,21 @@ async function listWeeklyPayrollRecords(
        w.net_salary,
        w.generated_at,
        e.name AS employee_name,
-       e.employee_code AS employee_code
+       e.employee_code AS employee_code,
+       (SELECT COALESCE(SUM(r.repayment_amount), 0)
+        FROM employee_advance_repayments r
+        WHERE r.company_id = w.company_id
+          AND r.employee_id = w.employee_id
+          AND r.year = EXTRACT(YEAR FROM w.week_end_date)::int
+          AND r.month = EXTRACT(MONTH FROM w.week_end_date)::int
+          AND r.status = 'pending') AS pending_loan_repayment,
+       (SELECT COALESCE(SUM(r.repayment_amount), 0)
+        FROM employee_advance_repayments r
+        WHERE r.company_id = w.company_id
+          AND r.employee_id = w.employee_id
+          AND r.year = EXTRACT(YEAR FROM w.week_end_date)::int
+          AND r.month = EXTRACT(MONTH FROM w.week_end_date)::int
+          AND r.status = 'deducted') AS deducted_loan_repayment
      FROM weekly_payroll_records w
      INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
      WHERE ${whereClause}
@@ -2621,7 +2635,21 @@ async function listPayrollRecords(
         p.net_salary,
         p.generated_at,
         e.name AS employee_name,
-        e.employee_code AS employee_code
+        e.employee_code AS employee_code,
+        (SELECT COALESCE(SUM(r.repayment_amount), 0)
+         FROM employee_advance_repayments r
+         WHERE r.company_id = p.company_id
+           AND r.employee_id = p.employee_id
+           AND r.year = p.year
+           AND r.month = p.month
+           AND r.status = 'pending') AS pending_loan_repayment,
+        (SELECT COALESCE(SUM(r.repayment_amount), 0)
+         FROM employee_advance_repayments r
+         WHERE r.company_id = p.company_id
+           AND r.employee_id = p.employee_id
+           AND r.year = p.year
+           AND r.month = p.month
+           AND r.status = 'deducted') AS deducted_loan_repayment
      FROM payroll_records p
      INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
      WHERE ${whereClause}
@@ -2700,6 +2728,234 @@ async function generateMonthlyPayrollForAllActive(companyId, year, month, payrol
   };
 }
 
+async function fetchLoanRepaymentsForPeriod(client, companyId, employeeId, year, month, status) {
+  const result = await client.query(
+    `SELECT
+       r.id,
+       r.loan_id,
+       r.repayment_amount,
+       r.status
+     FROM employee_advance_repayments r
+     INNER JOIN employee_advance_loans l
+       ON l.id = r.loan_id
+      AND l.company_id = r.company_id
+     WHERE r.company_id = $1
+       AND r.employee_id = $2
+       AND r.year = $3
+       AND r.month = $4
+       AND r.status = $5
+       AND l.status IN ('active', 'on_hold', 'cleared')
+     ORDER BY r.id ASC`,
+    [companyId, employeeId, Number(year), Number(month), status]
+  );
+  return result.rows;
+}
+
+function computeNetSalaryFromPayrollRow(payroll, salaryAdvance) {
+  return (
+    Number(payroll.gross_salary || 0) -
+    Number(payroll.deductions || 0) -
+    Number(salaryAdvance || 0) +
+    Number(payroll.no_leave_incentive || 0)
+  );
+}
+
+/**
+ * Toggle loan advance deduction on an existing monthly payroll record.
+ * @param {boolean} deduct - true to deduct pending repayments; false to revert deducted repayments
+ */
+async function setMonthlyPayrollAdvanceDeduction(companyId, payrollId, deduct, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const payrollResult = await client.query(
+      `SELECT p.*, e.branch_id
+       FROM payroll_records p
+       INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+       WHERE p.company_id = $1 AND p.id = $2
+       FOR UPDATE OF p`,
+      [companyId, Number(payrollId)]
+    );
+    if (payrollResult.rowCount === 0) {
+      throw new AppError('Payroll record not found', 404);
+    }
+
+    const payroll = payrollResult.rows[0];
+    await assertEmployeePayrollScope(companyId, payroll.employee_id, allowedBranchIds);
+
+    const year = Number(payroll.year);
+    const month = Number(payroll.month);
+    const employeeId = Number(payroll.employee_id);
+    const legacyAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+
+    if (deduct) {
+      await ensureDueRepaymentsForPayrollMonth(companyId, year, month, { client });
+      const pendingRows = await fetchLoanRepaymentsForPeriod(
+        client,
+        companyId,
+        employeeId,
+        year,
+        month,
+        'pending'
+      );
+      let repaymentTotal = 0;
+      for (const row of pendingRows) {
+        await markRepaymentDeducted(
+          companyId,
+          row.loan_id,
+          year,
+          month,
+          Number(row.repayment_amount || 0),
+          { client, repaymentId: row.id }
+        );
+        repaymentTotal += Number(row.repayment_amount || 0);
+      }
+      const salaryAdvance = legacyAdvance + repaymentTotal;
+      const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
+      const updateResult = await client.query(
+        `UPDATE payroll_records
+         SET salary_advance = $3,
+             net_salary = $4
+         WHERE company_id = $1 AND id = $2
+         RETURNING *`,
+        [companyId, Number(payrollId), salaryAdvance, netSalary]
+      );
+      await client.query('COMMIT');
+      return updateResult.rows[0];
+    }
+
+    const deductedRows = await fetchLoanRepaymentsForPeriod(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month,
+      'deducted'
+    );
+    for (const row of deductedRows) {
+      await revertRepaymentDeducted(companyId, row.id, { client });
+    }
+    const salaryAdvance = legacyAdvance;
+    const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
+    const updateResult = await client.query(
+      `UPDATE payroll_records
+       SET salary_advance = $3,
+           net_salary = $4
+       WHERE company_id = $1 AND id = $2
+       RETURNING *`,
+      [companyId, Number(payrollId), salaryAdvance, netSalary]
+    );
+    await client.query('COMMIT');
+    return updateResult.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Toggle loan advance deduction on an existing weekly payroll record.
+ * Uses the calendar month of week_end_date for loan repayments.
+ */
+async function setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deduct, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const payrollResult = await client.query(
+      `SELECT w.*, e.branch_id
+       FROM weekly_payroll_records w
+       INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
+       WHERE w.company_id = $1 AND w.id = $2
+       FOR UPDATE OF w`,
+      [companyId, Number(payrollId)]
+    );
+    if (payrollResult.rowCount === 0) {
+      throw new AppError('Payroll record not found', 404);
+    }
+
+    const payroll = payrollResult.rows[0];
+    await assertEmployeePayrollScope(companyId, payroll.employee_id, allowedBranchIds);
+
+    const weekEnd = String(payroll.week_end_date).slice(0, 10);
+    const { y: year, m: month } = parseYmd(weekEnd);
+    const employeeId = Number(payroll.employee_id);
+    const legacyAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+
+    if (deduct) {
+      await ensureDueRepaymentsForPayrollMonth(companyId, year, month, { client });
+      const pendingRows = await fetchLoanRepaymentsForPeriod(
+        client,
+        companyId,
+        employeeId,
+        year,
+        month,
+        'pending'
+      );
+      let repaymentTotal = 0;
+      for (const row of pendingRows) {
+        await markRepaymentDeducted(
+          companyId,
+          row.loan_id,
+          year,
+          month,
+          Number(row.repayment_amount || 0),
+          { client, repaymentId: row.id }
+        );
+        repaymentTotal += Number(row.repayment_amount || 0);
+      }
+      const salaryAdvance = legacyAdvance + repaymentTotal;
+      const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
+      const updateResult = await client.query(
+        `UPDATE weekly_payroll_records
+         SET salary_advance = $3,
+             net_salary = $4
+         WHERE company_id = $1 AND id = $2
+         RETURNING *`,
+        [companyId, Number(payrollId), salaryAdvance, netSalary]
+      );
+      await client.query('COMMIT');
+      return updateResult.rows[0];
+    }
+
+    const deductedRows = await fetchLoanRepaymentsForPeriod(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month,
+      'deducted'
+    );
+    for (const row of deductedRows) {
+      await revertRepaymentDeducted(companyId, row.id, { client });
+    }
+    const salaryAdvance = Math.max(0, legacyAdvance);
+    const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
+    const updateResult = await client.query(
+      `UPDATE weekly_payroll_records
+       SET salary_advance = $3,
+           net_salary = $4
+       WHERE company_id = $1 AND id = $2
+       RETURNING *`,
+      [companyId, Number(payrollId), salaryAdvance, netSalary]
+    );
+    await client.query('COMMIT');
+    return updateResult.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getAdjacentHolidayAbsentKeys,
   getAttendanceSummary,
@@ -2712,5 +2968,7 @@ module.exports = {
   generateWeeklyPayrollForAllActive,
   listPayrollRecords,
   listWeeklyPayrollRecords,
+  setMonthlyPayrollAdvanceDeduction,
+  setWeeklyPayrollAdvanceDeduction,
 };
 

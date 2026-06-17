@@ -45,6 +45,22 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+function hasLoanAdvanceRepayment(row) {
+  const pending = Number(row?.pending_loan_repayment || 0);
+  const deducted = Number(row?.deducted_loan_repayment || 0);
+  return pending > 0 || deducted > 0;
+}
+
+function isLoanAdvanceDeducted(row) {
+  return Number(row?.deducted_loan_repayment || 0) > 0;
+}
+
+function displayAdvanceAmount(row) {
+  const base = Number(row?.salary_advance || 0);
+  if (isLoanAdvanceDeducted(row)) return base;
+  return base + Number(row?.pending_loan_repayment || 0);
+}
+
 function formatPermissionUsedHours(minutes) {
   const m = Number(minutes || 0);
   if (!Number.isFinite(m) || m <= 0) return '0';
@@ -581,6 +597,7 @@ export default function PayrollPage() {
   const [attendanceMeta, setAttendanceMeta] = useState(null);
   const [selectedPayroll, setSelectedPayroll] = useState(() => new Map());
   const [exporting, setExporting] = useState(false);
+  const [advanceUpdatingId, setAdvanceUpdatingId] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
   const columnMenuRef = useRef(null);
@@ -1556,6 +1573,58 @@ export default function PayrollPage() {
     setAttendanceMeta(null);
   };
 
+  const toggleAdvanceDeduction = async (row, deduct) => {
+    if (!subscriptionAllowed || advanceUpdatingId != null) return;
+    const url =
+      payrollMode === 'monthly'
+        ? `/api/payroll/${row.id}/advance-deduction`
+        : `/api/payroll/weekly/${row.id}/advance-deduction`;
+    setAdvanceUpdatingId(row.id);
+    setToast(null);
+    try {
+      const res = await authFetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deduct }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const msg =
+          errData.code === 'SUBSCRIPTION_EXPIRED'
+            ? errData.message
+            : errData.message || 'Failed to update advance deduction';
+        throw new Error(msg);
+      }
+      const json = await res.json();
+      const updated = json.data;
+      setRecords((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? {
+                ...r,
+                salary_advance: updated?.salary_advance ?? r.salary_advance,
+                net_salary: updated?.net_salary ?? r.net_salary,
+              }
+            : r
+        )
+      );
+      setReloadKey((k) => k + 1);
+      setToast({
+        type: 'success',
+        message: deduct
+          ? `Advance deducted for ${row.employee_name || 'employee'}.`
+          : `Advance deduction removed for ${row.employee_name || 'employee'}.`,
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to update advance deduction',
+      });
+    } finally {
+      setAdvanceUpdatingId(null);
+    }
+  };
+
   const activeCount = employeesEligibleForGenerate.length;
   const canGeneratePayroll = modalEmployeeId ? Boolean(selectedGenerateEmployee) : activeCount > 0;
 
@@ -2150,7 +2219,10 @@ export default function PayrollPage() {
                       <th className="pb-2 pr-3 font-medium text-right">Permission offset</th>
                     )}
                     {isColumnVisible('advance') && (
-                      <th className="pb-2 pr-3 font-medium text-right">Advance</th>
+                      <th className="pb-2 pr-3 font-medium text-right">
+                        Advance
+                        <span className="block text-[10px] font-normal text-slate-400">Deduct loan</span>
+                      </th>
                     )}
                     {isColumnVisible('incentive') && (
                       <th className="pb-2 pr-3 font-medium text-right">Incentive</th>
@@ -2313,8 +2385,51 @@ export default function PayrollPage() {
                         </td>
                       )}
                       {isColumnVisible('advance') && (
-                        <td className="py-3 pr-3 text-right text-amber-700 font-medium">
-                          −{formatMoney(row.salary_advance)}
+                        <td
+                          className="py-3 pr-3 text-right align-middle"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {hasLoanAdvanceRepayment(row) ? (
+                            <label
+                              className={`inline-flex items-center justify-end gap-1.5 ${
+                                subscriptionAllowed && advanceUpdatingId !== row.id
+                                  ? 'cursor-pointer'
+                                  : 'cursor-default'
+                              }`}
+                              title={
+                                isLoanAdvanceDeducted(row)
+                                  ? 'Loan advance deducted from net salary'
+                                  : 'Check to deduct loan advance from net salary'
+                              }
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isLoanAdvanceDeducted(row)}
+                                disabled={
+                                  !subscriptionAllowed ||
+                                  advanceUpdatingId === row.id
+                                }
+                                onChange={(e) => void toggleAdvanceDeduction(row, e.target.checked)}
+                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                aria-label={`Deduct loan advance for ${row.employee_name || 'employee'}`}
+                              />
+                              <span
+                                className={`font-medium ${
+                                  isLoanAdvanceDeducted(row)
+                                    ? 'text-amber-700'
+                                    : 'text-slate-500'
+                                }`}
+                              >
+                                −{formatMoney(displayAdvanceAmount(row))}
+                              </span>
+                            </label>
+                          ) : Number(row.salary_advance) > 0 ? (
+                            <span className="font-medium text-amber-700">
+                              −{formatMoney(row.salary_advance)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                       )}
                       {isColumnVisible('incentive') && (
@@ -2562,7 +2677,7 @@ export default function PayrollPage() {
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    If unchecked, advance repayments remain pending and can be deducted later.
+                    If unchecked, advance repayments remain pending. You can deduct per employee from the payroll table after generation.
                   </p>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -2621,7 +2736,7 @@ export default function PayrollPage() {
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    If unchecked, advance repayments remain pending and can be deducted in a later week.
+                    If unchecked, advance repayments remain pending. You can deduct per employee from the payroll table after generation.
                   </p>
                 </div>
               )}

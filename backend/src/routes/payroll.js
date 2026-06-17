@@ -8,6 +8,8 @@ const {
   generateWeekly,
   generateAllWeekly,
   breakdownWeekly,
+  updateAdvanceDeduction,
+  updateWeeklyAdvanceDeduction,
 } = require('../controllers/payrollController');
 const {
   authenticate,
@@ -29,6 +31,13 @@ const withAuth = [
 
 router.get('/', withAuth, list);
 router.get('/breakdown', withAuth, breakdown);
+router.patch(
+  '/:id/advance-deduction',
+  withAuth,
+  requireHrBranchForMutation,
+  requireActiveSubscription,
+  updateAdvanceDeduction
+);
 
 // Generate or regenerate payroll (blocked if subscription expired)
 router.post('/generate', withAuth, requireHrBranchForMutation, requireActiveSubscription, generate);
@@ -44,6 +53,13 @@ router.post(
 // Weekly payroll (Sun–Sat)
 router.get('/weekly', withAuth, listWeekly);
 router.get('/weekly/breakdown', withAuth, breakdownWeekly);
+router.patch(
+  '/weekly/:id/advance-deduction',
+  withAuth,
+  requireHrBranchForMutation,
+  requireActiveSubscription,
+  updateWeeklyAdvanceDeduction
+);
 
 router.post(
   '/generate-weekly',

@@ -597,6 +597,71 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
   }
 }
 
+async function revertRepaymentDeducted(companyId, repaymentId, opts = {}) {
+  const client = opts.client || await pool.connect();
+  const ownClient = !opts.client;
+  try {
+    if (ownClient) await client.query('BEGIN');
+
+    const repaymentResult = await client.query(
+      `UPDATE employee_advance_repayments
+       SET status = 'pending',
+           updated_at = NOW()
+       WHERE company_id = $1
+         AND id = $2
+         AND status = 'deducted'
+       RETURNING *`,
+      [companyId, Number(repaymentId)]
+    );
+    if (repaymentResult.rowCount === 0) {
+      if (ownClient) await client.query('COMMIT');
+      return null;
+    }
+    const repayment = repaymentResult.rows[0];
+
+    const loanIdToUpdate = Number(repayment.loan_id);
+    const loanUpdateResult = await client.query(
+      `WITH repaid AS (
+         SELECT
+           l.id,
+           l.company_id,
+           l.loan_amount,
+           l.status AS current_status,
+           COALESCE(SUM(r.repayment_amount) FILTER (WHERE r.status = 'deducted'), 0)::numeric AS deducted_total
+         FROM employee_advance_loans l
+         LEFT JOIN employee_advance_repayments r
+           ON r.company_id = l.company_id
+          AND r.loan_id = l.id
+         WHERE l.company_id = $1 AND l.id = $2
+         GROUP BY l.id, l.company_id, l.loan_amount, l.status
+       )
+       UPDATE employee_advance_loans l
+       SET total_repaid = ROUND(repaid.deducted_total, 2),
+           outstanding_balance = GREATEST(ROUND((l.loan_amount - repaid.deducted_total)::numeric, 2), 0),
+           status = CASE
+             WHEN l.status = 'waived' THEN 'waived'
+             WHEN repaid.deducted_total >= l.loan_amount THEN 'cleared'
+             WHEN l.status = 'on_hold' THEN 'on_hold'
+             ELSE 'active'
+           END,
+           updated_at = NOW()
+       FROM repaid
+       WHERE l.company_id = repaid.company_id
+         AND l.id = repaid.id
+       RETURNING l.*`,
+      [companyId, loanIdToUpdate]
+    );
+
+    if (ownClient) await client.query('COMMIT');
+    return { repayment, loan: loanUpdateResult.rows[0] };
+  } catch (err) {
+    if (ownClient) await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    if (ownClient) client.release();
+  }
+}
+
 async function rescheduleSkippedAmount(client, skippedRepayment, skippedAmount, note) {
   const companyId = skippedRepayment.company_id;
   const loanId = Number(skippedRepayment.loan_id);
@@ -947,6 +1012,7 @@ module.exports = {
   getMonthlyRepayments,
   updateRepayment,
   markRepaymentDeducted,
+  revertRepaymentDeducted,
   markRepaymentPaidManually,
   skipRepayment,
   getEmployeeLoanSummary,
@@ -954,4 +1020,5 @@ module.exports = {
   waiveLoan,
   deleteLoan,
   addCalendarMonths,
+  ensureDueRepaymentsForPayrollMonth,
 };
