@@ -1,4 +1,6 @@
-import { createPdf, addAutoTable, savePdf } from './pdfGenerator';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { createPdf, savePdf } from './pdfGenerator';
 
 const LAYOUTS = {
   a5: {
@@ -14,14 +16,14 @@ const LAYOUTS = {
     showFooter: true,
   },
   'a4-half': {
-    marginX: 12,
-    startY: 8,
+    marginX: 14,
+    startY: 6,
     companyTitleSize: 8,
     payslipTitleSize: 7,
     periodSize: 6,
     tableFont: 5.5,
-    tablePadding: 2,
-    sectionGap: 4,
+    tablePadding: 1.5,
+    sectionGap: 3,
     netFont: 8,
     showFooter: false,
   },
@@ -57,24 +59,57 @@ function rowsWithAmount(labelValuePairs) {
     .map(([label, amount]) => [label, money(amount)]);
 }
 
-function tableOpts(layout, marginLeft, marginRight, tableWidth) {
-  const opts = {
-    styles: { fontSize: layout.tableFont, cellPadding: layout.tablePadding },
-    headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
-    columnStyles: {
-      0: { cellWidth: 'auto' },
-      1: { halign: 'right', cellWidth: layout === LAYOUTS.a5 ? 72 : 52 },
-    },
-    theme: 'striped',
-    margin: { left: marginLeft, right: marginRight },
+function trimPagesAfter(doc, anchorPage) {
+  while (doc.getNumberOfPages() > anchorPage) {
+    doc.deletePage(doc.getNumberOfPages());
+  }
+  doc.setPage(anchorPage);
+}
+
+function slotMargins(doc, slot, marginLeft, marginRight) {
+  if (!slot) {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    return { left: marginLeft, right: pageWidth - marginRight };
+  }
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  return {
+    left: marginLeft,
+    right: pageWidth - marginRight,
+    top: slot.y,
+    bottom: Math.max(0, pageHeight - slot.y - slot.height),
   };
-  if (tableWidth != null) opts.tableWidth = tableWidth;
-  return opts;
+}
+
+function drawPayslipTable(doc, { fixedPage, slot, marginLeft, marginRight, layout, startY, head, body, tableWidth }) {
+  if (fixedPage) doc.setPage(fixedPage);
+
+  const columnStyles = {
+    0: { cellWidth: 'auto' },
+    1: { halign: 'right', cellWidth: layout === LAYOUTS.a5 ? 72 : 50 },
+  };
+
+  autoTable(doc, {
+    head,
+    body,
+    startY,
+    tableWidth,
+    margin: slotMargins(doc, slot, marginLeft, marginRight),
+    styles: { fontSize: layout.tableFont, cellPadding: layout.tablePadding, overflow: 'linebreak' },
+    headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
+    theme: 'striped',
+    columnStyles,
+    pageBreak: 'avoid',
+    rowPageBreak: 'avoid',
+    showHead: 'firstPage',
+  });
+
+  if (fixedPage) trimPagesAfter(doc, fixedPage);
+  return doc.lastAutoTable.finalY;
 }
 
 /**
  * Render one compact payslip into the PDF document.
- * @param {object} [slot] - Optional region { x, y, width, height } for 2-up A4 layout
  */
 function renderCompactPayslip(
   doc,
@@ -87,6 +122,7 @@ function renderCompactPayslip(
     attendanceDetails,
     slot = null,
     layoutKey = 'a5',
+    fixedPage = null,
   }
 ) {
   const layout = LAYOUTS[layoutKey] || LAYOUTS.a5;
@@ -94,11 +130,11 @@ function renderCompactPayslip(
   const slotX = slot?.x ?? 0;
   const slotY = slot?.y ?? 0;
   const marginLeft = slotX + layout.marginX;
-  const marginRight = slot
-    ? slotX + slot.width - layout.marginX
-    : doc.internal.pageSize.getWidth() - layout.marginX;
+  const marginRight = slot ? slotX + slot.width - layout.marginX : doc.internal.pageSize.getWidth() - layout.marginX;
   const contentWidth = marginRight - marginLeft;
   const centerX = slotX + pageWidth / 2;
+
+  if (fixedPage) doc.setPage(fixedPage);
 
   const att = breakdown?.attendance || {};
   const b = breakdown?.breakdown || {};
@@ -109,7 +145,7 @@ function renderCompactPayslip(
   doc.setTextColor(15, 23, 42);
   doc.text(String(company?.name || 'Company'), centerX, y, { align: 'center' });
 
-  y += layout.companyTitleSize + 2;
+  y += layout.companyTitleSize + 1;
   if (layoutKey === 'a5') {
     doc.setFontSize(7);
     doc.setFont(undefined, 'normal');
@@ -118,7 +154,7 @@ function renderCompactPayslip(
     if (companyLine) {
       const lines = doc.splitTextToSize(companyLine, contentWidth);
       doc.text(lines, centerX, y, { align: 'center' });
-      y += lines.length * 8;
+      y += lines.length * 7;
     }
   }
 
@@ -126,59 +162,59 @@ function renderCompactPayslip(
   doc.setFont(undefined, 'bold');
   doc.setTextColor(30, 64, 175);
   doc.text('PAYSLIP', centerX, y, { align: 'center' });
-  y += layout.payslipTitleSize + 2;
+  y += layout.payslipTitleSize + 1;
   doc.setFontSize(layout.periodSize);
   doc.setFont(undefined, 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text(`Period: ${periodLabel}`, centerX, y, { align: 'center' });
   y += layout.periodSize + layout.sectionGap;
 
-  addAutoTable(
-    doc,
-    [['Employee', '']],
-    [
-      ['Name', `${employeeName || '—'} (${employeeCode || '—'})`],
-      ['Department', attendanceDetails?.department || '—'],
-      ['Shift', attendanceDetails?.shift_name || '—'],
-      [
-        'Basic salary',
-        money(attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary ?? 0),
-      ],
-    ],
-    {
-      ...tableOpts(layout, marginLeft, marginRight),
+  y =
+    drawPayslipTable(doc, {
+      fixedPage,
+      slot,
+      marginLeft,
+      marginRight,
+      layout,
       startY: y,
       head: [['Employee details', '']],
-    }
-  );
-  y = doc.lastAutoTable.finalY + layout.sectionGap;
+      body: [
+        ['Name', `${employeeName || '—'} (${employeeCode || '—'})`],
+        ['Department', attendanceDetails?.department || '—'],
+        ['Shift', attendanceDetails?.shift_name || '—'],
+        [
+          'Basic salary',
+          money(attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary ?? 0),
+        ],
+      ],
+    }) + layout.sectionGap;
 
-  addAutoTable(
-    doc,
-    [['Attendance', '']],
-    [
-      ['Working days', String(att.workingDays ?? '—')],
-      ['Present', `${formatDayCount(att.presentDays)} days`],
-      ['Absent', `${formatDayCount(att.absenceDays)} days`],
-      ['Late', `${att.lateDays ?? 0}`],
-      ['Overtime', `${formatHours(att.overtimeHours)} hrs`],
-    ],
-    {
-      ...tableOpts(layout, marginLeft, marginRight),
+  y =
+    drawPayslipTable(doc, {
+      fixedPage,
+      slot,
+      marginLeft,
+      marginRight,
+      layout,
       startY: y,
       head: [['Attendance', '']],
-    }
-  );
-  y = doc.lastAutoTable.finalY + layout.sectionGap;
+      body: [
+        ['Working days', String(att.workingDays ?? '—')],
+        ['Present', `${formatDayCount(att.presentDays)} d`],
+        ['Absent', `${formatDayCount(att.absenceDays)} d`],
+        ['Late', `${att.lateDays ?? 0}`],
+        ['Overtime', `${formatHours(att.overtimeHours)} h`],
+      ],
+    }) + layout.sectionGap;
 
   const earningRows = rowsWithAmount([
     ['Earned basic', b.basicSalary],
-    ['Travel allowance', b.travelAllowance],
-    ['Overtime pay', b.overtimePay],
-    ['Paid leave encashment', b.paidLeaveEncashmentAmount],
-    ['No-leave incentive', b.noLeaveIncentive],
+    ['Travel', b.travelAllowance],
+    ['Overtime', b.overtimePay],
+    ['Leave encash', b.paidLeaveEncashmentAmount],
+    ['Incentive', b.noLeaveIncentive],
   ]);
-  earningRows.push(['Gross salary', money(b.grossSalary)]);
+  earningRows.push(['Gross', money(b.grossSalary)]);
 
   const deductionRows = rowsWithAmount([
     ['Absent', b.absenceDeduction],
@@ -190,26 +226,40 @@ function renderCompactPayslip(
   ]);
   const permissionOffset = Number(b.permissionOffsetAmount || 0);
   if (permissionOffset > 0) {
-    deductionRows.push(['Permission offset', `(Rs ${formatMoney(permissionOffset)})`]);
+    deductionRows.push(['Perm. offset', `(Rs ${formatMoney(permissionOffset)})`]);
   }
-  const totalDeductions = Number(b.totalDeductions || 0) + Number(b.salaryAdvance || 0);
-  deductionRows.push(['Total deductions', money(totalDeductions)]);
+  deductionRows.push(['Total ded.', money(Number(b.totalDeductions || 0) + Number(b.salaryAdvance || 0))]);
 
   const midX = slotX + pageWidth / 2;
   const halfWidth = pageWidth / 2 - layout.marginX - 2;
 
-  addAutoTable(doc, [['Earnings', 'Rs']], earningRows, {
-    ...tableOpts(layout, marginLeft, midX + 2, halfWidth),
+  const earningsEndY = drawPayslipTable(doc, {
+    fixedPage,
+    slot,
+    marginLeft,
+    marginRight: midX + 2,
+    layout,
     startY: y,
+    head: [['Earnings', 'Rs']],
+    body: earningRows,
+    tableWidth: halfWidth,
   });
-  const earningsEndY = doc.lastAutoTable.finalY;
 
-  addAutoTable(doc, [['Deductions', 'Rs']], deductionRows, {
-    ...tableOpts(layout, midX + 2, marginRight, halfWidth),
+  const deductionsEndY = drawPayslipTable(doc, {
+    fixedPage,
+    slot,
+    marginLeft: midX + 2,
+    marginRight,
+    layout,
     startY: y,
+    head: [['Deductions', 'Rs']],
+    body: deductionRows,
+    tableWidth: halfWidth,
   });
-  y = Math.max(earningsEndY, doc.lastAutoTable.finalY) + layout.sectionGap;
 
+  y = Math.max(earningsEndY, deductionsEndY) + layout.sectionGap;
+
+  if (fixedPage) doc.setPage(fixedPage);
   doc.setDrawColor(226, 232, 240);
   doc.line(marginLeft, y, marginRight, y);
   y += layout.sectionGap;
@@ -219,28 +269,24 @@ function renderCompactPayslip(
   doc.text(`NET SALARY: ${money(b.netSalary)}`, marginRight, y, { align: 'right' });
 
   if (layout.showFooter) {
-    const footerY = slot
-      ? slotY + slot.height - 10
-      : doc.internal.pageSize.getHeight() - 16;
+    const footerY = doc.internal.pageSize.getHeight() - 16;
     doc.setFontSize(6);
     doc.setFont(undefined, 'normal');
     doc.setTextColor(148, 163, 184);
     doc.text('Generated by PunchPay | punchpay.in', centerX, footerY, { align: 'center' });
   }
 
+  if (fixedPage) trimPagesAfter(doc, fixedPage);
   return doc;
 }
 
-/**
- * Full-page compact payslip (A5 for single download).
- */
 export function addCompactPayslipPage(doc, params) {
   if (!params.isFirstPage) doc.addPage('a5', 'portrait');
   return renderCompactPayslip(doc, { ...params, layoutKey: 'a5' });
 }
 
 /**
- * Bulk payslips: two per A4 portrait page (each slip ≈ half page / A5 footprint).
+ * Bulk payslips: two per A4 portrait page.
  */
 export function addBulkCompactPayslipsToDoc(doc, items) {
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -249,24 +295,30 @@ export function addBulkCompactPayslipsToDoc(doc, items) {
 
   for (let i = 0; i < items.length; i += 2) {
     if (i > 0) doc.addPage('a4', 'portrait');
+    const anchorPage = doc.getNumberOfPages();
 
     renderCompactPayslip(doc, {
       ...items[i],
       slot: { x: 0, y: 0, width: pageWidth, height: halfH },
       layoutKey: 'a4-half',
+      fixedPage: anchorPage,
     });
 
     if (items[i + 1]) {
-      doc.setDrawColor(203, 213, 225);
-      doc.setLineWidth(0.5);
-      doc.line(8, halfH, pageWidth - 8, halfH);
+      trimPagesAfter(doc, anchorPage);
+      doc.setDrawColor(180, 190, 200);
+      doc.setLineWidth(0.6);
+      doc.line(10, halfH, pageWidth - 10, halfH);
 
       renderCompactPayslip(doc, {
         ...items[i + 1],
         slot: { x: 0, y: halfH, width: pageWidth, height: halfH },
         layoutKey: 'a4-half',
+        fixedPage: anchorPage,
       });
     }
+
+    trimPagesAfter(doc, anchorPage);
   }
 
   return doc;
