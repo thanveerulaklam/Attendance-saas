@@ -2511,7 +2511,7 @@ export default function PayrollPage() {
                             const value = absentDaysRaw != null ? Number(absentDaysRaw) : fallback;
                             if (!Number.isFinite(value)) return '0';
                             const display = Number.isInteger(value) ? String(value) : value.toFixed(2);
-                            if (value <= 0 && !subscriptionAllowed) return display;
+                            if (value <= 0) return <span className="text-slate-600">{display}</span>;
                             return (
                               <button
                                 type="button"
@@ -2519,14 +2519,10 @@ export default function PayrollPage() {
                                   e.stopPropagation();
                                   void openAbsentModal(row);
                                 }}
-                                className={`font-semibold underline decoration-dotted underline-offset-2 ${
-                                  value > 0
-                                    ? 'text-rose-700 hover:text-rose-800'
-                                    : 'text-blue-700 hover:text-blue-800'
-                                }`}
-                                title="Alter attendance — mark absent/leave days as on duty (OD)"
+                                className="font-semibold text-rose-700 underline decoration-dotted underline-offset-2 hover:text-rose-800"
+                                title="View absent days"
                               >
-                                {value > 0 ? display : 'Alter'}
+                                {display}
                               </button>
                             );
                           })()}

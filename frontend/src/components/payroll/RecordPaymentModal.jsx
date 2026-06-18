@@ -136,8 +136,14 @@ export default function RecordPaymentModal({
       });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
-      <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-soft">
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-xl bg-white p-4 shadow-soft"
+        onClick={(e) => e.stopPropagation()}
+      >
         <h2 className="text-sm font-semibold text-slate-900">Record salary payment</h2>
         <p className="mt-1 text-xs text-slate-600">
           {payrollRow.employee_name} ({payrollRow.employee_code}) — {periodLabel}

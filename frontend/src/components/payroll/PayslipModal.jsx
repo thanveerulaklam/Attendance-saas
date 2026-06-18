@@ -400,7 +400,7 @@ export default function PayslipModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3"
-      onClick={onClose}
+      onClick={recordPaymentOpen ? undefined : onClose}
     >
       <div
         className="payslip-print-root w-full max-w-3xl max-h-[95vh] overflow-y-auto rounded-2xl bg-white shadow-2xl border border-slate-200"
