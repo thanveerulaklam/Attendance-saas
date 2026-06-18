@@ -177,8 +177,12 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
                 />
               </label>
               <p className="mt-1 text-[11px] text-slate-400">
-                .xlsx, .xls, or .csv — max 10 MB, up to 500 rows. Required columns include name,
-                employee_code, basic_salary, and join_date.
+                .xlsx, .xls, or .csv — max 10 MB, up to 500 rows. Required columns (
+                <span className="font-medium text-rose-600">name</span>,{' '}
+                <span className="font-medium text-rose-600">employee_code</span>,{' '}
+                <span className="font-medium text-rose-600">basic_salary</span>,{' '}
+                <span className="font-medium text-rose-600">join_date</span>) are shown in red in
+                the Excel template.
               </p>
             </div>
 

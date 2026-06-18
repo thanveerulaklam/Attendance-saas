@@ -1,6 +1,6 @@
-const path = require('path');
 const employeeService = require('../services/employeeService');
 const employeeBulkImportService = require('../services/employeeBulkImportService');
+const { buildEmployeeImportTemplateBuffer } = require('../services/employeeImportTemplate');
 const auditService = require('../services/auditService');
 const { AppError } = require('../utils/AppError');
 
@@ -75,8 +75,13 @@ const getDepartments = asyncHandler(async (req, res) => {
  * GET /api/employees/import-template
  */
 const downloadEmployeeImportTemplate = asyncHandler(async (req, res) => {
-  const filePath = path.join(__dirname, '..', '..', 'templates', 'employee-import-template.xlsx');
-  return res.download(filePath, 'employee-import-template.xlsx');
+  const buffer = await buildEmployeeImportTemplateBuffer();
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', 'attachment; filename="employee-import-template.xlsx"');
+  return res.send(Buffer.from(buffer));
 });
 
 /**
