@@ -28,6 +28,18 @@ function employeesBranchFilterSql(allowedBranchIds, paramIndex, columnName = 'br
   };
 }
 
+function deviceFilterSql(deviceFilter, paramIndex) {
+  const raw = deviceFilter != null ? String(deviceFilter).trim() : '';
+  if (!raw) {
+    return { clause: '', params: [], nextIndex: paramIndex };
+  }
+  return {
+    clause: ` AND device_id = $${paramIndex}`,
+    params: [raw],
+    nextIndex: paramIndex + 1,
+  };
+}
+
 async function assertEmployeeInAttendanceScope(client, companyId, employeeId, allowedBranchIds) {
   if (allowedBranchIds == null) return;
   const r = await client.query(
@@ -670,7 +682,8 @@ async function getDailyAttendance(
   dateStr,
   employeeId = null,
   department = null,
-  allowedBranchIds = null
+  allowedBranchIds = null,
+  deviceFilter = null
 ) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   if (!match) {
@@ -736,21 +749,29 @@ async function getDailyAttendance(
     );
     const nextDayStr = addDaysIst(dateStr, 1);
 
+    const bfDev = deviceFilterSql(
+      deviceFilter,
+      needOvernightNextDay ? 5 : 4
+    );
+    const logsParams = needOvernightNextDay
+      ? [companyId, ids, dateStr, nextDayStr, ...bfDev.params]
+      : [companyId, ids, dateStr, ...bfDev.params];
+
     const logsResult = await client.query(
       needOvernightNextDay
         ? `SELECT id, employee_id, punch_time, punch_type, device_id
            FROM attendance_logs
            WHERE company_id = $1
              AND employee_id = ANY($2::bigint[])
-             AND (${SQL_PUNCH_IST_DATE} = $3::date OR ${SQL_PUNCH_IST_DATE} = $4::date)
+             AND (${SQL_PUNCH_IST_DATE} = $3::date OR ${SQL_PUNCH_IST_DATE} = $4::date)${bfDev.clause}
            ORDER BY punch_time ASC`
         : `SELECT id, employee_id, punch_time, punch_type, device_id
            FROM attendance_logs
            WHERE company_id = $1
              AND employee_id = ANY($2::bigint[])
-             AND ${SQL_PUNCH_IST_DATE} = $3::date
+             AND ${SQL_PUNCH_IST_DATE} = $3::date${bfDev.clause}
            ORDER BY punch_time ASC`,
-      needOvernightNextDay ? [companyId, ids, dateStr, nextDayStr] : [companyId, ids, dateStr]
+      logsParams
     );
 
     const logsByEmployee = new Map();
@@ -870,7 +891,8 @@ async function getMonthlyAttendance(
   month,
   employeeId = null,
   department = null,
-  allowedBranchIds = null
+  allowedBranchIds = null,
+  deviceFilter = null
 ) {
   const y = Number(year);
   const m = Number(month);
@@ -937,15 +959,16 @@ async function getMonthlyAttendance(
       ? addDaysIst(monthLastStr, 1)
       : monthLastStr;
 
+    const bfDevM = deviceFilterSql(deviceFilter, 5);
     const logsResult = await client.query(
       `SELECT employee_id, punch_time, punch_type, device_id
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
          AND ${SQL_PUNCH_IST_DATE} >= $3::date
-         AND ${SQL_PUNCH_IST_DATE} <= $4::date
+         AND ${SQL_PUNCH_IST_DATE} <= $4::date${bfDevM.clause}
        ORDER BY punch_time ASC`,
-      [companyId, ids, rangeStart, rangeEnd]
+      [companyId, ids, rangeStart, rangeEnd, ...bfDevM.params]
     );
 
     const empShiftById = new Map(

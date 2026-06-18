@@ -15,7 +15,13 @@ const { resolveBranchScope } = require('../utils/branchScope');
 async function getDaily(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { date, employee_id: employeeId, department, branch_id: branchIdRaw } = req.query || {};
+    const {
+      date,
+      employee_id: employeeId,
+      department,
+      branch_id: branchIdRaw,
+      device_id: deviceIdRaw,
+    } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -39,7 +45,19 @@ async function getDaily(req, res, next) {
       requestedBranchId: branchIdRaw,
     });
 
-    const data = await getDailyAttendance(companyId, date.trim(), eid, dept, allowedBranchIds);
+    const deviceFilter =
+      deviceIdRaw != null && String(deviceIdRaw).trim() !== ''
+        ? String(deviceIdRaw).trim()
+        : null;
+
+    const data = await getDailyAttendance(
+      companyId,
+      date.trim(),
+      eid,
+      dept,
+      allowedBranchIds,
+      deviceFilter
+    );
 
     return res.json({
       success: true,
@@ -56,7 +74,14 @@ async function getDaily(req, res, next) {
 async function getMonthly(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { year, month, employee_id: employeeId, department, branch_id: branchIdRaw } = req.query || {};
+    const {
+      year,
+      month,
+      employee_id: employeeId,
+      department,
+      branch_id: branchIdRaw,
+      device_id: deviceIdRaw,
+    } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -82,7 +107,20 @@ async function getMonthly(req, res, next) {
       requestedBranchId: branchIdRaw,
     });
 
-    const data = await getMonthlyAttendance(companyId, y, m, eid, dept, allowedBranchIds);
+    const deviceFilter =
+      deviceIdRaw != null && String(deviceIdRaw).trim() !== ''
+        ? String(deviceIdRaw).trim()
+        : null;
+
+    const data = await getMonthlyAttendance(
+      companyId,
+      y,
+      m,
+      eid,
+      dept,
+      allowedBranchIds,
+      deviceFilter
+    );
 
     return res.json({
       success: true,

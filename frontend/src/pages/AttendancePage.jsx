@@ -83,6 +83,8 @@ export default function AttendancePage() {
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [branches, setBranches] = useState([]);
   const [branchFilter, setBranchFilter] = useState(''); // '' = all allowed branches
+  const [deviceFilter, setDeviceFilter] = useState(''); // '' = all devices
+  const [devices, setDevices] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
@@ -181,6 +183,38 @@ export default function AttendancePage() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+    authFetch('/api/device', { headers: { 'Content-Type': 'application/json' } })
+      .then(async (res) => {
+        if (!res.ok) throw new Error('Failed to load devices');
+        const json = await res.json();
+        if (!isMounted) return;
+        setDevices(Array.isArray(json.data) ? json.data : []);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setDevices([]);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const devicesForBranch = useMemo(() => {
+    if (!branchFilter) return devices;
+    const bid = Number(branchFilter);
+    if (!Number.isFinite(bid)) return devices;
+    return (devices || []).filter((d) => Number(d.branch_id) === bid);
+  }, [devices, branchFilter]);
+
+  useEffect(() => {
+    if (!deviceFilter) return;
+    if (deviceFilter === 'manual' || deviceFilter === 'auto_out') return;
+    const stillValid = devicesForBranch.some((d) => String(d.id) === deviceFilter);
+    if (!stillValid) setDeviceFilter('');
+  }, [branchFilter, devicesForBranch, deviceFilter]);
+
   const employeesForBranch = useMemo(() => {
     if (!branchFilter) return employees;
     const bid = Number(branchFilter);
@@ -227,6 +261,7 @@ export default function AttendancePage() {
     if (employeeId) params.set('employee_id', employeeId);
     if (departmentFilter !== 'all') params.set('department', departmentFilter);
     if (branchFilter) params.set('branch_id', branchFilter);
+    if (deviceFilter) params.set('device_id', deviceFilter);
     authFetch(`/api/attendance/monthly?${params}`, {
       headers: { 'Content-Type': 'application/json' },
     })
@@ -247,7 +282,7 @@ export default function AttendancePage() {
         if (isMounted) setLoading(false);
       });
     return () => { isMounted = false; };
-  }, [year, month, employeeId, departmentFilter, refreshKey, branchFilter]);
+  }, [year, month, employeeId, departmentFilter, refreshKey, branchFilter, deviceFilter]);
 
   useEffect(() => {
     if (!branchFilter) return;
@@ -267,6 +302,7 @@ export default function AttendancePage() {
       const params = new URLSearchParams({ date: dateStr });
       if (departmentFilter !== 'all') params.set('department', departmentFilter);
       if (branchFilter) params.set('branch_id', branchFilter);
+      if (deviceFilter) params.set('device_id', deviceFilter);
       authFetch(`/api/attendance/daily?${params.toString()}`, {
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -304,7 +340,7 @@ export default function AttendancePage() {
       controller.abort();
       clearTimeout(timeout);
     };
-  }, [dateStr, departmentFilter, refreshKey, branchFilter]);
+  }, [dateStr, departmentFilter, refreshKey, branchFilter, deviceFilter]);
 
   const todaySummary = useMemo(() => {
     if (!dailyData || dailyData.length === 0) {
@@ -544,6 +580,20 @@ export default function AttendancePage() {
               {(branches || []).map((b) => (
                 <option key={String(b.id)} value={String(b.id)}>
                   {b.name || `Branch #${b.id}`}
+                </option>
+              ))}
+            </select>
+            <select
+              value={deviceFilter}
+              onChange={(e) => setDeviceFilter(e.target.value)}
+              className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
+            >
+              <option value="">All devices</option>
+              <option value="manual">Manual attendance</option>
+              <option value="auto_out">Auto OUT</option>
+              {(devicesForBranch || []).map((d) => (
+                <option key={String(d.id)} value={String(d.id)}>
+                  {d.name || `Device #${d.id}`}
                 </option>
               ))}
             </select>
