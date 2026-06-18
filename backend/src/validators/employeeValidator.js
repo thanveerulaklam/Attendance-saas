@@ -96,6 +96,15 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'other_allowance')) {
+    const v = payload.other_allowance;
+    if (v == null || v === '') {
+      // optional: treat as 0
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.other_allowance = 'Other allowance must be a non-negative number.';
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
     const v = payload.esi_amount;
     if (v == null || v === '') {
@@ -231,6 +240,11 @@ const validateCreateEmployee = (payload = {}) => {
   if (Object.prototype.hasOwnProperty.call(payload, 'daily_travel_allowance')) {
     const v = payload.daily_travel_allowance;
     result.daily_travel_allowance = v == null || v === '' ? 0 : Number(v);
+  }
+  result.other_allowance = 0;
+  if (Object.prototype.hasOwnProperty.call(payload, 'other_allowance')) {
+    const v = payload.other_allowance;
+    result.other_allowance = v == null || v === '' ? 0 : Number(v);
   }
   result.esi_amount = 0;
   if (Object.prototype.hasOwnProperty.call(payload, 'esi_amount')) {
@@ -420,6 +434,17 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.daily_travel_allowance = 'Daily travel allowance must be a non-negative number.';
     } else {
       clean.daily_travel_allowance = Number(v);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'other_allowance')) {
+    const v = payload.other_allowance;
+    if (v == null || v === '') {
+      clean.other_allowance = 0;
+    } else if (Number.isNaN(Number(v)) || Number(v) < 0) {
+      errors.other_allowance = 'Other allowance must be a non-negative number.';
+    } else {
+      clean.other_allowance = Number(v);
     }
   }
 

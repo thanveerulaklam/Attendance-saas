@@ -554,10 +554,10 @@ export default function PayslipModal({
                 Attendance buckets and payroll absence differ slightly due to payroll rules (leave/rounding/policy overrides).
               </p>
             )}
-            <div className="payslip-print-hidden mt-3 text-[11px] text-slate-600">
+            <div className="mt-3 text-[11px] text-slate-600">
               <p className="font-semibold">Absent Dates:</p>
               {payrollAsOfYmd && (
-                <p className="mt-0.5 text-[10px] text-slate-500">
+                <p className="payslip-print-hidden mt-0.5 text-[10px] text-slate-500">
                   Listed through {new Date(`${payrollAsOfYmd}T12:00:00`).toLocaleDateString('en-IN', {
                     day: 'numeric',
                     month: 'short',
@@ -569,8 +569,10 @@ export default function PayslipModal({
               <p className="mt-0.5">{renderGroupedDayNumbers(effectiveAbsentDates)}</p>
               <p className="mt-2 font-semibold">Late Arrival Dates:</p>
               <p className="mt-0.5">{renderGroupedLateDetails(effectiveLateDetails)}</p>
-              <p className="mt-2 font-semibold">{isHoursBasedPayroll ? 'Partial Day Dates:' : 'Half Day Dates:'}</p>
-              <p className="mt-0.5">{renderGroupedDayNumbers(effectiveHalfDayDates)}</p>
+              <div className="payslip-print-hidden">
+                <p className="mt-2 font-semibold">{isHoursBasedPayroll ? 'Partial Day Dates:' : 'Half Day Dates:'}</p>
+                <p className="mt-0.5">{renderGroupedDayNumbers(effectiveHalfDayDates)}</p>
+              </div>
             </div>
           </section>
 
@@ -590,6 +592,12 @@ export default function PayslipModal({
                   <span>Travel Allow.</span>
                   <span className="font-medium">
                     ₹{formatMoney(breakdown.breakdown?.travelAllowance)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Other Allow.</span>
+                  <span className="font-medium">
+                    ₹{formatMoney(breakdown.breakdown?.otherAllowance)}
                   </span>
                 </div>
                 <div className="flex justify-between">

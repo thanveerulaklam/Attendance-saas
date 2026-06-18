@@ -162,6 +162,9 @@ function rowToPayload(row, headerMap) {
   const dta = pickRaw(row, ['daily_travel_allowance', 'travel_allowance', 'ta'], headerMap);
   if (dta != null && String(dta).trim() !== '') payload.daily_travel_allowance = parseNumberish(dta);
 
+  const oa = pickRaw(row, ['other_allowance', 'other_allowances', 'other_allowance_amount'], headerMap);
+  if (oa != null && String(oa).trim() !== '') payload.other_allowance = parseNumberish(oa);
+
   const perm = pickRaw(row, ['permission_hours_override', 'permission_hours'], headerMap);
   if (perm != null && String(perm).trim() !== '') payload.permission_hours_override = parseNumberish(perm);
 
@@ -255,6 +258,7 @@ function createPayloadToUpdatePayload(p) {
         ? Number(p.shift_id)
         : null,
     daily_travel_allowance: p.daily_travel_allowance != null ? p.daily_travel_allowance : 0,
+    other_allowance: p.other_allowance != null ? p.other_allowance : 0,
     esi_amount: p.esi_amount != null ? p.esi_amount : 0,
     esi_mode: p.esi_mode != null && p.esi_mode !== '' ? String(p.esi_mode).toLowerCase() : 'fixed',
     esi_percent:

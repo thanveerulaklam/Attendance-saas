@@ -358,11 +358,8 @@ async function getEsiReportCsv(companyId, year, month, allowedBranchIds = null) 
   );
 
   const header = [
-    'Employee Code',
     'Name',
     'ESI Number',
-    'Type',
-    'Rate',
     'Gross Wages',
     'ESI Deduction',
   ];
@@ -376,11 +373,8 @@ async function getEsiReportCsv(companyId, year, month, allowedBranchIds = null) 
     const deduction = Number(b.esiDeduction || 0);
     if (deduction <= 0) continue;
     rows.push([
-      employee.employee_code,
       employee.name,
       employee.esi_number || '',
-      formatStatutoryModeLabel(employee.esi_mode),
-      formatStatutoryRate(employee, 'esi'),
       b.grossSalary ?? '',
       deduction,
     ]);

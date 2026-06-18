@@ -15,4 +15,5 @@ status,No,active | inactive (default: active),active
 payroll_frequency,No,monthly | weekly (for Tharagai use monthly),monthly
 salary_type,No,monthly | per_day,monthly
 daily_travel_allowance,No,Number >= 0,0
+other_allowance,No,Fixed monthly amount (₹),0
 permission_hours_override,No,Number >= 0 (hours),2

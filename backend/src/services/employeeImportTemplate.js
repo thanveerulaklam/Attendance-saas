@@ -19,6 +19,7 @@ const EMPLOYEE_COLUMNS = [
   'payroll_frequency',
   'salary_type',
   'daily_travel_allowance',
+  'other_allowance',
   'permission_hours_override',
 ];
 
@@ -39,6 +40,7 @@ const SAMPLE_EMPLOYEE_ROW = {
   payroll_frequency: 'monthly',
   salary_type: 'monthly',
   daily_travel_allowance: 0,
+  other_allowance: 0,
   permission_hours_override: '',
 };
 
@@ -60,6 +62,7 @@ const INSTRUCTION_ROWS = [
   ['payroll_frequency', 'No', 'monthly | weekly (for Tharagai use monthly)', 'monthly'],
   ['salary_type', 'No', 'monthly | per_day', 'monthly'],
   ['daily_travel_allowance', 'No', 'Number >= 0', '0'],
+  ['other_allowance', 'No', 'Fixed monthly amount (₹)', '0'],
   ['permission_hours_override', 'No', 'Number >= 0 (hours)', '2'],
 ];
 

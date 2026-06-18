@@ -1,6 +1,11 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { createPdf, savePdf } from './pdfGenerator';
+import {
+  formatGroupedDayNumbersText,
+  formatGroupedLateDetailsText,
+  resolvePayslipAttendanceDates,
+} from './payslipAttendance';
 
 const LAYOUTS = {
   a5: {
@@ -81,10 +86,10 @@ function slotMargins(doc, slot, marginLeft, marginRight) {
   };
 }
 
-function drawPayslipTable(doc, { fixedPage, slot, marginLeft, marginRight, layout, startY, head, body, tableWidth }) {
+function drawPayslipTable(doc, { fixedPage, slot, marginLeft, marginRight, layout, startY, head, body, tableWidth, columnStylesOverride }) {
   if (fixedPage) doc.setPage(fixedPage);
 
-  const columnStyles = {
+  const columnStyles = columnStylesOverride ?? {
     0: { cellWidth: 'auto' },
     1: { halign: 'right', cellWidth: layout === LAYOUTS.a5 ? 72 : 50 },
   };
@@ -138,6 +143,7 @@ function renderCompactPayslip(
 
   const att = breakdown?.attendance || {};
   const b = breakdown?.breakdown || {};
+  const { absentDates, lateDetails } = resolvePayslipAttendanceDates(breakdown, attendanceDetails);
   let y = slotY + layout.startY;
 
   doc.setFontSize(layout.companyTitleSize);
@@ -204,12 +210,19 @@ function renderCompactPayslip(
         ['Absent', `${formatDayCount(att.absenceDays)} d`],
         ['Late', `${att.lateDays ?? 0}`],
         ['Overtime', `${formatHours(att.overtimeHours)} h`],
+        ['Absent dates', formatGroupedDayNumbersText(absentDates)],
+        ['Late dates', formatGroupedLateDetailsText(lateDetails)],
       ],
+      columnStylesOverride: {
+        0: { cellWidth: layout === LAYOUTS.a5 ? 58 : 42 },
+        1: { halign: 'left', cellWidth: 'auto' },
+      },
     }) + layout.sectionGap;
 
   const earningRows = rowsWithAmount([
     ['Earned basic', b.basicSalary],
     ['Travel', b.travelAllowance],
+    ['Other allow.', b.otherAllowance],
     ['Overtime', b.overtimePay],
     ['Leave encash', b.paidLeaveEncashmentAmount],
     ['Incentive', b.noLeaveIncentive],

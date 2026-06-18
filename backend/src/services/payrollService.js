@@ -1498,6 +1498,27 @@ function resolveEmployeeStatutoryDeductions(employee, { earnedBasic = 0, grossSa
   };
 }
 
+function computeOtherAllowance(employee, summary, options = {}) {
+  const monthly = Number(employee.other_allowance || 0);
+  if (monthly <= 0) return 0;
+
+  const presentWorkingDays = Number(summary.presentWorkingDays ?? 0);
+  const workingDays = Number(summary.workingDays ?? 0);
+
+  if (options.isMonthComplete === true) {
+    return monthly;
+  }
+  if (options.isMonthComplete === false && workingDays > 0) {
+    return Math.round((monthly * presentWorkingDays / workingDays) * 100) / 100;
+  }
+
+  const daysInMonth = Number(options.daysInMonth || 0);
+  if (daysInMonth > 0 && presentWorkingDays > 0) {
+    return Math.round((monthly / daysInMonth) * presentWorkingDays * 100) / 100;
+  }
+  return 0;
+}
+
 async function computePayrollWageBasesForRange(
   companyId,
   employeeId,
@@ -1556,13 +1577,14 @@ async function computePayrollWageBasesForRange(
       : 0;
   const travelAllowance =
     Number(employee.daily_travel_allowance || 0) * (summary.presentWorkingDays ?? 0);
+  const otherAllowance = computeOtherAllowance(employee, summary, { daysInMonth });
 
   const earnedBasic =
     salaryType === 'per_day'
       ? dailyRate * (summary.presentWorkingDays ?? 0)
       : dailyRate * (summary.presentDays ?? 0);
 
-  const grossSalary = earnedBasic + overtimePay + travelAllowance;
+  const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
 
   return { earnedBasic, grossSalary };
 }
@@ -1600,7 +1622,7 @@ async function generateWeeklyPayroll(
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, daily_travel_allowance,
+      `SELECT id, basic_salary, status, daily_travel_allowance, other_allowance,
               esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type
        FROM employees
        WHERE company_id = $1 AND id = $2`,
@@ -1662,6 +1684,9 @@ async function generateWeeklyPayroll(
         : 0;
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * (summary.presentWorkingDays ?? 0);
+    const otherAllowance = computeOtherAllowance(employee, summary, {
+      daysInMonth: daysInStartMonth,
+    });
 
     // Weekly payroll ignores paid leave and incentives.
     const earnedBasic =
@@ -1692,7 +1717,7 @@ async function generateWeeklyPayroll(
       lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
     }
 
-    const grossSalary = earnedBasic + overtimePay + travelAllowance;
+    const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
     let statutoryEarnedBasic = earnedBasic;
     let statutoryGross = grossSalary;
     if (
@@ -2084,7 +2109,7 @@ async function getWeeklyPayrollBreakdown(
   const isWeekComplete = !isCurrentWeek || todayStr >= weekEnd;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance,
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, other_allowance,
             esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type
      FROM employees
      WHERE company_id = $1 AND id = $2`,
@@ -2141,6 +2166,9 @@ async function getWeeklyPayrollBreakdown(
     : 0;
   const travelAllowance =
     Number(employee.daily_travel_allowance || 0) * (shiftSummary.presentWorkingDays ?? 0);
+  const otherAllowance = computeOtherAllowance(employee, shiftSummary, {
+    daysInMonth: getDaysInMonth(endYear, endMonth),
+  });
 
   const earnedBasic =
     salaryType === 'per_day'
@@ -2173,7 +2201,7 @@ async function getWeeklyPayrollBreakdown(
   const monthLastDay = getDaysInMonth(endYear, endMonth);
   const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
   const shouldDeductEsi = weekEnd === monthLastDayStr;
-  const grossSalary = earnedBasic + overtimePay + travelAllowance;
+  const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
   let statutoryEarnedBasic = earnedBasic;
   let statutoryGross = grossSalary;
   if (
@@ -2260,6 +2288,7 @@ async function getWeeklyPayrollBreakdown(
       overtimeRatePerHour: effectiveOvertimeRate,
       allowOvertime: Boolean(shiftConfig.allowOvertime),
       travelAllowance,
+      otherAllowance,
       noLeaveIncentive: 0,
       presentWorkingDays: shiftSummary.presentWorkingDays,
       grossSalary,
@@ -2305,7 +2334,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     await client.query('BEGIN');
 
     const employeeResult = await client.query(
-      `SELECT id, basic_salary, status, join_date, daily_travel_allowance,
+      `SELECT id, basic_salary, status, join_date, daily_travel_allowance, other_allowance,
               esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
               payroll_frequency, salary_type, permission_hours_override
        FROM employees
@@ -2371,6 +2400,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const presentWorkingDays = summary.presentWorkingDays ?? 0;
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * presentWorkingDays;
+    const otherAllowance = computeOtherAllowance(employee, summary, {
+      isMonthComplete,
+      daysInMonth,
+    });
 
     const paidLeaveDaysAllowed = isMonthComplete ? Number(summary.paidLeaveDaysAllowed || 0) : 0;
     const paidLeaveUsed = isMonthComplete ? Number(summary.paidLeaveUsed || 0) : 0;
@@ -2432,7 +2465,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
     }
 
-    const grossSalary = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentAmount;
+    const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentAmount;
     const { esiDeduction, pfDeduction } = resolveEmployeeStatutoryDeductions(employee, {
       earnedBasic,
       grossSalary,
@@ -2642,7 +2675,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance,
+    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, other_allowance,
             esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
             shift_id, salary_type, permission_hours_override
      FROM employees
@@ -2710,6 +2743,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const presentWorkingDays = summary.presentWorkingDays ?? 0;
   const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
   const travelAllowance = dailyTravelAllowance * presentWorkingDays;
+  const otherAllowance = computeOtherAllowance(employee, summary, {
+    isMonthComplete,
+    daysInMonth,
+  });
 
   const paidLeaveDaysAllowed = isMonthComplete ? Number(summary.paidLeaveDaysAllowed || 0) : 0;
   const paidLeaveUsed = isMonthComplete ? Number(summary.paidLeaveUsed || 0) : 0;
@@ -2770,7 +2807,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
   }
 
-  const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + paidLeaveEncashmentComputed;
+  const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentComputed;
   const { esiDeduction, pfDeduction } = resolveEmployeeStatutoryDeductions(employee, {
     earnedBasic,
     grossSalary: grossSalaryComputed,
@@ -2957,6 +2994,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       overtimePay,
       allowOvertime,
       travelAllowance,
+      otherAllowance,
       unusedPaidLeaveDays,
       paidLeaveEncashmentAmount,
       presentWorkingDays: summary.presentWorkingDays,

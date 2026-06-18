@@ -27,6 +27,7 @@ export default function EmployeeFormModal({
   const [esiNumber, setEsiNumber] = useState('');
   const [pfNumber, setPfNumber] = useState('');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
+  const [otherAllowance, setOtherAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
   const [esiMode, setEsiMode] = useState('fixed');
   const [esiPercent, setEsiPercent] = useState('');
@@ -105,6 +106,9 @@ export default function EmployeeFormModal({
         setDailyTravelAllowance(
           employee.daily_travel_allowance != null ? String(employee.daily_travel_allowance) : ''
         );
+        setOtherAllowance(
+          employee.other_allowance != null ? String(employee.other_allowance) : ''
+        );
         setEsiAmount(
           employee.esi_amount != null ? String(employee.esi_amount) : ''
         );
@@ -149,6 +153,7 @@ export default function EmployeeFormModal({
         setPfNumber('');
         setBasicSalary('');
         setDailyTravelAllowance('');
+        setOtherAllowance('');
         setEsiAmount('');
         setEsiMode('fixed');
         setEsiPercent('');
@@ -222,6 +227,10 @@ export default function EmployeeFormModal({
 
     if (dailyTravelAllowance.trim() !== '' && (Number.isNaN(Number(dailyTravelAllowance)) || Number(dailyTravelAllowance) < 0)) {
       nextErrors.dailyTravelAllowance = 'Daily travel allowance must be 0 or more';
+    }
+
+    if (otherAllowance.trim() !== '' && (Number.isNaN(Number(otherAllowance)) || Number(otherAllowance) < 0)) {
+      nextErrors.otherAllowance = 'Other allowance must be 0 or more';
     }
 
     if (esiMode === 'fixed') {
@@ -317,6 +326,7 @@ export default function EmployeeFormModal({
         pf_number: pfNumber.trim() === '' ? null : pfNumber.trim(),
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
+        other_allowance: otherAllowance.trim() === '' ? 0 : Number(otherAllowance),
         esi_mode: esiMode,
         esi_amount: esiMode === 'fixed' ? (esiAmount.trim() === '' ? 0 : Number(esiAmount)) : 0,
         esi_percent:
@@ -651,25 +661,48 @@ export default function EmployeeFormModal({
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-slate-700">
-              Daily travel allowance (₹)
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={dailyTravelAllowance}
-                onChange={(e) => setDailyTravelAllowance(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
-                placeholder="0 — paid per working day present (not on holidays)"
-              />
-            </label>
-            <p className="mt-0.5 text-[11px] text-slate-500">
-              Added only for working days when the employee is present; holidays are excluded.
-            </p>
-            {errors.dailyTravelAllowance && (
-              <p className="mt-1 text-[11px] text-rose-600">{errors.dailyTravelAllowance}</p>
-            )}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Daily travel allowance (₹)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={dailyTravelAllowance}
+                  onChange={(e) => setDailyTravelAllowance(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="0 — per working day present"
+                />
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Paid per working day when present; holidays excluded.
+              </p>
+              {errors.dailyTravelAllowance && (
+                <p className="mt-1 text-[11px] text-rose-600">{errors.dailyTravelAllowance}</p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Other allowances (₹/month)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={otherAllowance}
+                  onChange={(e) => setOtherAllowance(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  placeholder="0 — fixed monthly amount"
+                />
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Added to gross salary in payroll (full month, or prorated if month in progress).
+              </p>
+              {errors.otherAllowance && (
+                <p className="mt-1 text-[11px] text-rose-600">{errors.otherAllowance}</p>
+              )}
+            </div>
           </div>
 
           <div>

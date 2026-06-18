@@ -1426,7 +1426,7 @@ export default function ReportsPage() {
             <li><strong>Attendance:</strong> Employee code, name, present/absent/late days, overtime hours.</li>
             <li><strong>Payroll:</strong> Employee code, name, present/total days, overtime, gross, deductions, net salary.</li>
             <li><strong>Overtime:</strong> Employee code, name, overtime hours for the month.</li>
-            <li><strong>ESI statement:</strong> Employee code, name, ESI number, type, rate, gross wages, ESI deduction.</li>
+            <li><strong>ESI statement:</strong> Name, ESI number, gross wages, ESI deduction.</li>
             <li><strong>PF statement:</strong> Employee code, name, type, rate, earned basic, PF deduction.</li>
             <li><strong>Salary payment ledger:</strong> Payment date, employee, period, amount, mode, reference, balance.</li>
           </ul>
