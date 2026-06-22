@@ -17,7 +17,7 @@ if (!code || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
 
 (async () => {
   const emp = await pool.query(
-    `SELECT e.id, e.name, e.employee_code, e.branch_id, e.status, b.name AS branch_name
+    `SELECT e.id, e.name, e.employee_code, e.company_id, e.branch_id, e.status, b.name AS branch_name
      FROM employees e
      LEFT JOIN branches b ON b.id = e.branch_id
      WHERE e.employee_code = $1
@@ -44,11 +44,20 @@ if (!code || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     console.log(`\nPunches for ${row.name} (${row.employee_code}) on ${dateStr}:`, logs.rows);
   }
 
+  const companyId = emp.rows[0]?.company_id;
+  const companyFilter = companyId ? 'AND d.company_id = $1' : '';
+  const deviceParams = companyId ? [companyId] : [];
+
   const devices = await pool.query(
-    `SELECT id, name, adms_sn, adms_attlog_stamp, adms_force_full_sync, last_seen_at
-     FROM devices WHERE adms_sn IS NOT NULL ORDER BY id`
+    `SELECT d.id, d.name, d.company_id, d.branch_id, b.name AS branch_name,
+            d.adms_sn, d.adms_attlog_stamp, d.adms_force_full_sync, d.last_seen_at
+     FROM devices d
+     LEFT JOIN branches b ON b.id = d.branch_id
+     WHERE d.adms_sn IS NOT NULL ${companyFilter}
+     ORDER BY d.id`,
+    deviceParams
   );
-  console.log('\nDevices:', devices.rows);
+  console.log('\nDevices (same company):', devices.rows);
   await pool.end();
 })().catch((e) => {
   console.error(e.message || e);
