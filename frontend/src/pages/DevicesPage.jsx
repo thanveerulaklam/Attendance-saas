@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 
 function maskKey(apiKey) {
@@ -423,6 +424,8 @@ export default function DevicesPage() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {devices.map((device) => {
               const online = isRecentlyOnline(device.last_seen_at);
+              const hasSyncIssues =
+                Array.isArray(device.sync_issues) && device.sync_issues.length > 0;
               const showingFull = showFullKeyId === device.id;
               const displayKey = showingFull
                 ? device.api_key
@@ -451,22 +454,29 @@ export default function DevicesPage() {
                         )}
                       </p>
                     </div>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        device.is_active
+                    <div className="flex flex-col items-end gap-1">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                          device.is_active
+                            ? online
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                              : 'bg-amber-50 text-amber-700 border border-amber-100'
+                            : 'bg-slate-100 text-slate-500 border border-slate-200'
+                        }`}
+                      >
+                        <span className="mr-1 h-1.5 w-1.5 rounded-full bg-current" />
+                        {device.is_active
                           ? online
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                            : 'bg-amber-50 text-amber-700 border border-amber-100'
-                          : 'bg-slate-100 text-slate-500 border border-slate-200'
-                      }`}
-                    >
-                      <span className="mr-1 h-1.5 w-1.5 rounded-full bg-current" />
-                      {device.is_active
-                        ? online
-                          ? 'Online'
-                          : 'No recent sync'
-                        : 'Inactive'}
-                    </span>
+                            ? 'Online'
+                            : 'No recent sync'
+                          : 'Inactive'}
+                      </span>
+                      {hasSyncIssues && (
+                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                          Punch issue
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-3 space-y-2 text-[11px] text-slate-600">
@@ -550,6 +560,43 @@ export default function DevicesPage() {
                         {formatLastSeen(device.last_seen_at)}
                       </span>
                     </div>
+
+                    {device.adms_force_full_sync && (
+                      <div className="rounded-md border border-blue-100 bg-blue-50 px-2.5 py-2">
+                        <p className="text-[10px] font-medium text-blue-800">
+                          Catching up on missed punches…
+                        </p>
+                        <p className="mt-0.5 text-[9px] text-blue-700">
+                          This device is re-uploading attendance. This clears automatically when done.
+                        </p>
+                      </div>
+                    )}
+
+                    {Array.isArray(device.sync_issues) && device.sync_issues.length > 0 && (
+                      <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2">
+                        <p className="text-[10px] font-semibold text-amber-900">
+                          Punches need your attention
+                        </p>
+                        <ul className="mt-1.5 list-disc space-y-1 pl-4">
+                          {device.sync_issues.map((issue) => (
+                            <li
+                              key={`${issue.reason}-${issue.employee_code}`}
+                              className="text-[10px] text-amber-900"
+                            >
+                              {issue.message}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="mt-1.5 text-[9px] text-amber-800">
+                          Other employees on this device are still syncing normally. Fix the codes
+                          above in{' '}
+                          <Link to="/employees" className="font-medium underline hover:text-amber-950">
+                            Employees
+                          </Link>{' '}
+                          to clear this warning.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-2">

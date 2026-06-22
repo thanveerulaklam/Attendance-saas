@@ -4,7 +4,7 @@ const { istYmdFromDate } = require('../utils/istDate');
 const crypto = require('crypto');
 const { getCompanyById, isSubscriptionAllowed } = require('./companyService');
 const auditService = require('./auditService');
-const { recordAdmsRejections } = require('./admsRejectionService');
+const { recordAdmsRejections, getSyncIssuesByDeviceIds } = require('./admsRejectionService');
 
 async function findActiveDeviceByApiKey(apiKey) {
   const result = await pool.query(
@@ -186,7 +186,8 @@ async function listDevices(companyId, { page = 1, limit = 50 } = {}, allowedBran
   const total = Number(countResult.rows[0]?.total || 0);
 
   const result = await pool.query(
-    `SELECT id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active, last_seen_at, created_at
+    `SELECT id, company_id, branch_id, name, api_key, cloud_token, adms_sn, is_active,
+            last_seen_at, created_at, adms_force_full_sync
      FROM devices
      ${where}
      ORDER BY created_at ASC
@@ -194,7 +195,14 @@ async function listDevices(companyId, { page = 1, limit = 50 } = {}, allowedBran
     [...params, limitNum, offset]
   );
 
-  return { data: result.rows, total, page: pageNum, limit: limitNum };
+  const deviceIds = result.rows.map((row) => Number(row.id));
+  const issuesByDevice = await getSyncIssuesByDeviceIds(companyId, deviceIds);
+  const data = result.rows.map((row) => ({
+    ...row,
+    sync_issues: issuesByDevice.get(Number(row.id)) || [],
+  }));
+
+  return { data, total, page: pageNum, limit: limitNum };
 }
 
 async function updateDevice(companyId, id, { name, branch_id: branchIdRaw }, branchContext = {}) {
