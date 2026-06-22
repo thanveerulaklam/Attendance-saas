@@ -25,17 +25,28 @@ async function getSyncIssuesByDeviceIds(companyId, deviceIds) {
   }
 
   const result = await pool.query(
-    `SELECT device_id,
-            employee_code,
-            reason,
+    `SELECT r.device_id,
+            r.employee_code,
+            r.reason,
             COUNT(*)::int AS attempt_count,
-            MAX(created_at) AS last_seen_at
-     FROM adms_punch_rejections
-     WHERE company_id = $1
-       AND device_id = ANY($2::bigint[])
-       AND created_at >= NOW() - INTERVAL '7 days'
-     GROUP BY device_id, employee_code, reason
-     ORDER BY device_id, MAX(created_at) DESC`,
+            MAX(r.created_at) AS last_seen_at
+     FROM adms_punch_rejections r
+     INNER JOIN devices d ON d.id = r.device_id AND d.company_id = r.company_id
+     WHERE r.company_id = $1
+       AND r.device_id = ANY($2::bigint[])
+       AND r.created_at >= NOW() - INTERVAL '7 days'
+       AND NOT (
+         r.reason IN ('unknown_code', 'wrong_branch')
+         AND EXISTS (
+           SELECT 1 FROM employees e
+           WHERE e.company_id = r.company_id
+             AND e.employee_code = r.employee_code
+             AND e.status = 'active'
+             AND e.branch_id = d.branch_id
+         )
+       )
+     GROUP BY r.device_id, r.employee_code, r.reason
+     ORDER BY r.device_id, MAX(r.created_at) DESC`,
     [companyId, deviceIds]
   );
 
