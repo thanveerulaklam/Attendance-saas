@@ -103,6 +103,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'devices' AND column_name = 'adms_attlog_stamp'
   )`,
+  '070_devices_adms_force_full_sync.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'devices' AND column_name = 'adms_force_full_sync'
+  )`,
 };
 
 async function hasExistingSchema(client) {

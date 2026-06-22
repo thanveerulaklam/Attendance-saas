@@ -16,7 +16,9 @@ const { getCompanyById, isSubscriptionAllowed } = require('../services/companySe
 const { parseDeviceIstDateTime, formatIstAdmsStamp } = require('../utils/istDate');
 const {
   getAttlogStamp,
+  isForceFullSync,
   persistAttlogStamp,
+  completeForceFullSync,
   touchAdmsDevice,
   shouldBootstrapPush,
 } = require('../services/admsStampService');
@@ -624,6 +626,10 @@ async function admsCdata(req, res, next) {
         console.warn(
           `ADMS ${admsSn}: ATTLOG POST empty body (Stamp=${stampFromQuery || 'none'})`
         );
+        if (await isForceFullSync(admsSn)) {
+          await completeForceFullSync(admsSn, stampFromQuery || (await getAttlogStamp(admsSn)));
+          console.info(`ADMS ${admsSn}: full sync complete`);
+        }
       }
     }
 
@@ -637,11 +643,14 @@ async function admsCdata(req, res, next) {
 
     if (logs.length > 0) {
       const result = await processDeviceLogs(admsSn, logs, 'adms_sn');
-      const latestStamp = latestAdmsStampFromLogs(logs, stampFromQuery);
-      if (latestStamp) {
-        await persistAttlogStamp(admsSn, latestStamp);
-      } else if (stampFromQuery) {
-        await persistAttlogStamp(admsSn, stampFromQuery);
+      const forceSync = await isForceFullSync(admsSn);
+      if (!forceSync) {
+        const stampToSave = stampFromQuery || latestAdmsStampFromLogs(logs, null);
+        if (stampToSave) {
+          await persistAttlogStamp(admsSn, stampToSave);
+        } else {
+          await touchAdmsDevice(admsSn);
+        }
       } else {
         await touchAdmsDevice(admsSn);
       }
@@ -650,9 +659,10 @@ async function admsCdata(req, res, next) {
           `ADMS ${admsSn}: skipped employee codes: ${result.skipped_unknown_codes.join(', ')}`
         );
       }
-      console.info(`ADMS ${admsSn}: imported ${result.inserted} punch(es)`);
-    } else {
-      if (stampFromQuery) {
+      const syncTag = forceSync ? ' [full-sync]' : '';
+      console.info(`ADMS ${admsSn}: imported ${result.inserted} punch(es)${syncTag}`);
+    } else if (!(table === 'ATTLOG' && req.method === 'POST' && (!rawBody || !rawBody.trim()))) {
+      if (stampFromQuery && !(await isForceFullSync(admsSn))) {
         await persistAttlogStamp(admsSn, stampFromQuery);
       } else {
         await touchAdmsDevice(admsSn);
