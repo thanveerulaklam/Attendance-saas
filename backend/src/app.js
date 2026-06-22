@@ -69,7 +69,40 @@ app.use(cors({
   credentials: true,
 }));
 
-// Parsing
+// ZKTeco/eSSL ADMS — capture raw POST body BEFORE global parsers (they can strip device payloads).
+// Fingerprint devices sync wall clock from HTTP Date on each poll. After bad TimeZone PUSH
+// experiments, many units apply GMT as UTC+5 (not IST +5:30) → 30 min behind. Strip Date on /iclock.
+app.use('/iclock', (_req, res, next) => {
+  const end = res.end.bind(res);
+  res.end = function stripDateHeader(...args) {
+    if (!res.headersSent) {
+      try {
+        res.removeHeader('Date');
+      } catch {
+        // ignore
+      }
+    }
+    return end(...args);
+  };
+  next();
+});
+app.use(
+  '/iclock',
+  express.raw({ type: '*/*', limit: '10mb' }),
+  (req, _res, next) => {
+    if (Buffer.isBuffer(req.body)) {
+      req.admsRawBody = req.body.length ? req.body.toString('utf8') : '';
+    } else if (typeof req.body === 'string') {
+      req.admsRawBody = req.body;
+    } else {
+      req.admsRawBody = '';
+    }
+    next();
+  },
+  admsRouter
+);
+
+// Parsing (API routes — after /iclock so device payloads are not consumed here)
 // Device connectors can send large backlogs (months of punches); nginx must allow similar size.
 app.use(express.json({ limit: '50mb' }));
 app.use(express.text({ type: ['text/plain', 'text/*'], limit: '10mb' }));
@@ -95,24 +128,6 @@ app.use('/api/advances', advancesRouter);
 app.use('/api/advance-loans', advanceLoansRouter);
 app.use('/api/salary-payments', salaryPaymentsRouter);
 app.use('/api/demo-enquiries', demoEnquiriesRouter);
-// ZKTeco/eSSL ADMS endpoints (outside /api for device compatibility)
-// Fingerprint devices sync wall clock from HTTP Date on each poll. After bad TimeZone PUSH
-// experiments, many units apply GMT as UTC+5 (not IST +5:30) → 30 min behind. Strip Date on /iclock.
-app.use('/iclock', (_req, res, next) => {
-  const end = res.end.bind(res);
-  res.end = function stripDateHeader(...args) {
-    if (!res.headersSent) {
-      try {
-        res.removeHeader('Date');
-      } catch {
-        // ignore
-      }
-    }
-    return end(...args);
-  };
-  next();
-});
-app.use('/iclock', express.text({ type: '*/*', limit: '10mb' }), admsRouter);
 
 // 404
 app.use((_req, res) => {

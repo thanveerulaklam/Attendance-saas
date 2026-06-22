@@ -13,6 +13,13 @@ const {
 } = require('../services/deviceService');
 const auditService = require('../services/auditService');
 const { getCompanyById, isSubscriptionAllowed } = require('../services/companyService');
+const { parseDeviceIstDateTime, formatIstAdmsStamp } = require('../utils/istDate');
+const {
+  getAttlogStamp,
+  persistAttlogStamp,
+  touchAdmsDevice,
+  shouldBootstrapPush,
+} = require('../services/admsStampService');
 
 const branchContext = (req) => ({
   role: req.user?.role,
@@ -484,8 +491,8 @@ function parseAdmsBody(rawBody) {
 
       const code = String(fields.PIN || fields.UserID || fields.userId || '').trim();
       const timeStr = fields.DateTime || fields.Time || fields.AttTime;
-      const punchTime = new Date(timeStr);
-      if (!code || !timeStr || Number.isNaN(punchTime.getTime())) continue;
+      const punchTime = parseDeviceIstDateTime(timeStr);
+      if (!code || !timeStr || !punchTime) continue;
       const st = String(fields.Status || fields.Verify || '0');
       const punchType = st === '1' ? 'out' : 'in';
       logs.push({ employeeCode: code, punchTime, punchType });
@@ -496,8 +503,8 @@ function parseAdmsBody(rawBody) {
       const parts = line.split('\t');
       if (parts.length < 2) continue;
       const code = String(parts[0] || '').trim();
-      const punchTime = new Date(parts[1]);
-      if (!code || Number.isNaN(punchTime.getTime())) continue;
+      const punchTime = parseDeviceIstDateTime(parts[1]);
+      if (!code || !punchTime) continue;
       const state = parts[2];
       const punchType = state === '1' ? 'out' : 'in';
       logs.push({ employeeCode: code, punchTime, punchType });
@@ -507,14 +514,81 @@ function parseAdmsBody(rawBody) {
   return logs;
 }
 
+function wantsAdmsPushOptions(req) {
+  const options = String(req.query?.options || '').toLowerCase();
+  if (options === 'all') return true;
+  if (req.query?.INFO) return true;
+  if (req.query?.PushOptionsFlag) return true;
+  return false;
+}
+
+function wantsCdataPushOptions(req, table) {
+  if (wantsAdmsPushOptions(req)) return true;
+  return req.method === 'GET' && req.query?.pushver && !table;
+}
+
+/**
+ * ZKTeco PUSH options for ATTLOG upload.
+ * IMPORTANT: never include TimeZone or SyncTime — fingerprint firmware misreads them (30 min drift).
+ */
+async function buildPushOptions(admsSn) {
+  const stamp = await getAttlogStamp(admsSn);
+  return [
+    `GET OPTION FROM: ${admsSn}`,
+    `ATTLOGStamp=${stamp}`,
+    'OPERLOGStamp=0',
+    'ATTPHOTOStamp=0',
+    'ErrorDelay=30',
+    'Delay=10',
+    'TransTimes=00:00;14:05',
+    'TransInterval=1',
+    'TransFlag=TransData AttLog\tOpLog\tAttPhoto\tEnrollUser\tChgUser\tEnrollFP\tChgFP',
+    'Realtime=1',
+  ].join('\n');
+}
+
+async function resolveAdmsPushResponse(req, admsSn) {
+  const table = String(req.query?.table || '').trim().toUpperCase();
+  const explicitPush = wantsAdmsPushOptions(req) || wantsCdataPushOptions(req, table);
+  const bootstrapPush = req.query?.INFO && (await shouldBootstrapPush(admsSn));
+  if (admsSn && (explicitPush || bootstrapPush)) {
+    return buildPushOptions(admsSn);
+  }
+  return 'OK';
+}
+
+function latestAdmsStampFromLogs(logs, fallbackStamp) {
+  let latest = fallbackStamp ? String(fallbackStamp).trim() : '';
+  let latestMs = 0;
+  for (const log of logs) {
+    const t = log.punchTime instanceof Date ? log.punchTime : new Date(log.punchTime);
+    const ms = t.getTime();
+    if (!Number.isNaN(ms) && ms >= latestMs) {
+      latestMs = ms;
+      latest = formatIstAdmsStamp(t);
+    }
+  }
+  return latest || null;
+}
+
 /**
  * ADMS endpoints used by many ZKTeco/eSSL devices
  * GET/POST /iclock/getrequest?SN=...
  * GET/POST /iclock/cdata?SN=...&table=ATTLOG
  */
 async function admsGetRequest(req, res) {
-  // No command queue for now.
-  res.set('Content-Type', 'text/plain').status(200).send('OK');
+  const admsSn = String(req.query?.SN || req.query?.sn || '').trim().toUpperCase();
+  try {
+    await touchAdmsDevice(admsSn);
+    const body = await resolveAdmsPushResponse(req, admsSn);
+    if (body !== 'OK') {
+      console.info(`ADMS ${admsSn}: PUSH options via getrequest`);
+    }
+    return res.set('Content-Type', 'text/plain').status(200).send(body);
+  } catch (err) {
+    console.error('ADMS getrequest error:', err?.message || err);
+    return res.set('Content-Type', 'text/plain').status(200).send('OK');
+  }
 }
 
 async function admsCdata(req, res, next) {
@@ -525,24 +599,68 @@ async function admsCdata(req, res, next) {
     }
 
     const table = String(req.query?.table || '').trim().toUpperCase();
-    // Devices can call cdata for non-attendance tables; acknowledge without failing.
     if (table && table !== 'ATTLOG') {
+      await touchAdmsDevice(admsSn);
       return res.set('Content-Type', 'text/plain').status(200).send('OK');
     }
 
-    const rawBody = typeof req.body === 'string'
-      ? req.body
-      : (req.body && typeof req.body === 'object' && req.body.data ? String(req.body.data) : '');
+    const pushBody = await resolveAdmsPushResponse(req, admsSn);
+    if (pushBody !== 'OK' && req.method === 'GET') {
+      console.info(`ADMS ${admsSn}: PUSH options via cdata`);
+      return res.set('Content-Type', 'text/plain').status(200).send(pushBody);
+    }
+
+    const rawBody =
+      req.admsRawBody != null
+        ? req.admsRawBody
+        : typeof req.body === 'string'
+          ? req.body
+          : '';
+
+    const stampFromQuery = req.query?.Stamp || req.query?.stamp;
+
+    if (table === 'ATTLOG' && req.method === 'POST') {
+      if (!rawBody || !rawBody.trim()) {
+        console.warn(
+          `ADMS ${admsSn}: ATTLOG POST empty body (Stamp=${stampFromQuery || 'none'})`
+        );
+      }
+    }
+
     const logs = parseAdmsBody(rawBody);
 
+    if (table === 'ATTLOG' && req.method === 'POST' && rawBody.trim() && logs.length === 0) {
+      console.warn(
+        `ADMS ${admsSn}: ATTLOG body not parsed (${rawBody.trim().slice(0, 120)}...)`
+      );
+    }
+
     if (logs.length > 0) {
-      await processDeviceLogs(admsSn, logs, 'adms_sn');
+      const result = await processDeviceLogs(admsSn, logs, 'adms_sn');
+      const latestStamp = latestAdmsStampFromLogs(logs, stampFromQuery);
+      if (latestStamp) {
+        await persistAttlogStamp(admsSn, latestStamp);
+      } else if (stampFromQuery) {
+        await persistAttlogStamp(admsSn, stampFromQuery);
+      } else {
+        await touchAdmsDevice(admsSn);
+      }
+      if (result.skipped_unknown_codes?.length) {
+        console.warn(
+          `ADMS ${admsSn}: skipped employee codes: ${result.skipped_unknown_codes.join(', ')}`
+        );
+      }
+      console.info(`ADMS ${admsSn}: imported ${result.inserted} punch(es)`);
+    } else {
+      if (stampFromQuery) {
+        await persistAttlogStamp(admsSn, stampFromQuery);
+      } else {
+        await touchAdmsDevice(admsSn);
+      }
     }
 
     return res.set('Content-Type', 'text/plain').status(200).send('OK');
   } catch (err) {
-    // ADMS devices can aggressively retry on non-200 responses.
-    // Log and acknowledge to avoid device-side queue lockups.
     console.error('ADMS cdata error:', err?.message || err);
     return res.set('Content-Type', 'text/plain').status(200).send('OK');
   }

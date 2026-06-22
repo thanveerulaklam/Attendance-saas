@@ -1,0 +1,2 @@
+ALTER TABLE devices
+  ADD COLUMN IF NOT EXISTS adms_attlog_stamp VARCHAR(32) NOT NULL DEFAULT '0';
