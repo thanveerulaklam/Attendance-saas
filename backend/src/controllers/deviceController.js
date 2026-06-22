@@ -10,10 +10,12 @@ const {
   updateAdmsSerial,
   deleteDevice,
   processDeviceLogs,
+  findActiveDeviceByAdmsSn,
 } = require('../services/deviceService');
 const auditService = require('../services/auditService');
+const { recordAdmsRejections } = require('../services/admsRejectionService');
 const { getCompanyById, isSubscriptionAllowed } = require('../services/companyService');
-const { parseDeviceIstDateTime, formatIstAdmsStamp } = require('../utils/istDate');
+const { parseDeviceIstDateTime } = require('../utils/istDate');
 const {
   getAttlogStamp,
   isForceFullSync,
@@ -471,14 +473,17 @@ function devicePing(req, res) {
 }
 
 function parseAdmsBody(rawBody) {
-  if (!rawBody || typeof rawBody !== 'string') return [];
+  if (!rawBody || typeof rawBody !== 'string') return { logs: [], unparsedLines: [] };
   const lines = rawBody
     .split(/\r?\n/)
     .map((s) => s.trim())
     .filter(Boolean);
 
   const logs = [];
+  const unparsedLines = [];
   for (const line of lines) {
+    let parsed = false;
+
     if (line.includes('=')) {
       // ADMS key-value style line:
       // PIN=1001\tDateTime=2026-04-16 10:14:00\tStatus=0
@@ -494,26 +499,29 @@ function parseAdmsBody(rawBody) {
       const code = String(fields.PIN || fields.UserID || fields.userId || '').trim();
       const timeStr = fields.DateTime || fields.Time || fields.AttTime;
       const punchTime = parseDeviceIstDateTime(timeStr);
-      if (!code || !timeStr || !punchTime) continue;
-      const st = String(fields.Status || fields.Verify || '0');
-      const punchType = st === '1' ? 'out' : 'in';
-      logs.push({ employeeCode: code, punchTime, punchType });
-      continue;
+      if (code && timeStr && punchTime) {
+        const st = String(fields.Status || fields.Verify || '0');
+        const punchType = st === '1' ? 'out' : 'in';
+        logs.push({ employeeCode: code, punchTime, punchType, rawLine: line });
+        parsed = true;
+      }
+    } else if (line.includes('\t')) {
+      const parts = line.split('\t');
+      if (parts.length >= 2) {
+        const code = String(parts[0] || '').trim();
+        const punchTime = parseDeviceIstDateTime(parts[1]);
+        if (code && punchTime) {
+          const state = parts[2];
+          const punchType = state === '1' ? 'out' : 'in';
+          logs.push({ employeeCode: code, punchTime, punchType, rawLine: line });
+          parsed = true;
+        }
+      }
     }
 
-    if (line.includes('\t')) {
-      const parts = line.split('\t');
-      if (parts.length < 2) continue;
-      const code = String(parts[0] || '').trim();
-      const punchTime = parseDeviceIstDateTime(parts[1]);
-      if (!code || !punchTime) continue;
-      const state = parts[2];
-      const punchType = state === '1' ? 'out' : 'in';
-      logs.push({ employeeCode: code, punchTime, punchType });
-      continue;
-    }
+    if (!parsed) unparsedLines.push(line);
   }
-  return logs;
+  return { logs, unparsedLines };
 }
 
 function wantsAdmsPushOptions(req) {
@@ -559,18 +567,20 @@ async function resolveAdmsPushResponse(req, admsSn) {
   return 'OK';
 }
 
-function latestAdmsStampFromLogs(logs, fallbackStamp) {
-  let latest = fallbackStamp ? String(fallbackStamp).trim() : '';
-  let latestMs = 0;
-  for (const log of logs) {
-    const t = log.punchTime instanceof Date ? log.punchTime : new Date(log.punchTime);
-    const ms = t.getTime();
-    if (!Number.isNaN(ms) && ms >= latestMs) {
-      latestMs = ms;
-      latest = formatIstAdmsStamp(t);
-    }
+/**
+ * Only advance ATTLOGStamp when every line in the batch is fully handled:
+ * - no unparsed lines
+ * - no unknown / wrong-branch employee codes
+ * - new inserts, or every valid punch already in DB (duplicates)
+ */
+function shouldAdvanceAdmsStamp(result, { unparsedLineCount = 0 } = {}) {
+  if (unparsedLineCount > 0) return false;
+  if (result.skipped_unknown_codes?.length || result.skipped_wrong_branch_codes?.length) {
+    return false;
   }
-  return latest || null;
+  if (result.inserted > 0) return true;
+  if (result.valid_count > 0 && result.duplicate_count === result.valid_count) return true;
+  return false;
 }
 
 /**
@@ -633,9 +643,31 @@ async function admsCdata(req, res, next) {
       }
     }
 
-    const logs = parseAdmsBody(rawBody);
+    const { logs, unparsedLines } = parseAdmsBody(rawBody);
 
-    if (table === 'ATTLOG' && req.method === 'POST' && rawBody.trim() && logs.length === 0) {
+    if (table === 'ATTLOG' && req.method === 'POST' && unparsedLines.length > 0) {
+      console.warn(
+        `ADMS ${admsSn}: ${unparsedLines.length} ATTLOG line(s) could not be parsed`
+      );
+      try {
+        const device = await findActiveDeviceByAdmsSn(admsSn);
+        await recordAdmsRejections(
+          device.company_id,
+          device.id,
+          admsSn,
+          unparsedLines.map((rawLine) => ({
+            employeeCode: '?',
+            punchTime: null,
+            reason: 'parse_failed',
+            rawLine: rawLine.slice(0, 2000),
+          }))
+        );
+      } catch (_) {
+        /* unknown device */
+      }
+    }
+
+    if (table === 'ATTLOG' && req.method === 'POST' && rawBody.trim() && logs.length === 0 && unparsedLines.length === 0) {
       console.warn(
         `ADMS ${admsSn}: ATTLOG body not parsed (${rawBody.trim().slice(0, 120)}...)`
       );
@@ -644,13 +676,9 @@ async function admsCdata(req, res, next) {
     if (logs.length > 0) {
       const result = await processDeviceLogs(admsSn, logs, 'adms_sn');
       const forceSync = await isForceFullSync(admsSn);
-      if (!forceSync) {
-        const stampToSave = stampFromQuery || latestAdmsStampFromLogs(logs, null);
-        if (stampToSave) {
-          await persistAttlogStamp(admsSn, stampToSave);
-        } else {
-          await touchAdmsDevice(admsSn);
-        }
+      const stamp = stampFromQuery != null ? String(stampFromQuery).trim() : '';
+      if (!forceSync && stamp && shouldAdvanceAdmsStamp(result, { unparsedLineCount: unparsedLines.length })) {
+        await persistAttlogStamp(admsSn, stamp);
       } else {
         await touchAdmsDevice(admsSn);
       }
@@ -659,14 +687,18 @@ async function admsCdata(req, res, next) {
           `ADMS ${admsSn}: skipped employee codes: ${result.skipped_unknown_codes.join(', ')}`
         );
       }
-      const syncTag = forceSync ? ' [full-sync]' : '';
-      console.info(`ADMS ${admsSn}: imported ${result.inserted} punch(es)${syncTag}`);
-    } else if (!(table === 'ATTLOG' && req.method === 'POST' && (!rawBody || !rawBody.trim()))) {
-      if (stampFromQuery && !(await isForceFullSync(admsSn))) {
-        await persistAttlogStamp(admsSn, stampFromQuery);
-      } else {
-        await touchAdmsDevice(admsSn);
+      if (result.skipped_wrong_branch_codes?.length) {
+        console.warn(
+          `ADMS ${admsSn}: wrong-branch employee codes: ${result.skipped_wrong_branch_codes.join(', ')}`
+        );
       }
+      const codes = [...new Set(logs.map((l) => l.employeeCode))];
+      const syncTag = forceSync ? ' [full-sync]' : '';
+      console.info(
+        `ADMS ${admsSn}: imported ${result.inserted} punch(es)${syncTag} codes=[${codes.join(', ')}]`
+      );
+    } else if (!(table === 'ATTLOG' && req.method === 'POST' && (!rawBody || !rawBody.trim()))) {
+      await touchAdmsDevice(admsSn);
     }
 
     return res.set('Content-Type', 'text/plain').status(200).send('OK');

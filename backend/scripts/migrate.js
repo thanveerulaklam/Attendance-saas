@@ -107,6 +107,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'devices' AND column_name = 'adms_force_full_sync'
   )`,
+  '071_adms_punch_rejections.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'adms_punch_rejections'
+  )`,
 };
 
 async function hasExistingSchema(client) {

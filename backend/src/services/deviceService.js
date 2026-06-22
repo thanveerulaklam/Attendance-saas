@@ -4,6 +4,7 @@ const { istYmdFromDate } = require('../utils/istDate');
 const crypto = require('crypto');
 const { getCompanyById, isSubscriptionAllowed } = require('./companyService');
 const auditService = require('./auditService');
+const { recordAdmsRejections } = require('./admsRejectionService');
 
 async function findActiveDeviceByApiKey(apiKey) {
   const result = await pool.query(
@@ -399,6 +400,34 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
     return e && e.branch_id !== deviceBranchId;
   });
 
+  const rejections = [];
+  for (const log of logs) {
+    const e = employeeMap[log.employeeCode];
+    if (!e) {
+      rejections.push({
+        employeeCode: log.employeeCode,
+        punchTime: log.punchTime,
+        reason: 'unknown_code',
+        rawLine: log.rawLine || null,
+      });
+    } else if (e.branch_id !== deviceBranchId) {
+      rejections.push({
+        employeeCode: log.employeeCode,
+        punchTime: log.punchTime,
+        reason: 'wrong_branch',
+        rawLine: log.rawLine || null,
+      });
+    }
+  }
+  if (rejections.length > 0) {
+    const admsSn = authMode === 'adms_sn' ? String(deviceAuthToken).trim().toUpperCase() : null;
+    try {
+      await recordAdmsRejections(companyId, device.id, admsSn, rejections);
+    } catch (err) {
+      console.error('Failed to record ADMS punch rejections:', err?.message || err);
+    }
+  }
+
   const validLogs = logs.filter((log) => {
     const e = employeeMap[log.employeeCode];
     return e && e.branch_id === deviceBranchId;
@@ -411,7 +440,10 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
       await pool.query(`UPDATE devices SET last_seen_at = NOW() WHERE id = $1`, [device.id]);
       return {
         inserted: 0,
-        skipped_unknown_codes: skipped,
+        valid_count: 0,
+        duplicate_count: 0,
+        skipped_unknown_codes: unknownCodes,
+        skipped_wrong_branch_codes: wrongBranchCodes,
       };
     }
     throw new AppError('No valid punches to import', 400);
@@ -463,21 +495,26 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
       values
     );
 
-    const insertedCount = insertResult.rowCount || 0;
-
     await client.query(`UPDATE devices SET last_seen_at = NOW() WHERE id = $1`, [device.id]);
 
     await client.query('COMMIT');
+
+    const insertedCount = insertResult.rowCount || 0;
+    const validCount = validLogs.length;
+    const duplicateCount = Math.max(0, validCount - insertedCount);
+
+    const result = {
+      inserted: insertedCount,
+      valid_count: validCount,
+      duplicate_count: duplicateCount,
+    };
+    if (unknownCodes.length > 0) result.skipped_unknown_codes = unknownCodes;
+    if (wrongBranchCodes.length > 0) result.skipped_wrong_branch_codes = wrongBranchCodes;
 
     auditService
       .log(companyId, null, 'device.push', 'device', device.id, { logs_count: insertedCount })
       .catch(() => {});
 
-    const result = { inserted: insertedCount };
-    const skipped = [...unknownCodes, ...wrongBranchCodes].filter(
-      (c, i, a) => a.indexOf(c) === i
-    );
-    if (skipped.length > 0) result.skipped_unknown_codes = skipped;
     return result;
   } catch (err) {
     await client.query('ROLLBACK');
