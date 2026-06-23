@@ -1,21 +1,25 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const {
-  istYmdFromDate,
-  istYmdParts,
-  todayIstYmd,
-  addDaysIst,
-  istDayBounds,
-  istMinutesFromMidnight,
-  SQL_PUNCH_IST_DATE,
-} = require('../utils/istDate');
+  ymdFromDate,
+  ymdParts,
+  todayYmd,
+  addDaysYmd,
+  dayBounds,
+  minutesFromMidnight,
+  sqlPunchLocalDate,
+  getActiveCompanyTimezone,
+  runWithCompanyTimezone,
+  getShiftStartMsForDate,
+} = require('../utils/companyDate');
 const { resolveEffectiveShiftIdsForDate } = require('./shiftResolverService');
-const { isFlexibleHoursMode } = require('./companyService');
+const { isFlexibleHoursMode, getCompanyTimezone } = require('./companyService');
 const { getHolidayDatesForMonth } = require('./holidayService');
 
-// Company timezone for shift/late calculations. Server may run in UTC, but punches and shifts are in company local time.
-// Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
-const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
+async function withCompanyIdTimezone(companyId, fn) {
+  const tz = await getCompanyTimezone(companyId);
+  return runWithCompanyTimezone(tz, fn);
+}
 
 function employeesBranchFilterSql(allowedBranchIds, paramIndex, columnName = 'branch_id') {
   if (allowedBranchIds == null) {
@@ -71,22 +75,9 @@ async function assertAttendanceLogInScope(client, companyId, logId, allowedBranc
   }
 }
 
-const TZ_OFFSETS = {
-  'Asia/Kolkata': '+05:30',
-  'Asia/Calcutta': '+05:30',
-  UTC: 'Z',
-  'Etc/UTC': 'Z',
-};
-
-/**
- * Get shift start timestamp (ms) for a given date in company timezone.
- * "9:30" must mean 9:30 AM in company local (e.g. IST), not server UTC.
- */
-function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
-  const offset = TZ_OFFSETS[COMPANY_TZ] ?? '+05:30';
-  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}:00${offset === 'Z' ? 'Z' : offset}`;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? new Date(year, month - 1, day, startHour, startMinute, 0).getTime() : d.getTime();
+/** Minutes from midnight in company local time (alias for clarity in shift attribution). */
+function companyMinutesFromMidnight(d) {
+  return minutesFromMidnight(d);
 }
 
 function parseAttendanceMode(row) {
@@ -159,7 +150,7 @@ function getFullDayMinimumWorkMs(shiftConfig) {
  * e.g. 06:00 on day 2 belongs to the shift that started 22:00 on day 1.
  */
 function attributedShiftStartDateStr(punchTime, shiftConfig) {
-  const istYmd = istYmdFromDate(punchTime);
+  const istYmd = ymdFromDate(punchTime);
   const mode = String(shiftConfig.attendanceMode || '').toLowerCase();
   if (
     !shiftConfig.isOvernightClock ||
@@ -167,7 +158,7 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
   ) {
     return istYmd;
   }
-  const mins = istMinutesFromMidnight(punchTime);
+  const mins = companyMinutesFromMidnight(punchTime);
   const startMin = shiftConfig.startHour * 60 + shiftConfig.startMinute;
   const endMin = shiftConfig.endHour * 60 + shiftConfig.endMinute;
   if (mins >= startMin) {
@@ -175,7 +166,7 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
   }
   // End boundary belongs to the shift that started previous day as well.
   if (mins <= endMin) {
-    return addDaysIst(istYmd, -1);
+    return addDaysYmd(istYmd, -1);
   }
   return istYmd;
 }
@@ -382,10 +373,10 @@ function computeRawWorkedMsFromAllLogs(allLogs, nowMs = Date.now()) {
     punch_time: l.punch_time || l.punchTime,
     punch_type: String(l.punch_type || l.punchType || 'in').toLowerCase(),
   }));
-  const todayStr = todayIstYmd();
+  const todayStr = todayYmd();
   const hasToday = logsForPairs.some((l) => {
     const d = new Date(l.punch_time);
-    return istYmdFromDate(d) === todayStr;
+    return ymdFromDate(d) === todayStr;
   });
   return computeRawWorkedMsFromPairs(logsForPairs, hasToday, nowMs);
 }
@@ -397,8 +388,8 @@ function distributeFlexibleHoursAcrossIstDays(inMs, outMs, map) {
   if (!Number.isFinite(inMs) || !Number.isFinite(outMs) || outMs <= inMs) return;
   let cursor = inMs;
   while (cursor < outMs) {
-    const ymd = istYmdFromDate(new Date(cursor));
-    const { end: dayEnd } = istDayBounds(ymd);
+    const ymd = ymdFromDate(new Date(cursor));
+    const { end: dayEnd } = dayBounds(ymd);
     const segEnd = Math.min(outMs, dayEnd.getTime());
     const diffMs = segEnd - cursor;
     if (diffMs > 0) {
@@ -418,7 +409,7 @@ function computeFlexibleDailyHoursFromLogs(allLogs, nowMs = Date.now()) {
   if (!Array.isArray(allLogs) || allLogs.length === 0) return map;
 
   const maxSessionMs = 24 * 60 * 60 * 1000;
-  const todayStr = todayIstYmd();
+  const todayStr = todayYmd();
   const sorted = [...allLogs].sort(
     (a, b) => new Date(a.punch_time || a.punchTime) - new Date(b.punch_time || b.punchTime)
   );
@@ -435,7 +426,7 @@ function computeFlexibleDailyHoursFromLogs(allLogs, nowMs = Date.now()) {
     }
 
     if (type === 'out' && currentInMs != null) {
-      const inDate = istYmdFromDate(new Date(currentInMs));
+      const inDate = ymdFromDate(new Date(currentInMs));
       const isOpenOnToday = inDate === todayStr;
       const endPairMs = isOpenOnToday ? Math.min(tMs, nowMs) : tMs;
       const diffMs = endPairMs - currentInMs;
@@ -519,7 +510,7 @@ function computeHoursInsideForHoursBasedPayroll(
       punch_type: String(l.punchType || l.punch_type || 'in').toLowerCase(),
     };
   });
-  const isCurrentDate = todayIstYmd() === ymd;
+  const isCurrentDate = todayYmd() === ymd;
   const workedMs = computeWorkedMsFromShiftStartToNow(
     logsForMs,
     shiftConfig,
@@ -865,7 +856,8 @@ async function getDailyAttendance(
     throw new AppError('Invalid date format. Use YYYY-MM-DD', 400);
   }
 
-  const isCurrentDate = todayIstYmd() === dateStr;
+  return withCompanyIdTimezone(companyId, async () => {
+  const isCurrentDate = todayYmd() === dateStr;
   const nowMs = Date.now();
 
   const client = await pool.connect();
@@ -922,7 +914,8 @@ async function getDailyAttendance(
         c.isOvernightClock &&
         (c.attendanceMode === 'shift_based' || c.attendanceMode === 'hours_based')
     );
-    const nextDayStr = addDaysIst(dateStr, 1);
+    const nextDayStr = addDaysYmd(dateStr, 1);
+    const punchDateSql = sqlPunchLocalDate(getActiveCompanyTimezone());
 
     const bfDev = deviceFilterSql(
       deviceFilter,
@@ -938,13 +931,13 @@ async function getDailyAttendance(
            FROM attendance_logs
            WHERE company_id = $1
              AND employee_id = ANY($2::bigint[])
-             AND (${SQL_PUNCH_IST_DATE} = $3::date OR ${SQL_PUNCH_IST_DATE} = $4::date)${bfDev.clause}
+             AND (${punchDateSql} = $3::date OR ${punchDateSql} = $4::date)${bfDev.clause}
            ORDER BY punch_time ASC`
         : `SELECT id, employee_id, punch_time, punch_type, device_id
            FROM attendance_logs
            WHERE company_id = $1
              AND employee_id = ANY($2::bigint[])
-             AND ${SQL_PUNCH_IST_DATE} = $3::date${bfDev.clause}
+             AND ${punchDateSql} = $3::date${bfDev.clause}
            ORDER BY punch_time ASC`,
       logsParams
     );
@@ -1051,6 +1044,7 @@ async function getDailyAttendance(
   } finally {
     client.release();
   }
+  });
 }
 
 /**
@@ -1075,6 +1069,7 @@ async function getMonthlyAttendance(
     throw new AppError('Valid year and month are required', 400);
   }
 
+  return withCompanyIdTimezone(companyId, async () => {
   const daysInMonth = new Date(y, m, 0).getDate();
   const monthFirstStr = `${y}-${String(m).padStart(2, '0')}-01`;
   const monthLastStr = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
@@ -1118,7 +1113,7 @@ async function getMonthlyAttendance(
     const holidaySet = flexibleHoursMode
       ? await getHolidayDatesForMonth(companyId, y, m)
       : null;
-    const todayStr = todayIstYmd();
+    const todayStr = todayYmd();
     let monthWorkingDays = 0;
     if (flexibleHoursMode) {
       for (let d = 1; d <= daysInMonth; d += 1) {
@@ -1141,20 +1136,21 @@ async function getMonthlyAttendance(
         (c.attendanceMode === 'shift_based' || c.attendanceMode === 'hours_based')
     );
     const rangeStart = needOvernightExtension
-      ? addDaysIst(monthFirstStr, -1)
+      ? addDaysYmd(monthFirstStr, -1)
       : monthFirstStr;
     const rangeEnd = needOvernightExtension
-      ? addDaysIst(monthLastStr, 1)
+      ? addDaysYmd(monthLastStr, 1)
       : monthLastStr;
 
     const bfDevM = deviceFilterSql(deviceFilter, 5);
+    const punchDateSqlM = sqlPunchLocalDate(getActiveCompanyTimezone());
     const logsResult = await client.query(
       `SELECT employee_id, punch_time, punch_type, device_id
        FROM attendance_logs
        WHERE company_id = $1
          AND employee_id = ANY($2::bigint[])
-         AND ${SQL_PUNCH_IST_DATE} >= $3::date
-         AND ${SQL_PUNCH_IST_DATE} <= $4::date${bfDevM.clause}
+         AND ${punchDateSqlM} >= $3::date
+         AND ${punchDateSqlM} <= $4::date${bfDevM.clause}
        ORDER BY punch_time ASC`,
       [companyId, ids, rangeStart, rangeEnd, ...bfDevM.params]
     );
@@ -1175,7 +1171,7 @@ async function getMonthlyAttendance(
         shiftCfg.isOvernightClock &&
         (shiftCfg.attendanceMode === 'shift_based' || shiftCfg.attendanceMode === 'hours_based')
           ? attributedShiftStartDateStr(punchTime, shiftCfg)
-          : istYmdFromDate(punchTime);
+          : ymdFromDate(punchTime);
       if (key < monthFirstStr || key > monthLastStr) continue;
       if (!logsByEmployeeAndDay.has(eid)) {
         logsByEmployeeAndDay.set(eid, new Map());
@@ -1320,6 +1316,7 @@ async function getMonthlyAttendance(
   } finally {
     client.release();
   }
+  });
 }
 
 /**

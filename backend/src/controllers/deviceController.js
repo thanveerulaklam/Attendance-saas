@@ -14,8 +14,8 @@ const {
 } = require('../services/deviceService');
 const auditService = require('../services/auditService');
 const { recordAdmsRejections } = require('../services/admsRejectionService');
-const { getCompanyById, isSubscriptionAllowed } = require('../services/companyService');
-const { parseDeviceIstDateTime } = require('../utils/istDate');
+const { getCompanyById, isSubscriptionAllowed, getCompanyTimezone } = require('../services/companyService');
+const { parseDeviceDateTime } = require('../utils/companyDate');
 const {
   getAttlogStamp,
   isForceFullSync,
@@ -472,7 +472,7 @@ function devicePing(req, res) {
   res.set('Content-Type', 'text/plain').status(200).send('OK');
 }
 
-function parseAdmsBody(rawBody) {
+function parseAdmsBody(rawBody, timezone = 'Asia/Kolkata') {
   if (!rawBody || typeof rawBody !== 'string') return { logs: [], unparsedLines: [] };
   const lines = rawBody
     .split(/\r?\n/)
@@ -498,7 +498,7 @@ function parseAdmsBody(rawBody) {
 
       const code = String(fields.PIN || fields.UserID || fields.userId || '').trim();
       const timeStr = fields.DateTime || fields.Time || fields.AttTime;
-      const punchTime = parseDeviceIstDateTime(timeStr);
+      const punchTime = parseDeviceDateTime(timeStr, timezone);
       if (code && timeStr && punchTime) {
         const st = String(fields.Status || fields.Verify || '0');
         const punchType = st === '1' ? 'out' : 'in';
@@ -509,7 +509,7 @@ function parseAdmsBody(rawBody) {
       const parts = line.split('\t');
       if (parts.length >= 2) {
         const code = String(parts[0] || '').trim();
-        const punchTime = parseDeviceIstDateTime(parts[1]);
+        const punchTime = parseDeviceDateTime(parts[1], timezone);
         if (code && punchTime) {
           const state = parts[2];
           const punchType = state === '1' ? 'out' : 'in';
@@ -643,7 +643,15 @@ async function admsCdata(req, res, next) {
       }
     }
 
-    const { logs, unparsedLines } = parseAdmsBody(rawBody);
+    let companyTimezone = 'Asia/Kolkata';
+    try {
+      const deviceForTz = await findActiveDeviceByAdmsSn(admsSn);
+      companyTimezone = await getCompanyTimezone(deviceForTz.company_id);
+    } catch {
+      /* unknown device — parse with India default */
+    }
+
+    const { logs, unparsedLines } = parseAdmsBody(rawBody, companyTimezone);
 
     if (table === 'ATTLOG' && req.method === 'POST' && unparsedLines.length > 0) {
       console.warn(

@@ -1,6 +1,12 @@
 import { Fragment, useEffect, useState, useMemo, useCallback } from 'react';
 import { authFetch } from '../utils/api';
-import { formatIstTime, IST } from '../utils/istDisplay';
+import { IST } from '../utils/istDisplay';
+import {
+  formatLocalTime,
+  formatYmdDisplay,
+  formatYmdLong,
+  todayYmdInTimezone,
+} from '../utils/companyLocalDisplay';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -10,33 +16,6 @@ function pad2(n) {
 
 function formatYMDLocalFromParts(year, month1Based, day) {
   return `${year}-${pad2(month1Based)}-${pad2(day)}`;
-}
-
-function formatDateDisplayFromYMD(ymd) {
-  const s = String(ymd || '');
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return '—';
-  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`).toLocaleDateString('en-IN', {
-    timeZone: IST,
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-}
-
-function formatDateLongIstYmd(ymd) {
-  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return '—';
-  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`).toLocaleDateString('en-IN', {
-    timeZone: IST,
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
-
-function todayStr() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: IST });
 }
 
 function formatTimeForInput(d) {
@@ -89,6 +68,8 @@ export default function AttendancePage() {
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
   const [company, setCompany] = useState(null);
+  const companyTz = company?.timezone || IST;
+  const todayStr = useMemo(() => todayYmdInTimezone(companyTz), [companyTz]);
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dailyLoading, setDailyLoading] = useState(false);
@@ -109,7 +90,7 @@ export default function AttendancePage() {
   const [editPunchEdits, setEditPunchEdits] = useState([]); // [{ id?, tempId?, isNew?, time, punch_type }]
   const [manualForm, setManualForm] = useState({
     employee_id: '',
-    date: todayStr(),
+    date: todayYmdInTimezone(IST),
     time: formatTimeForInput(new Date()),
     punch_type: 'in',
     mode: 'full_day', // 'full_day' | 'single'
@@ -117,7 +98,7 @@ export default function AttendancePage() {
     selected_ids: [],
   });
   const [refreshKey, setRefreshKey] = useState(0);
-  const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [selectedDate, setSelectedDate] = useState(() => todayYmdInTimezone(IST));
 
   const { year, month } = monthYear;
   const dateStr = selectedDate;
@@ -533,7 +514,7 @@ export default function AttendancePage() {
     setManualSuccess(null);
     setManualForm((f) => ({
       ...f,
-      date: todayStr(),
+      date: todayYmdInTimezone(IST),
       time: formatTimeForInput(new Date()),
       selected_ids: [],
     }));
@@ -555,7 +536,7 @@ export default function AttendancePage() {
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Daily summary</h2>
             <p className="text-[11px] text-slate-500 mt-0.5">
-              Attendance for {formatDateLongIstYmd(dateStr)}
+              Attendance for {formatYmdLong(dateStr, companyTz)}
             </p>
           </div>
           <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
@@ -693,7 +674,7 @@ export default function AttendancePage() {
           <div className="mt-4 border-t border-slate-100 pt-4">
             <h3 className="text-xs font-semibold text-slate-700 mb-2">
               Punch timings for{' '}
-              {formatDateDisplayFromYMD(dateStr)}
+              {formatYmdDisplay(dateStr, companyTz)}
             </h3>
             <div className="max-h-[44rem] overflow-auto rounded-lg border border-slate-100">
               <table className="w-full min-w-[720px] text-[11px]">
@@ -723,7 +704,7 @@ export default function AttendancePage() {
                     const punches = row.punches || [];
                     const timingsContent = punches.length
                       ? punches.map((p, idx) => {
-                          const timeStr = formatIstTime(p.punch_time);
+                          const timeStr = formatLocalTime(p.punch_time, companyTz);
                           const punchType = (p.punch_type || '').toLowerCase();
                           const deviceId = (p.device_id || '').toLowerCase();
                           const isAuto = deviceId === 'auto_out' && punchType === 'out';
@@ -783,7 +764,7 @@ export default function AttendancePage() {
                     }
                     let firstPunchLabel = '';
                     if (row.first_in_time) {
-                      const timeStr = formatIstTime(row.first_in_time);
+                      const timeStr = formatLocalTime(row.first_in_time, companyTz);
                       const minsLate = Number(row.minutes_late || 0);
                       const lateStr =
                         row.late && minsLate > 0
@@ -1125,7 +1106,7 @@ export default function AttendancePage() {
                   .filter((r) => r.late)
                   .map((row) => {
                     const firstIn = (row.punches || []).find((p) => (p.punch_type || '').toLowerCase() === 'in');
-                    const arrivalTime = firstIn ? formatIstTime(firstIn.punch_time) : '—';
+                    const arrivalTime = firstIn ? formatLocalTime(firstIn.punch_time, companyTz) : '—';
                     return (
                       <li
                         key={row.employee_id}
@@ -1251,8 +1232,8 @@ export default function AttendancePage() {
                           ) : null}
                         </span>
                         <span className="text-[11px] text-blue-700 font-medium">
-                          {firstIn ? formatIstTime(firstIn.punch_time) : '—'} →{' '}
-                          {lastOut ? formatIstTime(lastOut.punch_time) : '—'}
+                          {firstIn ? formatLocalTime(firstIn.punch_time, companyTz) : '—'} →{' '}
+                          {lastOut ? formatLocalTime(lastOut.punch_time, companyTz) : '—'}
                         </span>
                       </li>
                     );
@@ -1327,7 +1308,7 @@ export default function AttendancePage() {
                           ) : null}
                         </span>
                         <span className="text-[11px] text-rose-700 font-medium">
-                          {firstIn ? formatIstTime(firstIn.punch_time) : '—'} / {lastOut ? formatIstTime(lastOut.punch_time) : '—'} • {trailingLabel}
+                          {firstIn ? formatLocalTime(firstIn.punch_time, companyTz) : '—'} / {lastOut ? formatLocalTime(lastOut.punch_time, companyTz) : '—'} • {trailingLabel}
                         </span>
                       </li>
                     );

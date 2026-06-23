@@ -1,6 +1,15 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
-const { istYmdFromDate, todayIstYmd, SQL_PUNCH_IST_DATE, addDaysIst } = require('../utils/istDate');
+const {
+  ymdFromDate,
+  todayYmd,
+  addDaysYmd,
+  sqlPunchLocalDate,
+  getActiveCompanyTimezone,
+  runWithCompanyTimezone,
+  getShiftStartMsForDate,
+  minutesFromMidnight,
+} = require('../utils/companyDate');
 const {
   computeDayStatus,
   attributedShiftStartDateStr,
@@ -25,8 +34,12 @@ const {
   computePfDeduction,
   normalizeMode,
 } = require('../utils/statutoryDeductions');
+const { getCompanyTimezone } = require('./companyService');
 
-const COMPANY_TZ = process.env.COMPANY_TIMEZONE || 'Asia/Kolkata';
+async function withCompanyIdTimezone(companyId, fn) {
+  const tz = await getCompanyTimezone(companyId);
+  return runWithCompanyTimezone(tz, fn);
+}
 
 async function assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds) {
   if (allowedBranchIds == null) return;
@@ -56,13 +69,6 @@ function normalizePayrollDayLogs(dayLogs) {
   }));
 }
 
-function getShiftStartMsForDate(year, month, day, startHour, startMinute) {
-  const offset = TZ_OFFSETS[COMPANY_TZ] ?? '+05:30';
-  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${String(startHour).padStart(2, '0')}:${String(startMinute).padStart(2, '0')}:00${offset === 'Z' ? 'Z' : offset}`;
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? new Date(year, month - 1, day, startHour, startMinute, 0).getTime() : d.getTime();
-}
-
 function getMonthBounds(year, month) {
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0));
   const end = new Date(Date.UTC(year, month, 1, 0, 0, 0));
@@ -71,26 +77,18 @@ function getMonthBounds(year, month) {
 }
 
 /** For compact hours-based shops, map after-midnight close punches to previous attendance day. */
-const LATE_CLOSE_CUTOFF_MINUTES = 6 * 60; // 06:00 IST
+const LATE_CLOSE_CUTOFF_MINUTES = 6 * 60; // 06:00 local
 
-function getIstMinutesFromMidnight(date) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: COMPANY_TZ,
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-  }).formatToParts(date);
-  const hh = Number(parts.find((p) => p.type === 'hour')?.value || 0);
-  const mm = Number(parts.find((p) => p.type === 'minute')?.value || 0);
-  return hh * 60 + mm;
+function getLocalMinutesFromMidnight(date) {
+  return minutesFromMidnight(date, getActiveCompanyTimezone());
 }
 
 function attributedCompactHoursBasedDateStr(punchTime, shiftConfig) {
-  const ymd = istYmdFromDate(punchTime);
+  const ymd = ymdFromDate(punchTime);
   const startMin = Number(shiftConfig.startHour || 0) * 60 + Number(shiftConfig.startMinute || 0);
-  const mins = getIstMinutesFromMidnight(punchTime);
+  const mins = getLocalMinutesFromMidnight(punchTime);
   if (mins < LATE_CLOSE_CUTOFF_MINUTES && mins < startMin) {
-    return addDaysIst(ymd, -1);
+    return addDaysYmd(ymd, -1);
   }
   return ymd;
 }
@@ -439,7 +437,7 @@ async function getShiftForEmployee(client, companyId, employeeId, dateStr = null
 
 /** Add or subtract days from YYYY-MM-DD (IST calendar), return YYYY-MM-DD. */
 function addDays(isoDateStr, delta) {
-  return addDaysIst(isoDateStr, delta);
+  return addDaysYmd(isoDateStr, delta);
 }
 
 /** Holidays/weekly-offs adjacent to an absent day (for treatHolidayAdjacentAbsenceAsWorking). */
@@ -465,7 +463,7 @@ function getAdjacentHolidayAbsentKeys(holidaySet, presentDayKeys, rangeStart, ra
  * and absence for dates that have already occurred. Avoids penalizing staff for future days.
  */
 function getLastDateToConsider(year, month, asOfDate) {
-  const todayStr = todayIstYmd();
+  const todayStr = todayYmd();
   const [ty, tm] = todayStr.split('-').map(Number);
   const isCurrentMonth = year === ty && month === tm;
   const lastDayOfMonth = new Date(year, month, 0).getDate();
@@ -475,7 +473,7 @@ function getLastDateToConsider(year, month, asOfDate) {
     return lastDayStr;
   }
   const asOfStr =
-    typeof asOfDate === 'string' ? asOfDate.slice(0, 10) : istYmdFromDate(asOfDate);
+    typeof asOfDate === 'string' ? asOfDate.slice(0, 10) : ymdFromDate(asOfDate);
   return asOfStr < lastDayStr ? asOfStr : lastDayStr;
 }
 
@@ -523,8 +521,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
          FROM attendance_logs
          WHERE company_id = $1
            AND employee_id = $2
-           AND ${SQL_PUNCH_IST_DATE} >= $3::date
-           AND ${SQL_PUNCH_IST_DATE} <= $4::date
+           AND ${sqlPunchLocalDate(getActiveCompanyTimezone())} >= $3::date
+           AND ${sqlPunchLocalDate(getActiveCompanyTimezone())} <= $4::date
          ORDER BY punch_time ASC`,
         [companyId, employeeId, rangeStart, rangeEnd]
       ),
@@ -548,7 +546,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     for (const row of logsResult.rows) {
       const punchTime = new Date(row.punch_time);
-      const punchYmd = istYmdFromDate(punchTime);
+      const punchYmd = ymdFromDate(punchTime);
       const punchShift = rotationEnabled ? await getDayShift(punchYmd) : shift;
       let key;
       if (shiftsCompactUi && punchShift.attendanceMode === 'hours_based') {
@@ -862,7 +860,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         punch_type: l.punchType,
       }));
 
-      const isCurrentDateForStatus = dayKey === todayIstYmd();
+      const isCurrentDateForStatus = dayKey === todayYmd();
       const status = computeDayStatus(
         logsForStatus,
         dayShift,
@@ -984,7 +982,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         punch_time: l.punchTime.toISOString(),
         punch_type: l.punchType,
       }));
-      const isCurrentDateForStatus = dayKey === todayIstYmd();
+      const isCurrentDateForStatus = dayKey === todayYmd();
       const status = computeDayStatus(
         logsForStatus,
         dayShift,
@@ -1158,8 +1156,8 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
          FROM attendance_logs
          WHERE company_id = $1
            AND employee_id = $2
-           AND ${SQL_PUNCH_IST_DATE} >= $3::date
-           AND ${SQL_PUNCH_IST_DATE} <= $4::date
+           AND ${sqlPunchLocalDate(getActiveCompanyTimezone())} >= $3::date
+           AND ${sqlPunchLocalDate(getActiveCompanyTimezone())} <= $4::date
          ORDER BY punch_time ASC`,
         [companyId, employeeId, rangeStart, rangeEnd]
       ),
@@ -1179,7 +1177,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       ) {
         key = attributedShiftStartDateStr(punchTime, shift);
       } else {
-        key = istYmdFromDate(punchTime);
+        key = ymdFromDate(punchTime);
       }
       if (key < startStr || key > endStr) continue;
       if (!logsByDay.has(key)) logsByDay.set(key, []);
@@ -1656,6 +1654,7 @@ async function generateWeeklyPayroll(
   const applySalaryAdvances = applySalaryAdvancesRaw !== false;
   const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
 
+  return withCompanyIdTimezone(companyId, async () => {
   const weekStart = String(weekStartDateStr).slice(0, 10);
   const weekEnd = getWeekEndDate(weekStart);
 
@@ -1688,7 +1687,7 @@ async function generateWeeklyPayroll(
       throw new AppError('Cannot generate payroll for inactive employee', 400);
     }
 
-    const todayStr = todayIstYmd();
+    const todayStr = todayYmd();
     const isCurrentWeek = todayStr >= weekStart && todayStr <= weekEnd;
     const asOfDate = isCurrentWeek ? todayStr : null;
 
@@ -1910,9 +1909,11 @@ async function generateWeeklyPayroll(
   } finally {
     client.release();
   }
+  });
 }
 
 async function generateWeeklyPayrollForAllActive(companyId, weekStartDateStr, payrollOptions = {}) {
+  return withCompanyIdTimezone(companyId, async () => {
   const {
     allowedBranchIds = null,
     ...rest
@@ -1970,6 +1971,7 @@ async function generateWeeklyPayrollForAllActive(companyId, weekStartDateStr, pa
     results,
     errors,
   };
+  });
 }
 
 /**
@@ -2150,7 +2152,7 @@ async function getWeeklyPayrollBreakdown(
   }
   const weekPayrollRow = weekPayrollRowResult.rows[0];
 
-  const todayStr = todayIstYmd();
+  const todayStr = todayYmd();
   const isCurrentWeek = todayStr >= weekStart && todayStr <= weekEnd;
   const asOfDate = isCurrentWeek ? todayStr : null;
   const isWeekComplete = !isCurrentWeek || todayStr >= weekEnd;
@@ -2375,6 +2377,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     allowedBranchIds = null,
   } = payrollOptions;
   const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
+
+  return withCompanyIdTimezone(companyId, async () => {
   const client = await pool.connect();
 
   try {
@@ -2405,7 +2409,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       throw new AppError('This employee is configured for weekly payroll', 400);
     }
 
-    const todayStr = todayIstYmd();
+    const todayStr = todayYmd();
     const [ty, tm, td] = todayStr.split('-').map(Number);
     const isCurrentMonth = year === ty && month === tm;
     const asOfDate = isCurrentMonth ? todayStr : null;
@@ -2670,6 +2674,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
   } finally {
     client.release();
   }
+  });
 }
 
 /**
@@ -2718,7 +2723,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const effectiveTreatHolidayAdjacentAbsenceAsWorking =
     options.treatHolidayAdjacentAbsenceAsWorking === true || persistedTreatHoliday;
 
-  const todayStr = todayIstYmd();
+  const todayStr = todayYmd();
   const [ty, tm, td] = todayStr.split('-').map(Number);
   const isCurrentMonth = year === ty && month === tm;
   const asOfDate = isCurrentMonth ? todayStr : null;
@@ -3240,6 +3245,7 @@ async function listPayrollRecords(
  * @returns { Promise<{ generated: number, failed: number, results: Array, errors: Array }> }
  */
 async function generateMonthlyPayrollForAllActive(companyId, year, month, payrollOptions = {}) {
+  return withCompanyIdTimezone(companyId, async () => {
   const { noLeaveIncentive = 0, allowedBranchIds = null, ...rest } = payrollOptions;
   const client = await pool.connect();
   let employeeIds = [];
@@ -3294,6 +3300,7 @@ async function generateMonthlyPayrollForAllActive(companyId, year, month, payrol
     results,
     errors,
   };
+  });
 }
 
 async function fetchLoanRepaymentsForPeriod(client, companyId, employeeId, year, month, status) {

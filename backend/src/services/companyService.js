@@ -367,8 +367,17 @@ async function updateBillingMetadata(companyId, data) {
   return result.rows[0] || null;
 }
 
+async function getCompanyTimezone(companyId) {
+  const result = await pool.query(
+    `SELECT timezone FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  return result.rows[0]?.timezone || 'Asia/Kolkata';
+}
+
 module.exports = {
   getCompanyById,
+  getCompanyTimezone,
   getSubscriptionStatus,
   isSubscriptionAllowed,
   isFlexibleHoursMode,
