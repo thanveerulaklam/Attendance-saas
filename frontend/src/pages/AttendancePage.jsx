@@ -102,7 +102,7 @@ export default function AttendancePage() {
 
   const { year, month } = monthYear;
   const dateStr = selectedDate;
-  const isTodaySelected = dateStr === todayStr();
+  const isTodaySelected = dateStr === todayStr;
   const isTharagaiReadymades = String(company?.name || '').toLowerCase().includes('tharagai readymades');
 
   const refreshAfterManual = useCallback(() => {
