@@ -48,10 +48,18 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
   onetime_payment_status, amc_payment_status, last_onetime_payment_date,
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
-  enable_shift_rotation,
+  enable_shift_rotation, flexible_hours_mode,
   whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
   whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;
+
+async function isFlexibleHoursMode(companyId) {
+  const result = await pool.query(
+    `SELECT flexible_hours_mode FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  return result.rows[0]?.flexible_hours_mode === true;
+}
 
 async function getCompanyById(companyId) {
   const result = await pool.query(
@@ -124,6 +132,7 @@ async function updateCompany(companyId, data) {
     'whatsapp_secondary_number',
     'whatsapp_send_time',
     'enable_shift_rotation',
+    'flexible_hours_mode',
   ];
   const raw = data || {};
   const normalized = { ...raw };
@@ -177,6 +186,40 @@ async function updateCompany(companyId, data) {
     normalized.enable_shift_rotation = Boolean(normalized.enable_shift_rotation);
   }
 
+  if (Object.prototype.hasOwnProperty.call(normalized, 'flexible_hours_mode')) {
+    normalized.flexible_hours_mode = Boolean(normalized.flexible_hours_mode);
+  }
+
+  const existingForPolicy = await getCompanyById(companyId);
+
+  const enablingFlexible =
+    Object.prototype.hasOwnProperty.call(normalized, 'flexible_hours_mode') &&
+    normalized.flexible_hours_mode === true;
+  const enablingRotation =
+    Object.prototype.hasOwnProperty.call(normalized, 'enable_shift_rotation') &&
+    normalized.enable_shift_rotation === true;
+
+  if (enablingFlexible && existingForPolicy?.enable_shift_rotation === true) {
+    throw new AppError(
+      'Turn off factory shift rotation before enabling flexible hours mode',
+      400
+    );
+  }
+  if (enablingRotation && existingForPolicy?.flexible_hours_mode === true) {
+    throw new AppError(
+      'Turn off flexible hours mode before enabling factory shift rotation',
+      400
+    );
+  }
+
+  if (enablingFlexible) {
+    normalized.enable_shift_rotation = false;
+    await pool.query(
+      `UPDATE companies SET hours_based_shifts_only = TRUE WHERE id = $1`,
+      [companyId]
+    );
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalized, 'paid_leave_forfeit_if_absence_gt')) {
     const v = normalized.paid_leave_forfeit_if_absence_gt;
     if (v === '' || v === null || typeof v === 'undefined') {
@@ -197,10 +240,6 @@ async function updateCompany(companyId, data) {
   if (entries.length === 0) {
     return getCompanyById(companyId);
   }
-
-  const enablingRotation =
-    Object.prototype.hasOwnProperty.call(normalized, 'enable_shift_rotation') &&
-    normalized.enable_shift_rotation === true;
 
   if (enablingRotation) {
     await backfillInitialAssignments(companyId);
@@ -331,6 +370,7 @@ module.exports = {
   getCompanyById,
   getSubscriptionStatus,
   isSubscriptionAllowed,
+  isFlexibleHoursMode,
   updateCompany,
   updateSubscription,
   updateBillingMetadata,

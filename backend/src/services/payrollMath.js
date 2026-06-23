@@ -72,6 +72,29 @@ function computePermissionOffset({
   };
 }
 
+function computeFlexibleMonthlySettlement({
+  monthlyWorkedHours,
+  monthlyRequiredHours,
+  requiredHoursPerDay,
+  workingDays,
+}) {
+  const worked = Math.max(0, Number(monthlyWorkedHours || 0));
+  const required = Math.max(0, Number(monthlyRequiredHours || 0));
+  const perDay = Math.max(0, Number(requiredHoursPerDay || 8));
+  const days = Math.max(0, Number(workingDays || 0));
+  const balanceHours = worked - required;
+  const presentDays = perDay > 0 ? Math.min(days, worked / perDay) : 0;
+  const rawAbsenceHours = Math.max(0, required - worked);
+  return {
+    monthlyWorkedHours: worked,
+    monthlyRequiredHours: required,
+    monthlyBalanceHours: balanceHours,
+    presentDays,
+    rawAbsenceHours,
+    rawAbsenceDays: perDay > 0 ? rawAbsenceHours / perDay : 0,
+  };
+}
+
 function computePaidLeaveEncashment({
   enabled,
   isMonthComplete,
@@ -97,6 +120,7 @@ function computePaidLeaveEncashment({
 module.exports = {
   computeMonthlyBaseAndAbsence,
   computePermissionOffset,
+  computeFlexibleMonthlySettlement,
   computePaidLeaveEncashment,
 };
 

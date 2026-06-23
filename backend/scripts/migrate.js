@@ -111,6 +111,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'adms_punch_rejections'
   )`,
+  '072_companies_flexible_hours_mode.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'companies' AND column_name = 'flexible_hours_mode'
+  )`,
 };
 
 async function hasExistingSchema(client) {

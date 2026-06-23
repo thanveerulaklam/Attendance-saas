@@ -102,7 +102,8 @@ export default function ShiftsPage() {
   const hoursBasedOnly = company?.hours_based_shifts_only === true;
   /** Tharagai Readymades (and any company with `shifts_compact_ui`): simplified shifts + neutral legacy columns server-side. */
   const shiftsCompactUi = company?.shifts_compact_ui === true;
-  const factoryMode = company?.enable_shift_rotation === true;
+  const flexibleHoursMode = company?.flexible_hours_mode === true;
+  const factoryMode = company?.enable_shift_rotation === true && !flexibleHoursMode;
   const [activeTab, setActiveTab] = useState('templates');
   /** Company policy: absent days above this → paid leave from shift not applied (editable). */
   const [plForfeitGt, setPlForfeitGt] = useState('');
@@ -368,6 +369,21 @@ export default function ShiftsPage() {
         full_day_hours: 11,
         half_day_hours: 5.5,
       }));
+    } else if (preset === 'hospital') {
+      setForm((prev) => ({
+        ...prev,
+        shift_name: prev.shift_name || 'Hospital — Flexible',
+        start_time: '00:00',
+        end_time: '23:59',
+        attendance_mode: 'hours_based',
+        required_hours_per_day: 8,
+        full_day_hours: 8,
+        half_day_hours: 4,
+        grace_minutes: 0,
+        lunch_minutes: 0,
+        weekly_off_days: [],
+        allow_overtime: false,
+      }));
     }
   };
 
@@ -376,10 +392,25 @@ export default function ShiftsPage() {
       <header>
         <h1 className="text-lg font-semibold text-slate-900">Shifts</h1>
         <p className="text-xs text-slate-500">
-          {factoryMode
+          {flexibleHoursMode
+            ? 'Flexible hours: daily minimum is for tracking; payroll uses monthly total hours worked.'
+            : factoryMode
             ? 'Factory mode: create Day/Night templates, assign staff, then optionally set up automatic rotation.'
             : 'Define standard working hours and grace time for your factory.'}
         </p>
+        {flexibleHoursMode && (
+          <div className="mt-3 max-w-2xl rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-[11px] text-emerald-900">
+            <p className="font-semibold">Hospital / flexible hours guide</p>
+            <ol className="mt-1.5 list-decimal space-y-1 pl-4">
+              <li>
+                Use <strong>Hospital flexible</strong> preset — set daily minimum hours (e.g. 8 or 12).
+              </li>
+              <li>Assign all clinical staff to this shift on the Employees page.</li>
+              <li>Leave weekly off empty for 24/7 operations; use Holidays for planned closures only.</li>
+              <li>Extra hours on one day automatically offset short days within the same month.</li>
+            </ol>
+          </div>
+        )}
         {factoryMode && (
           <div className="mt-3 max-w-2xl rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-[11px] text-blue-900">
             <p className="font-semibold">Quick guide</p>
@@ -467,6 +498,15 @@ export default function ShiftsPage() {
                     Night 21–9
                   </button>
                 </div>
+              )}
+              {flexibleHoursMode && (
+                <button
+                  type="button"
+                  onClick={() => applyShiftPreset('hospital')}
+                  className="rounded border border-emerald-200 bg-white px-2 py-0.5 text-[10px] text-emerald-700 hover:bg-emerald-50"
+                >
+                  Hospital flexible
+                </button>
               )}
             </div>
             <div className="space-y-2">

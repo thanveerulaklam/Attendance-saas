@@ -5,6 +5,8 @@ const {
   computeDayStatus,
   attributedShiftStartDateStr,
   computeHoursInsideForHoursBasedPayroll,
+  computeFlexibleDailyHoursFromLogs,
+  computeMonthlyRawWorkedHoursFromLogs,
 } = require('./attendanceService');
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
@@ -15,6 +17,7 @@ const { resolveShiftIdForEmployeeOnDate } = require('./shiftAssignmentService');
 const {
   computeMonthlyBaseAndAbsence,
   computePermissionOffset,
+  computeFlexibleMonthlySettlement,
   computePaidLeaveEncashment,
 } = require('./payrollMath');
 const {
@@ -496,11 +499,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     };
 
     const companyPlResult = await client.query(
-      `SELECT paid_leave_forfeit_if_absence_gt, shifts_compact_ui FROM companies WHERE id = $1`,
+      `SELECT paid_leave_forfeit_if_absence_gt, shifts_compact_ui, flexible_hours_mode FROM companies WHERE id = $1`,
       [companyId]
     );
     const plForfeitIfAbsenceGt = companyPlResult.rows[0]?.paid_leave_forfeit_if_absence_gt;
     const shiftsCompactUi = companyPlResult.rows[0]?.shifts_compact_ui === true;
+    const flexibleHoursMode = companyPlResult.rows[0]?.flexible_hours_mode === true;
 
     const needOvernightRange =
       rotationEnabled ||
@@ -593,6 +597,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       let rawAbsenceHours = 0;
       let overtimeHours = 0;
 
+      const flexibleDailyHours = flexibleHoursMode
+        ? computeFlexibleDailyHoursFromLogs(logsResult.rows)
+        : null;
+
       // Iterate every calendar day up to lastDateToConsider so working days with no punches
       // are counted absent (logsByDay only had keys where at least one punch existed).
       for (let d = 1; d <= daysInMonth; d += 1) {
@@ -616,8 +624,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
               })
             );
           } else {
-            rawAbsenceDays += 1;
-            rawAbsenceHours += required;
+            if (!flexibleHoursMode) {
+              rawAbsenceDays += 1;
+              rawAbsenceHours += required;
+            }
             dayDetails.push(
               buildDayDetailRecord({
                 date: dayKey,
@@ -630,13 +640,15 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         }
 
         const sorted = normalizePayrollDayLogs(dayLogs);
-        const hoursInside = computeHoursInsideForHoursBasedPayroll(sorted, dayShift, dayKey);
+        const hoursInside = flexibleHoursMode
+          ? flexibleDailyHours?.get(dayKey) || 0
+          : computeHoursInsideForHoursBasedPayroll(sorted, dayShift, dayKey);
         const workedHoursCapped = Math.min(required, Math.max(0, Number(hoursInside || 0)));
 
         const presentFraction = required > 0 ? workedHoursCapped / required : 0;
         let statusLabel = 'absent';
 
-        if (hoursInside >= required) {
+        if (!flexibleHoursMode && hoursInside >= required) {
           overtimeHours += hoursInside - required;
         }
         if (hoursInside >= required) {
@@ -655,7 +667,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
         let isLate = false;
         let minutesLate = 0;
-        if (firstInTime && !isHoliday) {
+        if (!flexibleHoursMode && firstInTime && !isHoliday) {
           const [y, mo, dNum] = dayKey.split('-').map(Number);
           const shiftStartMs = getShiftStartMsForDate(
             y,
@@ -674,20 +686,27 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           }
         }
 
-        if (presentFraction > 0) {
-          presentDayKeys.add(dayKey);
-          presentDays += presentFraction;
-          if (!isHoliday) {
-            presentWorkingDays += presentFraction;
-            if (presentFraction > 0 && presentFraction < 1) {
-              halfDayDays += 1;
+        if (!flexibleHoursMode) {
+          if (presentFraction > 0) {
+            presentDayKeys.add(dayKey);
+            presentDays += presentFraction;
+            if (!isHoliday) {
+              presentWorkingDays += presentFraction;
+              if (presentFraction > 0 && presentFraction < 1) {
+                halfDayDays += 1;
+              }
             }
+          } else if (!isHoliday) {
+            rawAbsenceDays += 1;
           }
-        } else if (!isHoliday) {
-          rawAbsenceDays += 1;
-        }
-        if (!isHoliday) {
-          rawAbsenceHours += Math.max(0, required - workedHoursCapped);
+          if (!isHoliday) {
+            rawAbsenceHours += Math.max(0, required - workedHoursCapped);
+          }
+        } else if (presentFraction > 0) {
+          presentDayKeys.add(dayKey);
+          if (presentFraction > 0 && presentFraction < 1) {
+            halfDayDays += 1;
+          }
         }
 
         dayDetails.push(
@@ -701,6 +720,30 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
             minutesLate,
           })
         );
+      }
+
+      let monthlyWorkedHours = null;
+      let monthlyRequiredHours = null;
+      let monthlyBalanceHours = null;
+
+      if (flexibleHoursMode) {
+        const defaultRequired = Number(shift.requiredHoursPerDay || 8);
+        const monthlyWorked = computeMonthlyRawWorkedHoursFromLogs(logsResult.rows);
+        const monthlyRequired = workingDays * defaultRequired;
+        const settlement = computeFlexibleMonthlySettlement({
+          monthlyWorkedHours: monthlyWorked,
+          monthlyRequiredHours: monthlyRequired,
+          requiredHoursPerDay: defaultRequired,
+          workingDays,
+        });
+        monthlyWorkedHours = settlement.monthlyWorkedHours;
+        monthlyRequiredHours = settlement.monthlyRequiredHours;
+        monthlyBalanceHours = settlement.monthlyBalanceHours;
+        presentDays = settlement.presentDays;
+        presentWorkingDays = settlement.presentDays;
+        rawAbsenceHours = settlement.rawAbsenceHours;
+        rawAbsenceDays = settlement.rawAbsenceDays;
+        overtimeHours = Math.max(0, monthlyWorkedHours - monthlyRequiredHours);
       }
 
       let effectiveWorkingDays = workingDays;
@@ -786,6 +829,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         absenceDays,
         attendanceMode: 'hours_based',
         requiredHoursPerDay: defaultRequired,
+        flexibleHoursMode,
+        monthlyWorkedHours,
+        monthlyRequiredHours,
+        monthlyBalanceHours,
         dayDetails,
       };
       const overridesMap = await loadOverridesMap(
@@ -2447,6 +2494,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     let lateDeduction = 0;
     if (
+      !summary.flexibleHoursMode &&
       (summary.lateDays || 0) > 0 &&
       summary.lateDeductionMinutes > 0 &&
       summary.lateDeductionAmount > 0
@@ -2475,16 +2523,17 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       employee.permission_hours_override != null
         ? Number(employee.permission_hours_override || 0)
         : Number(shiftConfig.monthlyPermissionHours || 0);
-    const permissionOffset = isMonthComplete
-      ? computePermissionOffset({
+    const permissionOffset =
+      summary.flexibleHoursMode || !isMonthComplete
+        ? { allocatedHours: 0, usedMinutes: 0, offsetAmount: 0 }
+        : computePermissionOffset({
           allocatedHours: effectivePermissionHours,
           lateMinutes: summary.lateMinutes,
           absenceDays: absenceDaysForPayroll,
           hourlyRate,
           deductionsBeforeOffset: deductionsBeforePermission,
           workDayHoursForPermission,
-        })
-      : { allocatedHours: 0, usedMinutes: 0, offsetAmount: 0 };
+        });
     const deductions = deductionsBeforePermission - permissionOffset.offsetAmount;
     const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
     const repaymentRowsResult = applyAdvanceRepayments
@@ -2789,6 +2838,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   let lateDeduction = 0;
   if (
+    !summary.flexibleHoursMode &&
     (summary.lateDays || 0) > 0 &&
     summary.lateDeductionMinutes > 0 &&
     summary.lateDeductionAmount > 0
@@ -2813,14 +2863,17 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     grossSalary: grossSalaryComputed,
   });
   const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
-  const permissionOffsetComputed = computePermissionOffset({
-    allocatedHours: isMonthComplete ? effectivePermissionHours : 0,
-    lateMinutes: summary.lateMinutes,
-    absenceDays: absenceDaysForPayroll,
-    hourlyRate,
-    deductionsBeforeOffset: deductionsBeforePermission,
-    workDayHoursForPermission,
-  });
+  const permissionOffsetComputed =
+    summary.flexibleHoursMode || !isMonthComplete
+      ? { allocatedHours: 0, usedMinutes: 0, offsetAmount: 0 }
+      : computePermissionOffset({
+          allocatedHours: effectivePermissionHours,
+          lateMinutes: summary.lateMinutes,
+          absenceDays: absenceDaysForPayroll,
+          hourlyRate,
+          deductionsBeforeOffset: deductionsBeforePermission,
+          workDayHoursForPermission,
+        });
   const permissionHoursAllocated =
     !isMonthComplete
       ? 0
@@ -2976,6 +3029,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       halfDayDays: summary.halfDayDays,
       attendanceMode: summary.attendanceMode,
       requiredHoursPerDay: summary.requiredHoursPerDay,
+      flexibleHoursMode: summary.flexibleHoursMode === true,
+      monthlyWorkedHours: summary.monthlyWorkedHours,
+      monthlyRequiredHours: summary.monthlyRequiredHours,
+      monthlyBalanceHours: summary.monthlyBalanceHours,
       treatHolidayAdjacentAbsenceAsWorking: effectiveTreatHolidayAdjacentAbsenceAsWorking,
       paidLeaveDaysAllowed: summary.paidLeaveDaysAllowed,
       paidLeaveUsed: summary.paidLeaveUsed,
@@ -3007,6 +3064,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       permissionHoursAllocated,
       permissionMinutesUsed,
       permissionOffsetAmount,
+      monthlyWorkedHours: summary.monthlyWorkedHours,
+      monthlyRequiredHours: summary.monthlyRequiredHours,
+      monthlyBalanceHours: summary.monthlyBalanceHours,
       totalDeductions,
       salaryAdvance,
       noLeaveIncentive,

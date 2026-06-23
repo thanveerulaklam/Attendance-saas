@@ -72,6 +72,9 @@ export default function CompanySettingsPage() {
   const [shiftRotationEnabled, setShiftRotationEnabled] = useState(false);
   const [shiftRotationSaving, setShiftRotationSaving] = useState(false);
   const [shiftRotationToast, setShiftRotationToast] = useState(null);
+  const [flexibleHoursEnabled, setFlexibleHoursEnabled] = useState(false);
+  const [flexibleHoursSaving, setFlexibleHoursSaving] = useState(false);
+  const [flexibleHoursToast, setFlexibleHoursToast] = useState(null);
   const [subscriptionForm, setSubscriptionForm] = useState({
     subscription_start_date: '',
     subscription_end_date: '',
@@ -149,6 +152,7 @@ export default function CompanySettingsPage() {
           last_sent_at: data.whatsapp_last_sent_at || null,
         });
         setShiftRotationEnabled(Boolean(data.enable_shift_rotation));
+        setFlexibleHoursEnabled(Boolean(data.flexible_hours_mode));
         setSubscriptionForm({
           subscription_start_date: toDateInputValue(data.subscription_start_date),
           subscription_end_date: toDateInputValue(data.subscription_end_date),
@@ -270,6 +274,44 @@ export default function CompanySettingsPage() {
       setWhatsappToast({ type: 'error', message: err.message || 'Failed to save' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleToggleFlexibleHours = async (nextEnabled) => {
+    const turningOn = nextEnabled && !flexibleHoursEnabled;
+    const turningOff = !nextEnabled && flexibleHoursEnabled;
+    if (turningOn) {
+      const ok = window.confirm(
+        'Enable flexible hours mode? Attendance is tracked daily but payroll settles on monthly total hours — ideal for hospitals and round-the-clock staff without fixed shifts. Factory shift rotation will be turned off.'
+      );
+      if (!ok) return;
+    }
+    if (turningOff) {
+      const ok = window.confirm(
+        'Turn off flexible hours mode? Payroll will return to per-day hours-based rules for each shift.'
+      );
+      if (!ok) return;
+    }
+    try {
+      setFlexibleHoursSaving(true);
+      setFlexibleHoursToast(null);
+      const res = await authFetch('/api/company', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flexible_hours_mode: nextEnabled }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save setting');
+      setFlexibleHoursEnabled(Boolean(json.data?.flexible_hours_mode));
+      if (nextEnabled) setShiftRotationEnabled(false);
+      setFlexibleHoursToast({
+        type: 'success',
+        message: nextEnabled ? 'Flexible hours mode enabled.' : 'Flexible hours mode disabled.',
+      });
+    } catch (err) {
+      setFlexibleHoursToast({ type: 'error', message: err.message || 'Failed to save' });
+    } finally {
+      setFlexibleHoursSaving(false);
     }
   };
 
@@ -544,6 +586,51 @@ export default function CompanySettingsPage() {
 
       {isAdmin && (
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Flexible hours (hospital mode)</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            For hospitals and 24/7 teams without fixed shifts. Staff punch at varying times;
+            daily attendance shows present/half/absent, but payroll only penalizes if monthly
+            total hours fall short.
+          </p>
+          {flexibleHoursToast && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-[11px] ${
+                flexibleHoursToast.type === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-700'
+                  : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {flexibleHoursToast.message}
+            </div>
+          )}
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={flexibleHoursEnabled}
+              onChange={(e) => handleToggleFlexibleHours(e.target.checked)}
+              disabled={loading || flexibleHoursSaving || shiftRotationEnabled}
+            />
+            <span>
+              <span className="font-medium">Enable flexible hours mode</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                Uses hours-based shifts only. Cannot be used together with factory shift rotation.
+              </span>
+            </span>
+          </label>
+          {flexibleHoursEnabled && (
+            <p className="mt-3 text-[11px]">
+              <a href="/shifts" className="font-medium text-blue-600 hover:underline">
+                Go to Shifts →
+              </a>{' '}
+              use the Hospital flexible preset and assign staff to that shift.
+            </p>
+          )}
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
           <h2 className="text-sm font-semibold text-slate-900">Factory shift rotation</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
             For factories with day and night shifts that rotate every few weeks. Leave off for
@@ -566,7 +653,7 @@ export default function CompanySettingsPage() {
               className="mt-0.5 rounded border-slate-300"
               checked={shiftRotationEnabled}
               onChange={(e) => handleToggleShiftRotation(e.target.checked)}
-              disabled={loading || shiftRotationSaving}
+              disabled={loading || shiftRotationSaving || flexibleHoursEnabled}
             />
             <span>
               <span className="font-medium">Enable shift rotation</span>

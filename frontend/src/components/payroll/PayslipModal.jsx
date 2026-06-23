@@ -340,6 +340,7 @@ export default function PayslipModal({
   const b = breakdown.breakdown || {};
   const isHoursBasedPayroll =
     String(breakdown?.attendance?.attendanceMode || '').toLowerCase() === 'hours_based';
+  const isFlexibleHoursPayroll = breakdown?.attendance?.flexibleHoursMode === true;
   const absentDaysNum = Number(breakdown?.attendance?.absenceDays || 0);
   const absentDeductNum = Number(breakdown?.breakdown?.absenceDeduction || 0);
   const absentPerDayRate =
@@ -497,11 +498,47 @@ export default function PayslipModal({
                 )}
               </p>
             )}
-            {isHoursBasedPayroll && (
+            {isFlexibleHoursPayroll && (
+              <p className="payslip-print-hidden mb-2 rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] text-emerald-800">
+                Flexible hours mode: payroll settles on monthly total hours. Daily present/half/absent
+                are for supervision; short days can be offset by extra hours elsewhere in the month.
+              </p>
+            )}
+            {isHoursBasedPayroll && !isFlexibleHoursPayroll && (
               <p className="payslip-print-hidden mb-2 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] text-blue-800">
                 Hours-based payroll mode: salary is prorated by hours worked (worked hours / required hours per day).
                 Full-day and half-day buckets are not used for payroll calculation.
               </p>
+            )}
+            {isFlexibleHoursPayroll &&
+              breakdown.breakdown?.monthlyWorkedHours != null &&
+              breakdown.breakdown?.monthlyRequiredHours != null && (
+              <div className="mb-2 grid gap-x-6 gap-y-1 rounded-md border border-emerald-100 bg-white px-2 py-2 sm:grid-cols-3 text-[10px]">
+                <div className="flex justify-between sm:block">
+                  <span className="text-slate-500">Monthly worked</span>
+                  <span className="font-medium text-slate-800">
+                    {formatHours(breakdown.breakdown.monthlyWorkedHours)} hrs
+                  </span>
+                </div>
+                <div className="flex justify-between sm:block">
+                  <span className="text-slate-500">Monthly required</span>
+                  <span className="font-medium text-slate-800">
+                    {formatHours(breakdown.breakdown.monthlyRequiredHours)} hrs
+                  </span>
+                </div>
+                <div className="flex justify-between sm:block">
+                  <span className="text-slate-500">Balance</span>
+                  <span
+                    className={`font-medium ${
+                      Number(breakdown.breakdown.monthlyBalanceHours || 0) < 0
+                        ? 'text-rose-600'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatHours(breakdown.breakdown.monthlyBalanceHours)} hrs
+                  </span>
+                </div>
+              </div>
             )}
             <div className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
               <div className="flex justify-between">
@@ -545,7 +582,9 @@ export default function PayslipModal({
               </div>
             </div>
             <p className="payslip-print-hidden mt-2 text-[10px] text-slate-500">
-              {isHoursBasedPayroll
+              {isFlexibleHoursPayroll
+                ? 'Salary is based on monthly hours worked vs monthly contract hours (working days × daily minimum).'
+                : isHoursBasedPayroll
                 ? 'Salary deduction absence is computed from worked-hours shortfall against required hours.'
                 : 'Salary deduction absence = full absent days + (half days x 0.5).'}
             </p>

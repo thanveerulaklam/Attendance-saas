@@ -5,10 +5,13 @@ const {
   istYmdParts,
   todayIstYmd,
   addDaysIst,
+  istDayBounds,
   istMinutesFromMidnight,
   SQL_PUNCH_IST_DATE,
 } = require('../utils/istDate');
 const { resolveEffectiveShiftIdsForDate } = require('./shiftResolverService');
+const { isFlexibleHoursMode } = require('./companyService');
+const { getHolidayDatesForMonth } = require('./holidayService');
 
 // Company timezone for shift/late calculations. Server may run in UTC, but punches and shifts are in company local time.
 // Set COMPANY_TIMEZONE=Asia/Kolkata for Indian deployments. Defaults to Asia/Kolkata.
@@ -322,6 +325,178 @@ function computeWorkedMsFromShiftStartToNow(
   }
 
   return workedMs;
+}
+
+/**
+ * Sum completed IN→OUT pair duration without shift-start clipping (flexible / hospital mode).
+ * Unpaired IN on a past date contributes nothing; on today counts through now.
+ */
+function computeRawWorkedMsFromPairs(dayLogs, isCurrentDate = false, nowMs = Date.now()) {
+  if (!Array.isArray(dayLogs) || dayLogs.length === 0) return 0;
+
+  const maxSessionMs = 24 * 60 * 60 * 1000;
+  const endMs = isCurrentDate ? nowMs : Number.POSITIVE_INFINITY;
+  let workedMs = 0;
+  let currentInMs = null;
+
+  const sorted = [...dayLogs].sort(
+    (a, b) => new Date(a.punch_time || a.punchTime) - new Date(b.punch_time || b.punchTime)
+  );
+
+  for (const log of sorted) {
+    const tMs = new Date(log.punch_time || log.punchTime).getTime();
+    const type = String(log.punch_type || log.punchType || 'in').toLowerCase();
+
+    if (type === 'in') {
+      currentInMs = tMs;
+      continue;
+    }
+
+    if (type === 'out' && currentInMs != null) {
+      const endPairMs = Math.min(tMs, endMs);
+      const diffMs = endPairMs - currentInMs;
+      if (diffMs > 0 && diffMs <= maxSessionMs) {
+        workedMs += diffMs;
+      }
+      currentInMs = null;
+    }
+  }
+
+  if (isCurrentDate && currentInMs != null && Number.isFinite(endMs)) {
+    const diffMs = endMs - currentInMs;
+    if (diffMs > 0 && diffMs <= maxSessionMs) {
+      workedMs += diffMs;
+    }
+  }
+
+  return workedMs;
+}
+
+/**
+ * Global IN→OUT pairing across all logs (monthly total for flexible hours mode).
+ */
+function computeRawWorkedMsFromAllLogs(allLogs, nowMs = Date.now()) {
+  if (!Array.isArray(allLogs) || allLogs.length === 0) return 0;
+
+  const logsForPairs = allLogs.map((l) => ({
+    punch_time: l.punch_time || l.punchTime,
+    punch_type: String(l.punch_type || l.punchType || 'in').toLowerCase(),
+  }));
+  const todayStr = todayIstYmd();
+  const hasToday = logsForPairs.some((l) => {
+    const d = new Date(l.punch_time);
+    return istYmdFromDate(d) === todayStr;
+  });
+  return computeRawWorkedMsFromPairs(logsForPairs, hasToday, nowMs);
+}
+
+/**
+ * Split a worked interval at IST midnights into per-calendar-day hour buckets.
+ */
+function distributeFlexibleHoursAcrossIstDays(inMs, outMs, map) {
+  if (!Number.isFinite(inMs) || !Number.isFinite(outMs) || outMs <= inMs) return;
+  let cursor = inMs;
+  while (cursor < outMs) {
+    const ymd = istYmdFromDate(new Date(cursor));
+    const { end: dayEnd } = istDayBounds(ymd);
+    const segEnd = Math.min(outMs, dayEnd.getTime());
+    const diffMs = segEnd - cursor;
+    if (diffMs > 0) {
+      const hours = diffMs / (60 * 60 * 1000);
+      map.set(ymd, (map.get(ymd) || 0) + hours);
+    }
+    cursor = segEnd;
+  }
+}
+
+/**
+ * Per-day hours for flexible mode: completed IN→OUT pairs split at IST midnight.
+ * Monthly payroll total still uses global pair sum (unchanged).
+ */
+function computeFlexibleDailyHoursFromLogs(allLogs, nowMs = Date.now()) {
+  const map = new Map();
+  if (!Array.isArray(allLogs) || allLogs.length === 0) return map;
+
+  const maxSessionMs = 24 * 60 * 60 * 1000;
+  const todayStr = todayIstYmd();
+  const sorted = [...allLogs].sort(
+    (a, b) => new Date(a.punch_time || a.punchTime) - new Date(b.punch_time || b.punchTime)
+  );
+
+  let currentInMs = null;
+
+  for (const log of sorted) {
+    const tMs = new Date(log.punch_time || log.punchTime).getTime();
+    const type = String(log.punch_type || log.punchType || 'in').toLowerCase();
+
+    if (type === 'in') {
+      currentInMs = tMs;
+      continue;
+    }
+
+    if (type === 'out' && currentInMs != null) {
+      const inDate = istYmdFromDate(new Date(currentInMs));
+      const isOpenOnToday = inDate === todayStr;
+      const endPairMs = isOpenOnToday ? Math.min(tMs, nowMs) : tMs;
+      const diffMs = endPairMs - currentInMs;
+      if (diffMs > 0 && diffMs <= maxSessionMs) {
+        distributeFlexibleHoursAcrossIstDays(currentInMs, endPairMs, map);
+      }
+      currentInMs = null;
+    }
+  }
+
+  if (currentInMs != null) {
+    const diffMs = nowMs - currentInMs;
+    if (diffMs > 0 && diffMs <= maxSessionMs) {
+      distributeFlexibleHoursAcrossIstDays(currentInMs, nowMs, map);
+    }
+  }
+
+  return map;
+}
+
+function computeMonthlyRawWorkedHoursFromLogs(allLogs, nowMs = Date.now()) {
+  return computeRawWorkedMsFromAllLogs(allLogs, nowMs) / (60 * 60 * 1000);
+}
+
+function computeFlexibleHoursBasedDayStatus(hoursInside, shiftConfig, isCurrentDate, dayLogs) {
+  const required = Number(shiftConfig.requiredHoursPerDay || 8);
+  const totalHoursInside = Number(hoursInside || 0);
+
+  let present = false;
+  let halfDay = false;
+  let overtimeHours = 0;
+
+  if (totalHoursInside >= required) {
+    present = true;
+    overtimeHours = totalHoursInside - required;
+  } else if (totalHoursInside >= required * 0.5) {
+    present = true;
+    halfDay = true;
+  } else if (isCurrentDate && dayLogs?.length) {
+    const last = [...dayLogs].sort(
+      (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
+    );
+    const lastType = String(last[last.length - 1]?.punch_type || '').toLowerCase();
+    if (lastType === 'in') present = true;
+  }
+
+  return {
+    present,
+    late: false,
+    overtimeHours,
+    fullDay: present && !halfDay,
+    halfDay,
+    leftDuringLunch: false,
+    lunchMinutes: null,
+    lunchMinutesAllotted: 0,
+    lunchOverMinutes: null,
+    totalHoursInside,
+    firstInTime: null,
+    lastOutTime: null,
+    minutesLate: 0,
+  };
 }
 
 /**
@@ -936,7 +1111,20 @@ async function getMonthlyAttendance(
 
     const employees = employeesResult.rows;
     if (employees.length === 0) {
-      return { year: y, month: m, daysInMonth, employees: [] };
+      return { year: y, month: m, daysInMonth, employees: [], flexible_hours_mode: false };
+    }
+
+    const flexibleHoursMode = await isFlexibleHoursMode(companyId);
+    const holidaySet = flexibleHoursMode
+      ? await getHolidayDatesForMonth(companyId, y, m)
+      : null;
+    const todayStr = todayIstYmd();
+    let monthWorkingDays = 0;
+    if (flexibleHoursMode) {
+      for (let d = 1; d <= daysInMonth; d += 1) {
+        const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        if (!holidaySet.has(key)) monthWorkingDays += 1;
+      }
     }
 
     const shiftConfigMap = await getShiftConfigMap(
@@ -1001,36 +1189,70 @@ async function getMonthlyAttendance(
       });
     }
 
+    const logsByEmployeeAll = new Map();
+    for (const row of logsResult.rows) {
+      const eid = row.employee_id;
+      if (!logsByEmployeeAll.has(eid)) logsByEmployeeAll.set(eid, []);
+      logsByEmployeeAll.get(eid).push({
+        punch_time: row.punch_time,
+        punch_type: row.punch_type,
+        device_id: row.device_id || null,
+      });
+    }
+
     const employeesWithDays = [];
     for (const emp of employees) {
       const shiftConfig =
         shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
       const byDay = logsByEmployeeAndDay.get(emp.id) || new Map();
+      const empAllLogs = logsByEmployeeAll.get(emp.id) || [];
+      const flexibleDailyHours = flexibleHoursMode
+        ? computeFlexibleDailyHoursFromLogs(empAllLogs)
+        : null;
+      const requiredHours = Number(shiftConfig.requiredHoursPerDay || 8);
       const days = [];
-      const todayStr = todayIstYmd();
       const nowMs = Date.now();
       for (let d = 1; d <= daysInMonth; d += 1) {
         const key = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const rawDayLogs = byDay.get(key) || [];
         const dayLogs = normalizePunchTypesByOrder(rawDayLogs);
         const isCurrentDate = key === todayStr;
-        const status =
+        let status;
+        if (
+          flexibleHoursMode &&
           shiftConfig.attendanceMode === 'hours_based'
-            ? computeHoursBasedDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs)
-            : computeDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs);
-        const workedMsFromShiftStart = computeWorkedMsFromShiftStartToNow(
-          dayLogs,
-          shiftConfig,
-          key,
-          isCurrentDate,
-          nowMs
-        );
+        ) {
+          const hoursInside = flexibleDailyHours?.get(key) || 0;
+          status = computeFlexibleHoursBasedDayStatus(
+            hoursInside,
+            shiftConfig,
+            isCurrentDate,
+            dayLogs
+          );
+        } else {
+          status =
+            shiftConfig.attendanceMode === 'hours_based'
+              ? computeHoursBasedDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs)
+              : computeDayStatus(dayLogs, shiftConfig, key, isCurrentDate, nowMs);
+        }
+        const workedMsFromShiftStart =
+          flexibleHoursMode && shiftConfig.attendanceMode === 'hours_based'
+            ? (flexibleDailyHours?.get(key) || 0) * 60 * 60 * 1000
+            : computeWorkedMsFromShiftStartToNow(
+                dayLogs,
+                shiftConfig,
+                key,
+                isCurrentDate,
+                nowMs
+              );
         const total_hours_from_shift_start = Math.round(
           (workedMsFromShiftStart / (60 * 60 * 1000)) * 100
         ) / 100;
         const presentForDay =
           shiftConfig.attendanceMode === 'hours_based'
-            ? getHoursBasedDailyPresence(dayLogs, status, isCurrentDate)
+            ? flexibleHoursMode
+              ? status.present
+              : getHoursBasedDailyPresence(dayLogs, status, isCurrentDate)
             : status.present;
         days.push({
           date: key,
@@ -1066,11 +1288,24 @@ async function getMonthlyAttendance(
       const presentDays = days.filter((d) => d.present).length;
       const absenceDays = Math.max(0, daysInMonth - presentDays);
       const overtimeHours = Math.round(days.reduce((s, d) => s + (d.overtime_hours || 0), 0) * 100) / 100;
+
+      let monthlySummary = null;
+      if (flexibleHoursMode && shiftConfig.attendanceMode === 'hours_based') {
+        const worked = Math.round(computeMonthlyRawWorkedHoursFromLogs(empAllLogs, nowMs) * 100) / 100;
+        const required = Math.round(monthWorkingDays * requiredHours * 100) / 100;
+        monthlySummary = {
+          worked,
+          required,
+          balance: Math.round((worked - required) * 100) / 100,
+        };
+      }
+
       employeesWithDays.push({
         employee_id: emp.id,
         name: emp.name,
         employee_code: emp.employee_code,
         summary: { presentDays, absenceDays, overtimeHours },
+        monthly_summary: monthlySummary,
         days,
       });
     }
@@ -1079,6 +1314,7 @@ async function getMonthlyAttendance(
       year: y,
       month: m,
       daysInMonth,
+      flexible_hours_mode: flexibleHoursMode,
       employees: employeesWithDays,
     };
   } finally {
@@ -1404,6 +1640,11 @@ module.exports = {
   computeDayStatus,
   computeHoursBasedDayStatus,
   computeHoursInsideForHoursBasedPayroll,
+  computeRawWorkedMsFromPairs,
+  computeRawWorkedMsFromAllLogs,
+  computeFlexibleDailyHoursFromLogs,
+  computeMonthlyRawWorkedHoursFromLogs,
+  computeFlexibleHoursBasedDayStatus,
   getHoursBasedDailyPresence,
   attributedShiftStartDateStr,
 };

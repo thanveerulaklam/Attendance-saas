@@ -1003,6 +1003,51 @@ export default function AttendancePage() {
                 <span className="h-2.5 w-2.5 rounded bg-slate-200" /> Absent
               </span>
             </div>
+            {monthlyData?.flexible_hours_mode && monthlyData.employees?.length > 0 && (
+              <div className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50/40 px-3 py-3">
+                <p className="text-[11px] font-semibold text-emerald-900">Monthly hours balance</p>
+                <p className="mt-0.5 text-[10px] text-emerald-800">
+                  Payroll uses monthly total; daily status is for supervision only.
+                </p>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[280px] text-left text-[11px]">
+                    <thead>
+                      <tr className="text-slate-600 border-b border-emerald-100">
+                        <th className="py-1.5 pr-3 font-medium">Employee</th>
+                        <th className="py-1.5 pr-3 font-medium text-right">Worked</th>
+                        <th className="py-1.5 pr-3 font-medium text-right">Required</th>
+                        <th className="py-1.5 font-medium text-right">Balance</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {monthlyData.employees
+                        .filter((emp) => emp.monthly_summary)
+                        .map((emp) => {
+                          const bal = Number(emp.monthly_summary.balance || 0);
+                          return (
+                            <tr key={emp.employee_id} className="border-b border-emerald-50">
+                              <td className="py-1.5 pr-3 font-medium text-slate-800">
+                                {emp.name}
+                                <span className="ml-1 text-slate-400">{emp.employee_code}</span>
+                              </td>
+                              <td className="py-1.5 pr-3 text-right">{emp.monthly_summary.worked}h</td>
+                              <td className="py-1.5 pr-3 text-right">{emp.monthly_summary.required}h</td>
+                              <td
+                                className={`py-1.5 text-right font-medium ${
+                                  bal < 0 ? 'text-rose-600' : bal > 0 ? 'text-emerald-700' : 'text-slate-600'
+                                }`}
+                              >
+                                {bal > 0 ? '+' : ''}
+                                {bal}h
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-6 text-center text-xs text-slate-500">

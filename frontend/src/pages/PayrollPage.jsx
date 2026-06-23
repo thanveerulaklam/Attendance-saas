@@ -3126,6 +3126,14 @@ export default function PayrollPage() {
                 Absent (unpaid): {Number(attendanceAlterModal.summary.absenceDays || 0).toFixed(2)} days
                 {' · '}
                 Paid leave used: {Number(attendanceAlterModal.summary.paidLeaveUsed || 0).toFixed(2)} days
+                {attendanceAlterModal.summary.flexibleHoursMode &&
+                  attendanceAlterModal.summary.monthlyWorkedHours != null && (
+                    <>
+                      {' · '}
+                      Monthly: {Number(attendanceAlterModal.summary.monthlyWorkedHours).toFixed(1)}h /{' '}
+                      {Number(attendanceAlterModal.summary.monthlyRequiredHours).toFixed(1)}h
+                    </>
+                  )}
               </p>
             )}
             <p className="mt-1 text-[11px] text-slate-500">
