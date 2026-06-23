@@ -375,9 +375,21 @@ async function getCompanyTimezone(companyId) {
   return result.rows[0]?.timezone || 'Asia/Kolkata';
 }
 
+async function getCompanyCountryCode(companyId) {
+  const result = await pool.query(
+    `SELECT country_code FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  if (result.rowCount === 0) {
+    throw new AppError('Company not found', 404);
+  }
+  return result.rows[0]?.country_code || 'IN';
+}
+
 module.exports = {
   getCompanyById,
   getCompanyTimezone,
+  getCompanyCountryCode,
   getSubscriptionStatus,
   isSubscriptionAllowed,
   isFlexibleHoursMode,

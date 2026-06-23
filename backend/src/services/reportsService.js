@@ -2,11 +2,8 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { getMonthlyAttendance, getDailyAttendance } = require('./attendanceService');
 const { getPayrollBreakdown, getWeeklyPayrollBreakdown } = require('./payrollService');
-const {
-  employeeHasEsiConfigured,
-  employeeHasPfConfigured,
-  formatStatutoryModeLabel,
-} = require('../utils/statutoryDeductions');
+const { formatStatutoryModeLabel } = require('../utils/statutoryDeductions');
+const { getPayrollRulesForCompanyId } = require('../payroll/rules');
 
 /**
  * Escape a value for CSV (wrap in quotes if needed, escape internal quotes).
@@ -349,6 +346,11 @@ async function getStatutoryBreakdownForEmployee(companyId, employee, year, month
  * Monthly ESI statement CSV.
  */
 async function getEsiReportCsv(companyId, year, month, allowedBranchIds = null) {
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
+  if (!payrollRules.supportsEsiReports) {
+    throw new AppError('ESI reports are only available for India payroll companies', 400);
+  }
+
   const { year: y, month: m, employees } = await loadStatutoryReportEmployees(
     companyId,
     year,
@@ -366,7 +368,7 @@ async function getEsiReportCsv(companyId, year, month, allowedBranchIds = null) 
   const rows = [];
 
   for (const employee of employees) {
-    if (!employeeHasEsiConfigured(employee)) continue;
+    if (!payrollRules.employeeHasEsiConfigured(employee)) continue;
     const breakdown = await getStatutoryBreakdownForEmployee(companyId, employee, y, m);
     if (!breakdown?.breakdown) continue;
     const b = breakdown.breakdown;
@@ -387,6 +389,11 @@ async function getEsiReportCsv(companyId, year, month, allowedBranchIds = null) 
  * Monthly PF statement CSV.
  */
 async function getPfReportCsv(companyId, year, month, allowedBranchIds = null) {
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
+  if (!payrollRules.supportsPfReports) {
+    throw new AppError('PF reports are only available for India payroll companies', 400);
+  }
+
   const { year: y, month: m, employees } = await loadStatutoryReportEmployees(
     companyId,
     year,
@@ -406,7 +413,7 @@ async function getPfReportCsv(companyId, year, month, allowedBranchIds = null) {
   const rows = [];
 
   for (const employee of employees) {
-    if (!employeeHasPfConfigured(employee)) continue;
+    if (!payrollRules.employeeHasPfConfigured(employee)) continue;
     const breakdown = await getStatutoryBreakdownForEmployee(companyId, employee, y, m);
     if (!breakdown?.breakdown) continue;
     const b = breakdown.breakdown;

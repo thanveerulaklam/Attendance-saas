@@ -233,6 +233,7 @@ export default function ReportsPage() {
 
   const companyCurrency = company?.currency || 'INR';
   const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
+  const showIndiaStatutory = company?.region_features?.esi === true;
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -1351,16 +1352,20 @@ export default function ReportsPage() {
               title: 'Overtime',
               blurb: 'Overtime hours for the month.',
             },
-            {
-              key: 'esi',
-              title: 'ESI statement',
-              blurb: 'Employee-wise ESI deductions for the month.',
-            },
-            {
-              key: 'pf',
-              title: 'PF statement',
-              blurb: 'Employee-wise PF deductions for the month.',
-            },
+            ...(showIndiaStatutory
+              ? [
+                  {
+                    key: 'esi',
+                    title: 'ESI statement',
+                    blurb: 'Employee-wise ESI deductions for the month.',
+                  },
+                  {
+                    key: 'pf',
+                    title: 'PF statement',
+                    blurb: 'Employee-wise PF deductions for the month.',
+                  },
+                ]
+              : []),
             {
               key: 'salaryPayments',
               title: 'Salary payment ledger',
@@ -1428,8 +1433,12 @@ export default function ReportsPage() {
             <li><strong>Attendance:</strong> Employee code, name, present/absent/late days, overtime hours.</li>
             <li><strong>Payroll:</strong> Employee code, name, present/total days, overtime, gross, deductions, net salary.</li>
             <li><strong>Overtime:</strong> Employee code, name, overtime hours for the month.</li>
-            <li><strong>ESI statement:</strong> Name, ESI number, gross wages, ESI deduction.</li>
-            <li><strong>PF statement:</strong> Employee code, name, type, rate, earned basic, PF deduction.</li>
+            {showIndiaStatutory && (
+              <>
+                <li><strong>ESI statement:</strong> Name, ESI number, gross wages, ESI deduction.</li>
+                <li><strong>PF statement:</strong> Employee code, name, type, rate, earned basic, PF deduction.</li>
+              </>
+            )}
             <li><strong>Salary payment ledger:</strong> Payment date, employee, period, amount, mode, reference, balance.</li>
           </ul>
         </div>

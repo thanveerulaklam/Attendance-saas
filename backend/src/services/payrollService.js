@@ -29,12 +29,9 @@ const {
   computeFlexibleMonthlySettlement,
   computePaidLeaveEncashment,
 } = require('./payrollMath');
-const {
-  computeEsiDeduction,
-  computePfDeduction,
-  normalizeMode,
-} = require('../utils/statutoryDeductions');
+const { normalizeMode } = require('../utils/statutoryDeductions');
 const { getCompanyTimezone } = require('./companyService');
+const { getPayrollRulesForCompanyId } = require('../payroll/rules');
 
 async function withCompanyIdTimezone(companyId, fn) {
   const tz = await getCompanyTimezone(companyId);
@@ -1536,11 +1533,8 @@ function getDaysInMonth(year, month1to12) {
   return new Date(year, month1to12, 0).getDate(); // month1to12: 1=Jan..12=Dec
 }
 
-function resolveEmployeeStatutoryDeductions(employee, { earnedBasic = 0, grossSalary = 0 } = {}) {
-  return {
-    esiDeduction: computeEsiDeduction(employee, { grossSalary }),
-    pfDeduction: computePfDeduction(employee, { earnedBasic }),
-  };
+function resolveStatutoryDeductions(payrollRules, employee, { earnedBasic = 0, grossSalary = 0 } = {}) {
+  return payrollRules.resolveStatutoryDeductions(employee, { earnedBasic, grossSalary });
 }
 
 function computeOtherAllowance(employee, summary, options = {}) {
@@ -1655,13 +1649,16 @@ async function generateWeeklyPayroll(
   const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
 
   return withCompanyIdTimezone(companyId, async () => {
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
   const weekStart = String(weekStartDateStr).slice(0, 10);
   const weekEnd = getWeekEndDate(weekStart);
 
   const { y: endYear, m: endMonth } = parseYmd(weekEnd);
   const monthLastDay = getDaysInMonth(endYear, endMonth);
   const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
-  const shouldDeductEsi = weekEnd === monthLastDayStr;
+  const shouldDeductStatutory =
+    payrollRules.supportsStatutoryDeductions &&
+    payrollRules.shouldDeductStatutoryForWeek(weekEnd, monthLastDayStr);
 
   const client = await pool.connect();
   try {
@@ -1767,7 +1764,7 @@ async function generateWeeklyPayroll(
     let statutoryEarnedBasic = earnedBasic;
     let statutoryGross = grossSalary;
     if (
-      shouldDeductEsi &&
+      shouldDeductStatutory &&
       (normalizeMode(employee.esi_mode) === 'percentage' ||
         normalizeMode(employee.pf_mode) === 'percentage')
     ) {
@@ -1787,8 +1784,8 @@ async function generateWeeklyPayroll(
       statutoryEarnedBasic = monthBases.earnedBasic;
       statutoryGross = monthBases.grossSalary;
     }
-    const { esiDeduction, pfDeduction } = shouldDeductEsi
-      ? resolveEmployeeStatutoryDeductions(employee, {
+    const { esiDeduction, pfDeduction } = shouldDeductStatutory
+      ? resolveStatutoryDeductions(payrollRules, employee, {
           earnedBasic: statutoryEarnedBasic,
           grossSalary: statutoryGross,
         })
@@ -2136,6 +2133,7 @@ async function getWeeklyPayrollBreakdown(
 
   await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
 
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
   const weekStart = String(weekStartDateStr).slice(0, 10);
   const weekEnd = getWeekEndDate(weekStart);
   const { y: startYear, m: startMonth } = parseYmd(weekStart);
@@ -2249,12 +2247,14 @@ async function getWeeklyPayrollBreakdown(
 
   const monthLastDay = getDaysInMonth(endYear, endMonth);
   const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
-  const shouldDeductEsi = weekEnd === monthLastDayStr;
+  const shouldDeductStatutory =
+    payrollRules.supportsStatutoryDeductions &&
+    payrollRules.shouldDeductStatutoryForWeek(weekEnd, monthLastDayStr);
   const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
   let statutoryEarnedBasic = earnedBasic;
   let statutoryGross = grossSalary;
   if (
-    shouldDeductEsi &&
+    shouldDeductStatutory &&
     (normalizeMode(employee.esi_mode) === 'percentage' ||
       normalizeMode(employee.pf_mode) === 'percentage')
   ) {
@@ -2274,8 +2274,8 @@ async function getWeeklyPayrollBreakdown(
     statutoryEarnedBasic = monthBases.earnedBasic;
     statutoryGross = monthBases.grossSalary;
   }
-  const { esiDeduction, pfDeduction } = shouldDeductEsi
-    ? resolveEmployeeStatutoryDeductions(employee, {
+  const { esiDeduction, pfDeduction } = shouldDeductStatutory
+    ? resolveStatutoryDeductions(payrollRules, employee, {
         earnedBasic: statutoryEarnedBasic,
         grossSalary: statutoryGross,
       })
@@ -2379,6 +2379,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
   const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
 
   return withCompanyIdTimezone(companyId, async () => {
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
   const client = await pool.connect();
 
   try {
@@ -2518,7 +2519,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     }
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentAmount;
-    const { esiDeduction, pfDeduction } = resolveEmployeeStatutoryDeductions(employee, {
+    const { esiDeduction, pfDeduction } = resolveStatutoryDeductions(payrollRules, employee, {
       earnedBasic,
       grossSalary,
     });
@@ -2690,6 +2691,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   } = options;
 
   await assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds);
+
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
 
   const existingPayrollResult = await pool.query(
     `SELECT
@@ -2863,7 +2866,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   }
 
   const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentComputed;
-  const { esiDeduction, pfDeduction } = resolveEmployeeStatutoryDeductions(employee, {
+  const { esiDeduction, pfDeduction } = resolveStatutoryDeductions(payrollRules, employee, {
     earnedBasic,
     grossSalary: grossSalaryComputed,
   });
