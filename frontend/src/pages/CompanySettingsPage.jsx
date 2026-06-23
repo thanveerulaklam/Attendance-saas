@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { PLAN_DISPLAY_NAME, planDefaultLimits } from '../constants/pricingPlans';
+import { countryProfile } from '../constants/countryProfiles';
+import { formatMoneyWithSymbol } from '../utils/formatMoney';
 
 function toDateInputValue(d) {
   if (!d) return '';
@@ -87,6 +89,7 @@ export default function CompanySettingsPage() {
 
   /** Enriched from GET /api/company (plan, AMC, caps). */
   const [planSnapshot, setPlanSnapshot] = useState(null);
+  const [localeInfo, setLocaleInfo] = useState({ country_code: 'IN', currency: 'INR' });
 
   const [branches, setBranches] = useState([]);
   const [newBranchName, setNewBranchName] = useState('');
@@ -172,6 +175,10 @@ export default function CompanySettingsPage() {
           last_amc_payment_date: data.last_amc_payment_date,
           amc_amount: data.amc_amount,
           onetime_fee_amount: data.onetime_fee_amount,
+        });
+        setLocaleInfo({
+          country_code: data.country_code || 'IN',
+          currency: data.currency || 'INR',
         });
       } catch (err) {
         if (!isMounted) return;
@@ -1088,6 +1095,18 @@ export default function CompanySettingsPage() {
                 {subscriptionForm.is_active ? 'Active' : 'Inactive'}
               </span>
             </div>
+            <div>
+              <span className="text-slate-500">Country</span>
+              <span className="ml-2 font-medium text-slate-900">
+                {countryProfile(localeInfo.country_code).label}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500">Timezone</span>
+              <span className="ml-2 font-medium text-slate-900">
+                {countryProfile(localeInfo.country_code).timezone}
+              </span>
+            </div>
           </div>
           <div className="grid gap-3 border-t border-slate-200/80 pt-3 sm:grid-cols-2">
             <div className="text-sm">
@@ -1106,17 +1125,21 @@ export default function CompanySettingsPage() {
               planSnapshot.onetime_fee_amount != null &&
               planSnapshot.onetime_fee_amount !== '' && (
                 <div className="text-sm">
-                  <span className="text-slate-500">One-time fee (excl. GST)</span>
+                  <span className="text-slate-500">
+                    One-time fee ({localeInfo.country_code === 'AE' ? 'excl. VAT' : 'excl. GST'})
+                  </span>
                   <div className="font-medium text-slate-900">
-                    ₹{Number(planSnapshot.onetime_fee_amount).toLocaleString('en-IN')}
+                    {formatMoneyWithSymbol(planSnapshot.onetime_fee_amount, localeInfo.currency)}
                   </div>
                 </div>
               )}
             {planSnapshot && planSnapshot.amc_amount != null && planSnapshot.amc_amount !== '' && (
               <div className="text-sm">
-                <span className="text-slate-500">AMC per year (excl. GST)</span>
+                <span className="text-slate-500">
+                  AMC per year ({localeInfo.country_code === 'AE' ? 'excl. VAT' : 'excl. GST'})
+                </span>
                 <div className="font-medium text-slate-900">
-                  ₹{Number(planSnapshot.amc_amount).toLocaleString('en-IN')}
+                  {formatMoneyWithSymbol(planSnapshot.amc_amount, localeInfo.currency)}
                 </div>
               </div>
             )}

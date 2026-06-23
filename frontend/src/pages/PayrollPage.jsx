@@ -5,6 +5,8 @@ import PayslipModal from '../components/payroll/PayslipModal';
 import RecordPaymentModal from '../components/payroll/RecordPaymentModal';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 import { buildBulkPayslipsDoc, openBulkPayslipsForPrint } from '../utils/payslipPdf';
+import { formatMoneyAmount, formatMoneyWithSymbol, currencySymbol } from '../utils/formatMoney';
+import { regionFeaturesForCountry } from '../utils/regionFeatures';
 
 const PAGE_SIZE = 50;
 const PAYROLL_COLUMN_STORAGE_KEY = 'payroll.visibleColumns.v1';
@@ -40,15 +42,6 @@ const MONTHS = [
 
 function currentYear() {
   return new Date().getFullYear();
-}
-
-function formatMoney(n) {
-  if (n == null || Number.isNaN(Number(n))) return '—';
-  return new Intl.NumberFormat('en-IN', {
-    style: 'decimal',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Number(n));
 }
 
 function hasLoanAdvanceRepayment(row) {
@@ -277,7 +270,8 @@ function triggerDownloadCsv(content, filename) {
   URL.revokeObjectURL(url);
 }
 
-function buildPayrollPrintDocument(rows, payrollMode, companyName) {
+function buildPayrollPrintDocument(rows, payrollMode, companyName, currency = 'INR') {
+  const fmt = (n) => formatMoneyAmount(n, currency);
   const title = companyName ? `${companyName} — Payroll` : 'Payroll';
   const rowsHtml = rows
     .map((row) => {
@@ -299,13 +293,13 @@ function buildPayrollPrintDocument(rows, payrollMode, companyName) {
             : Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0))
         }</td>
         <td class="num">${row.overtime_hours ?? ''}</td>
-        <td class="num">${formatMoney(row.gross_salary)}</td>
-        <td class="num">${formatMoney(row.deductions)}</td>
+        <td class="num">${fmt(row.gross_salary)}</td>
+        <td class="num">${fmt(row.deductions)}</td>
         <td class="num">${formatPermissionUsedHours(row.permission_minutes_used)}</td>
-        <td class="num">${formatMoney(row.permission_offset_amount)}</td>
-        <td class="num">${formatMoney(row.salary_advance)}</td>
-        <td class="num">${formatMoney(row.no_leave_incentive)}</td>
-        <td class="num"><strong>${formatMoney(row.net_salary)}</strong></td>
+        <td class="num">${fmt(row.permission_offset_amount)}</td>
+        <td class="num">${fmt(row.salary_advance)}</td>
+        <td class="num">${fmt(row.no_leave_incentive)}</td>
+        <td class="num"><strong>${fmt(row.net_salary)}</strong></td>
       </tr>`;
     })
     .join('');
@@ -358,7 +352,8 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
-function payrollRowsToPdfData(rows, payrollMode) {
+function payrollRowsToPdfData(rows, payrollMode, currency = 'INR') {
+  const fmt = (n) => formatMoneyAmount(n, currency);
   const header = [
     'Employee',
     'Code',
@@ -393,13 +388,13 @@ function payrollRowsToPdfData(rows, payrollMode) {
           : Math.max(0, Number(row.total_days || 0) - Number(row.present_days || 0))
       ),
       String(row.overtime_hours ?? ''),
-      formatMoney(row.gross_salary),
-      formatMoney(row.deductions),
+      fmt(row.gross_salary),
+      fmt(row.deductions),
       formatPermissionUsedHours(row.permission_minutes_used),
-      formatMoney(row.permission_offset_amount),
-      formatMoney(row.salary_advance),
-      formatMoney(row.no_leave_incentive),
-      formatMoney(row.net_salary),
+      fmt(row.permission_offset_amount),
+      fmt(row.salary_advance),
+      fmt(row.no_leave_incentive),
+      fmt(row.net_salary),
     ];
   });
   const netTotal = rows.reduce((s, r) => s + (Number(r.net_salary) || 0), 0);
@@ -407,7 +402,8 @@ function payrollRowsToPdfData(rows, payrollMode) {
 }
 
 function buildPayrollPdfDocument(rows, payrollMode, company, periodLabel) {
-  const { header, body, netTotal } = payrollRowsToPdfData(rows, payrollMode);
+  const currency = company?.currency || 'INR';
+  const { header, body, netTotal } = payrollRowsToPdfData(rows, payrollMode, currency);
   const doc = createPdf({ orientation: 'landscape' });
   const startY = addReportHeader(doc, {
     companyName: company?.name,
@@ -427,7 +423,7 @@ function buildPayrollPdfDocument(rows, payrollMode, company, periodLabel) {
   const y = doc.internal.pageSize.getHeight() - 44;
   doc.setFontSize(18);
   doc.setFont(undefined, 'bold');
-  const label = `INR: ${formatMoney(netTotal)}`;
+  const label = `${currency}: ${formatMoneyAmount(netTotal, currency)}`;
   doc.text(label, pageWidth * 0.75, y, { align: 'center' });
   return doc;
 }
@@ -598,6 +594,11 @@ export default function PayrollPage() {
   const subscription = getSubscriptionStatus(company);
   const subscriptionAllowed = subscription.allowed;
   const monthlyOnlyPayroll = company?.shifts_compact_ui === true;
+  const companyCurrency = company?.currency || 'INR';
+  const moneySym = currencySymbol(companyCurrency);
+  const showIndiaStatutory = regionFeaturesForCountry(company?.country_code).esi;
+  const fmt = (n) => formatMoneyAmount(n, companyCurrency);
+  const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const employeesForBranch = useMemo(() => {
     if (!branchFilter) return employees;
@@ -1069,13 +1070,17 @@ export default function PayrollPage() {
       const data = await getMonthlyBreakdown(row);
       const b = data?.breakdown || {};
       const deductionRows = [
-        ['Absent Deduction', formatMoney(b.absenceDeduction)],
-        ['Late Deduction', formatMoney(b.lateDeduction)],
-        ['Lunch Deduction', formatMoney(b.lunchOverDeduction)],
-        ['ESI Deduction', formatMoney(b.esiDeduction)],
-        ['PF Deduction', formatMoney(b.pfDeduction)],
-        ['Permission Offset', `-${formatMoney(b.permissionOffsetAmount)}`],
-        ['Total Deductions', formatMoney(b.totalDeductions)],
+        ['Absent Deduction', fmt(b.absenceDeduction)],
+        ['Late Deduction', fmt(b.lateDeduction)],
+        ['Lunch Deduction', fmt(b.lunchOverDeduction)],
+        ...(showIndiaStatutory
+          ? [
+              ['ESI Deduction', fmt(b.esiDeduction)],
+              ['PF Deduction', fmt(b.pfDeduction)],
+            ]
+          : []),
+        ['Permission Offset', `-${fmt(b.permissionOffsetAmount)}`],
+        ['Total Deductions', fmt(b.totalDeductions)],
       ];
       setMetricModal({
         open: true,
@@ -1100,7 +1105,7 @@ export default function PayrollPage() {
       const permissionRows = [
         ['Allocated', `${formatPermissionUsedHours(Number(b.permissionHoursAllocated || 0) * 60)} hrs`],
         ['Used', `${formatPermissionUsedHours(b.permissionMinutesUsed)} hrs`],
-        ['Offset Amount', formatMoney(b.permissionOffsetAmount)],
+        ['Offset Amount', fmt(b.permissionOffsetAmount)],
       ];
       setMetricModal({
         open: true,
@@ -1769,7 +1774,7 @@ export default function PayrollPage() {
         type: 'success',
         message:
           amount > 0
-            ? `Diary advance of ₹${formatMoney(amount)} deducted for ${row.employee_name || 'employee'}.`
+            ? `Diary advance of ${fmtSym(amount)} deducted for ${row.employee_name || 'employee'}.`
             : `Diary advance removed for ${row.employee_name || 'employee'}.`,
       });
     } catch (err) {
@@ -2540,10 +2545,10 @@ export default function PayrollPage() {
                               className="font-semibold text-amber-700 underline decoration-dotted underline-offset-2 hover:text-amber-800"
                               title="View deductions breakdown"
                             >
-                              −{formatMoney(row.deductions)}
+                              −{fmt(row.deductions)}
                             </button>
                           ) : (
-                            <span>−{formatMoney(row.deductions)}</span>
+                            <span>−{fmt(row.deductions)}</span>
                           )}
                         </td>
                       )}
@@ -2568,7 +2573,7 @@ export default function PayrollPage() {
                       )}
                       {isColumnVisible('permissionOffset') && (
                         <td className="py-3 pr-3 text-right text-emerald-700 font-medium">
-                          −{formatMoney(row.permission_offset_amount)}
+                          −{fmt(row.permission_offset_amount)}
                         </td>
                       )}
                       {isColumnVisible('advance') && (
@@ -2589,7 +2594,7 @@ export default function PayrollPage() {
                               title="Enter advance amount from your diary"
                             >
                               {getManualAdvanceAmount(row) > 0
-                                ? `Diary −${formatMoney(getManualAdvanceAmount(row))}`
+                                ? `Diary −${fmt(getManualAdvanceAmount(row))}`
                                 : '+ Diary advance'}
                             </button>
                             {hasLoanAdvanceRepayment(row) && (
@@ -2623,7 +2628,7 @@ export default function PayrollPage() {
                                       : 'text-slate-500'
                                   }`}
                                 >
-                                  Loan −{formatMoney(
+                                  Loan −{fmt(
                                     isLoanAdvanceDeducted(row)
                                       ? Number(row.deducted_loan_repayment || 0)
                                       : Number(row.pending_loan_repayment || 0)
@@ -2633,7 +2638,7 @@ export default function PayrollPage() {
                             )}
                             {getAppliedAdvanceTotal(row) > 0 && (
                               <span className="text-[10px] font-semibold text-amber-800">
-                                Total −{formatMoney(getAppliedAdvanceTotal(row))}
+                                Total −{fmt(getAppliedAdvanceTotal(row))}
                               </span>
                             )}
                           </div>
@@ -2641,22 +2646,22 @@ export default function PayrollPage() {
                       )}
                       {isColumnVisible('incentive') && (
                         <td className="py-3 pr-3 text-right text-emerald-600 font-medium">
-                          +{formatMoney(row.no_leave_incentive)}
+                          +{fmt(row.no_leave_incentive)}
                         </td>
                       )}
                       {isColumnVisible('netSalary') && (
                         <td className="py-3 pr-3 text-right font-semibold text-slate-900">
-                          {formatMoney(row.net_salary)}
+                          {fmt(row.net_salary)}
                         </td>
                       )}
                       {isColumnVisible('totalPaid') && (
                         <td className="py-3 pr-3 text-right text-emerald-700">
-                          {formatMoney(row.total_paid)}
+                          {fmt(row.total_paid)}
                         </td>
                       )}
                       {isColumnVisible('balanceDue') && (
                         <td className="py-3 pr-3 text-right font-medium text-amber-700">
-                          {formatMoney(row.balance_due)}
+                          {fmt(row.balance_due)}
                         </td>
                       )}
                       {isColumnVisible('paymentStatus') && (
@@ -2933,7 +2938,7 @@ export default function PayrollPage() {
                     Adds unused shift paid leave value to gross salary. Applies only when month is complete.
                   </p>
                   <label className="text-[11px] font-medium text-slate-700">
-                    Incentive for no leave (₹)
+                    Incentive for no leave ({moneySym})
                   </label>
                   <input
                     type="number"
@@ -3050,7 +3055,7 @@ export default function PayrollPage() {
             </p>
             <div className="mt-4 space-y-3">
               <div>
-                <label className="text-[11px] font-medium text-slate-700">Amount (₹)</label>
+                <label className="text-[11px] font-medium text-slate-700">Amount ({moneySym})</label>
                 <input
                   type="number"
                   min="0"

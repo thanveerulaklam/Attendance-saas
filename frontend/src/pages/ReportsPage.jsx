@@ -8,6 +8,7 @@ import {
   generateDayWiseReportPdf,
 } from '../components/reports/DayWiseReportPDF';
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
+import { formatMoneyAmount, formatMoneyWithSymbol } from '../utils/formatMoney';
 import { formatIstTime, IST } from '../utils/istDisplay';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../utils/whatsapp';
 import {
@@ -122,15 +123,6 @@ function getFirstInTime(row) {
   return firstIn?.punch_time ? formatIstTime(firstIn.punch_time) : '—';
 }
 
-function formatMoney(n) {
-  if (n == null || Number.isNaN(Number(n))) return '0';
-  return new Intl.NumberFormat('en-IN', {
-    style: 'decimal',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Number(n));
-}
-
 /**
  * Fetch CSV from URL and trigger browser download.
  */
@@ -237,6 +229,10 @@ export default function ReportsPage() {
   const [monthlyAttendanceEmployees, setMonthlyAttendanceEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
   const [reportBranchFilter, setReportBranchFilter] = useState('');
+  const [company, setCompany] = useState(null);
+
+  const companyCurrency = company?.currency || 'INR';
+  const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -249,7 +245,7 @@ export default function ReportsPage() {
     let isMounted = true;
     async function loadFilterOptions() {
       try {
-        const [employeesRes, departmentsRes, branchesRes] = await Promise.all([
+        const [employeesRes, departmentsRes, branchesRes, companyRes] = await Promise.all([
           authFetch('/api/employees?limit=500', {
             headers: { 'Content-Type': 'application/json' },
           }),
@@ -259,16 +255,21 @@ export default function ReportsPage() {
           authFetch('/api/company/branches', {
             headers: { 'Content-Type': 'application/json' },
           }),
+          authFetch('/api/company', {
+            headers: { 'Content-Type': 'application/json' },
+          }),
         ]);
 
         const employeesJson = employeesRes.ok ? await employeesRes.json() : { data: { data: [] } };
         const departmentsJson = departmentsRes.ok ? await departmentsRes.json() : { data: [] };
         const branchesJson = branchesRes.ok ? await branchesRes.json() : { data: [] };
+        const companyJson = companyRes.ok ? await companyRes.json() : { data: null };
 
         if (!isMounted) return;
         setEmployees(employeesJson.data?.data || []);
         setDepartments(departmentsJson.data || []);
         setBranches(Array.isArray(branchesJson.data) ? branchesJson.data : []);
+        setCompany(companyJson.data || null);
       } catch {
         if (!isMounted) return;
         setEmployees([]);
@@ -749,6 +750,7 @@ export default function ReportsPage() {
       }
       const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
       const company = companyJson.data || {};
+      const pdfCurrency = company.currency || 'INR';
       const csvText = await csvRes.text();
       const { header, rows } = parseCsvText(csvText);
       if (header.length === 0) {
@@ -787,7 +789,7 @@ export default function ReportsPage() {
         const y = doc.internal.pageSize.getHeight() - 44;
         doc.setFontSize(18);
         doc.setFont(undefined, 'bold');
-        const label = `INR: ${formatMoney(payrollTotal)}`;
+        const label = `${pdfCurrency}: ${formatMoneyAmount(payrollTotal, pdfCurrency)}`;
         doc.text(label, pageWidth * 0.75, y, { align: 'center' });
       }
       if (type === 'salaryPayments' && rows.length > 0) {
@@ -802,7 +804,7 @@ export default function ReportsPage() {
         const y = doc.internal.pageSize.getHeight() - 44;
         doc.setFontSize(14);
         doc.setFont(undefined, 'bold');
-        doc.text(`Total disbursed: INR ${formatMoney(totalPaid)}`, pageWidth * 0.75, y, { align: 'center' });
+        doc.text(`Total disbursed: ${pdfCurrency} ${formatMoneyAmount(totalPaid, pdfCurrency)}`, pageWidth * 0.75, y, { align: 'center' });
       }
       savePdf(doc, `${slug}-${year}-${String(month).padStart(2, '0')}.pdf`);
       setToast({ type: 'success', message: `${type} PDF downloaded` });
@@ -1252,7 +1254,7 @@ export default function ReportsPage() {
               Payroll total (month to date)
             </p>
             <p className="mt-2 text-3xl font-semibold tabular-nums text-slate-900">
-              {summaryLoading ? '...' : `₹${formatMoney(currentMonthPayrollTotal)}`}
+              {summaryLoading ? '...' : fmtSym(currentMonthPayrollTotal)}
             </p>
             <p className="mt-2 text-[11px] text-primary-700 opacity-0 transition group-hover:opacity-100">
               View payroll breakdown →
@@ -1263,7 +1265,7 @@ export default function ReportsPage() {
               Salary paid (this month)
             </p>
             <p className="mt-2 text-3xl font-semibold tabular-nums text-emerald-700">
-              {summaryLoading ? '...' : `₹${formatMoney(paymentSummary.total_paid)}`}
+              {summaryLoading ? '...' : fmtSym(paymentSummary.total_paid)}
             </p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-white to-amber-50/40 px-4 py-4 shadow-sm">
@@ -1271,7 +1273,7 @@ export default function ReportsPage() {
               Outstanding (this month)
             </p>
             <p className="mt-2 text-3xl font-semibold tabular-nums text-amber-700">
-              {summaryLoading ? '...' : `₹${formatMoney(paymentSummary.total_outstanding)}`}
+              {summaryLoading ? '...' : fmtSym(paymentSummary.total_outstanding)}
             </p>
           </div>
         </div>
@@ -1585,7 +1587,7 @@ export default function ReportsPage() {
                 <p className="mt-0.5 text-[11px] text-slate-500">
                   {detailsModal === 'employees'
                     ? `Active employees included in payroll (${payrollEmployees.length})`
-                    : `Current month total: ₹${formatMoney(currentMonthPayrollTotal)}`}
+                    : `Current month total: ${fmtSym(currentMonthPayrollTotal)}`}
                 </p>
               </div>
               <button
@@ -1657,7 +1659,7 @@ export default function ReportsPage() {
                               {row.present_days ?? 0}/{row.total_days ?? 0}
                             </td>
                             <td className="px-3 py-2 text-right font-medium text-slate-900">
-                              ₹{formatMoney(row.net_salary)}
+                              {fmtSym(row.net_salary)}
                             </td>
                           </tr>
                         ))

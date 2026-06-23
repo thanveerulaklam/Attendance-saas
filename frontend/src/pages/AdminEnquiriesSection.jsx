@@ -8,13 +8,13 @@ import {
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
 } from '../constants/demoEnquiryStatus';
 import {
-  PRICING_PLANS,
   planDefaultLimits,
   planOptionsForAdminSelect,
+  planPricingForCountry,
+  pricingSymbolForCountry,
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 
-const PLAN_OPTIONS = planOptionsForAdminSelect();
 const PAGE_SIZE = 25;
 
 function adminFetch(path, options = {}, key) {
@@ -37,20 +37,6 @@ function messageFromAdminErrorResponse(text, status) {
   } catch {
     return String(text).trim();
   }
-}
-
-function parseInrPrice(value) {
-  if (value == null || value === '' || String(value).toLowerCase() === 'custom') return '';
-  const n = Number(String(value).replace(/,/g, ''));
-  return Number.isFinite(n) && n >= 0 ? String(n) : '';
-}
-
-function planPricing(planCode) {
-  const plan = PRICING_PLANS.find((p) => p.code === (planCode || 'starter')) || PRICING_PLANS[0];
-  return {
-    onetime: parseInrPrice(plan.price),
-    amc: parseInrPrice(plan.amc),
-  };
 }
 
 function formatDateTime(iso) {
@@ -81,7 +67,8 @@ function emptyAddForm() {
 
 function convertFormFromLead(lead) {
   const plan = lead?.expected_plan || 'starter';
-  const pricing = planPricing(plan);
+  const countryCode = DEFAULT_COUNTRY_CODE;
+  const pricing = planPricingForCountry(plan, countryCode);
   const limits = planDefaultLimits(plan);
   const today = new Date().toISOString().slice(0, 10);
   const end = new Date(today);
@@ -139,6 +126,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [notesDraft, setNotesDraft] = useState('');
   const [sourceSuggestions, setSourceSuggestions] = useState(DEFAULT_LEAD_SOURCE_SUGGESTIONS);
   const [sourceSuggestionsLoading, setSourceSuggestionsLoading] = useState(false);
+
+  const addPlanOptions = useMemo(() => planOptionsForAdminSelect(DEFAULT_COUNTRY_CODE), []);
+  const convertPlanOptions = useMemo(
+    () => planOptionsForAdminSelect(convertForm?.country_code || DEFAULT_COUNTRY_CODE),
+    [convertForm?.country_code]
+  );
+  const convertMoneySymbol = pricingSymbolForCountry(convertForm?.country_code || DEFAULT_COUNTRY_CODE);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -337,13 +331,17 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     const { name, value, type, checked } = e.target;
     setConvertForm((prev) => {
       const next = { ...prev, [name]: type === 'checkbox' ? checked : value };
-      if (name === 'plan_code') {
-        const pricing = planPricing(value);
-        const limits = planDefaultLimits(value);
+      const countryCode = name === 'country_code' ? value : prev.country_code || DEFAULT_COUNTRY_CODE;
+      if (name === 'plan_code' || name === 'country_code') {
+        const plan = name === 'plan_code' ? value : prev.plan_code;
+        const pricing = planPricingForCountry(plan, countryCode);
         next.onetime_fee_amount = pricing.onetime;
         next.amc_amount = pricing.amc;
-        if (limits.staffCap != null) next.staffs_allowed = limits.staffCap;
-        if (limits.branchTotal != null) next.branches_allowed = limits.branchTotal;
+        if (name === 'plan_code') {
+          const limits = planDefaultLimits(value);
+          if (limits.staffCap != null) next.staffs_allowed = limits.staffCap;
+          if (limits.branchTotal != null) next.branches_allowed = limits.branchTotal;
+        }
       }
       if (name === 'subscription_start_date' && value) {
         const d = new Date(value);
@@ -821,7 +819,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     onChange={(e) => setAddForm((p) => ({ ...p, expected_plan: e.target.value }))}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   >
-                    {PLAN_OPTIONS.map((p) => (
+                    {addPlanOptions.map((p) => (
                       <option key={p.value} value={p.value}>
                         {p.label}
                       </option>
@@ -949,7 +947,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   <label className="block">
                     <span className="text-xs font-medium text-slate-700">Plan</span>
                     <select name="plan_code" value={convertForm.plan_code} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
-                      {PLAN_OPTIONS.map((p) => (
+                      {convertPlanOptions.map((p) => (
                         <option key={p.value} value={p.value}>{p.label}</option>
                       ))}
                     </select>
@@ -963,11 +961,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     <input name="staffs_allowed" type="number" min={1} value={convertForm.staffs_allowed} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-medium text-slate-700">One-time fee (₹)</span>
+                    <span className="text-xs font-medium text-slate-700">One-time fee ({convertMoneySymbol})</span>
                     <input name="onetime_fee_amount" value={convertForm.onetime_fee_amount} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
                   <label className="block">
-                    <span className="text-xs font-medium text-slate-700">AMC (₹)</span>
+                    <span className="text-xs font-medium text-slate-700">AMC ({convertMoneySymbol})</span>
                     <input name="amc_amount" value={convertForm.amc_amount} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
                   <label className="flex items-center gap-2 sm:col-span-2 text-sm">

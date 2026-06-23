@@ -83,6 +83,82 @@ export const PRICING_PLANS = [
   },
 ];
 
+/** UAE reference pricing for SuperAdmin (excl. VAT). */
+export const PRICING_PLANS_AE = [
+  {
+    code: 'starter',
+    name: 'Basic',
+    emp: 'Up to 25',
+    price: '2,500',
+    amc: '650',
+    currency: 'AED',
+  },
+  {
+    code: 'growth',
+    name: 'Growth',
+    emp: 'Up to 50',
+    price: '4,500',
+    amc: '1,000',
+    currency: 'AED',
+  },
+  {
+    code: 'business',
+    name: 'Business',
+    emp: 'Up to 100',
+    price: '7,500',
+    amc: '2,000',
+    currency: 'AED',
+  },
+  {
+    code: 'professional',
+    name: 'Professional',
+    emp: 'Up to 200',
+    price: '12,500',
+    amc: '3,500',
+    currency: 'AED',
+  },
+  {
+    code: 'enterprise',
+    name: 'Enterprise',
+    emp: '200+',
+    price: 'Custom',
+    amc: 'Custom',
+    currency: 'AED',
+  },
+];
+
+export function pricingPlansForCountry(countryCode = 'IN') {
+  const code = String(countryCode || 'IN').toUpperCase();
+  if (code === 'AE') return PRICING_PLANS_AE;
+  return PRICING_PLANS;
+}
+
+export function pricingCurrencyForCountry(countryCode = 'IN') {
+  const code = String(countryCode || 'IN').toUpperCase();
+  if (code === 'AE') return 'AED';
+  return 'INR';
+}
+
+export function pricingSymbolForCountry(countryCode = 'IN') {
+  return pricingCurrencyForCountry(countryCode) === 'AED' ? 'AED' : '₹';
+}
+
+/** Parsed one-time + AMC amounts for admin lead/convert forms. */
+export function planPricingForCountry(planCode, countryCode = 'IN') {
+  const plans = pricingPlansForCountry(countryCode);
+  const plan = plans.find((p) => p.code === (planCode || 'starter')) || plans[0];
+  const parsePrice = (value) => {
+    if (value == null || value === '' || String(value).toLowerCase() === 'custom') return '';
+    const n = Number(String(value).replace(/,/g, ''));
+    return Number.isFinite(n) && n >= 0 ? String(n) : '';
+  };
+  return {
+    onetime: parsePrice(plan.price),
+    amc: parsePrice(plan.amc),
+    currency: pricingCurrencyForCountry(countryCode),
+  };
+}
+
 /** Mirrors backend `PLAN_EMPLOYEE_LIMITS` for display. null = no default cap. */
 export const PLAN_EMPLOYEE_CAP = {
   starter: 25,
@@ -124,12 +200,15 @@ export const PLAN_DISPLAY_NAME = {
 };
 
 /** Labels for SuperAdmin <select>s — aligned with login pricing. */
-export function planOptionsForAdminSelect() {
-  const fromLanding = PRICING_PLANS.map((p) => {
+export function planOptionsForAdminSelect(countryCode = 'IN') {
+  const plans = pricingPlansForCountry(countryCode);
+  const sym = pricingSymbolForCountry(countryCode);
+  const taxNote = String(countryCode || 'IN').toUpperCase() === 'AE' ? 'excl. VAT' : 'excl. GST';
+  const fromLanding = plans.map((p) => {
     const priceLine =
       p.price === 'Custom'
         ? `${p.name} — ${p.emp} employees · custom one-time & AMC`
-        : `${p.name} — ${p.emp} employees · ₹${p.price} + ₹${p.amc} AMC/yr (excl. GST)`;
+        : `${p.name} — ${p.emp} employees · ${sym}${p.price} + ${sym}${p.amc} AMC/yr (${taxNote})`;
     return { value: p.code, label: priceLine };
   });
   return [

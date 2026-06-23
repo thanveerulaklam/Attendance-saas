@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../../utils/api';
 import { GENDER_OPTIONS } from '../../utils/employeeGender';
+import { currencySymbol } from '../../utils/formatMoney';
+import { isIndiaCompany } from '../../utils/regionFeatures';
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -48,7 +50,12 @@ export default function EmployeeFormModal({
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [monthlyOnlyPayroll, setMonthlyOnlyPayroll] = useState(false);
   const [factoryShiftRotation, setFactoryShiftRotation] = useState(false);
+  const [countryCode, setCountryCode] = useState('IN');
+  const [companyCurrency, setCompanyCurrency] = useState('INR');
   const [currentAssignment, setCurrentAssignment] = useState(null);
+
+  const showIndiaStatutory = isIndiaCompany(countryCode);
+  const moneySymbol = currencySymbol(companyCurrency);
 
 
   const [errors, setErrors] = useState({});
@@ -81,10 +88,14 @@ export default function EmployeeFormModal({
         .then((json) => {
           setMonthlyOnlyPayroll(json?.data?.shifts_compact_ui === true);
           setFactoryShiftRotation(json?.data?.enable_shift_rotation === true);
+          setCountryCode(json?.data?.country_code || 'IN');
+          setCompanyCurrency(json?.data?.currency || 'INR');
         })
         .catch(() => {
           setMonthlyOnlyPayroll(false);
           setFactoryShiftRotation(false);
+          setCountryCode('IN');
+          setCompanyCurrency('INR');
         });
     }
   }, [open]);
@@ -233,32 +244,47 @@ export default function EmployeeFormModal({
       nextErrors.otherAllowance = 'Other allowance must be 0 or more';
     }
 
-    if (esiMode === 'fixed') {
-      if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
-        nextErrors.esiAmount = 'ESI amount must be 0 or more';
+    if (showIndiaStatutory) {
+      if (esiMode === 'fixed') {
+        if (esiAmount.trim() !== '' && (Number.isNaN(Number(esiAmount)) || Number(esiAmount) < 0)) {
+          nextErrors.esiAmount = 'ESI amount must be 0 or more';
+        }
+      } else if (esiPercent.trim() === '') {
+        nextErrors.esiPercent = 'ESI percentage is required';
+      } else if (
+        Number.isNaN(Number(esiPercent)) ||
+        Number(esiPercent) < 0 ||
+        Number(esiPercent) > 100
+      ) {
+        nextErrors.esiPercent = 'ESI percentage must be between 0 and 100';
       }
-    } else if (esiPercent.trim() === '') {
-      nextErrors.esiPercent = 'ESI percentage is required';
-    } else if (
-      Number.isNaN(Number(esiPercent)) ||
-      Number(esiPercent) < 0 ||
-      Number(esiPercent) > 100
-    ) {
-      nextErrors.esiPercent = 'ESI percentage must be between 0 and 100';
-    }
-    if (pfMode === 'fixed') {
-      if (pfAmount.trim() !== '' && (Number.isNaN(Number(pfAmount)) || Number(pfAmount) < 0)) {
-        nextErrors.pfAmount = 'PF amount must be 0 or more';
+      if (pfMode === 'fixed') {
+        if (pfAmount.trim() !== '' && (Number.isNaN(Number(pfAmount)) || Number(pfAmount) < 0)) {
+          nextErrors.pfAmount = 'PF amount must be 0 or more';
+        }
+      } else if (pfPercent.trim() === '') {
+        nextErrors.pfPercent = 'PF percentage is required';
+      } else if (
+        Number.isNaN(Number(pfPercent)) ||
+        Number(pfPercent) < 0 ||
+        Number(pfPercent) > 100
+      ) {
+        nextErrors.pfPercent = 'PF percentage must be between 0 and 100';
       }
-    } else if (pfPercent.trim() === '') {
-      nextErrors.pfPercent = 'PF percentage is required';
-    } else if (
-      Number.isNaN(Number(pfPercent)) ||
-      Number(pfPercent) < 0 ||
-      Number(pfPercent) > 100
-    ) {
-      nextErrors.pfPercent = 'PF percentage must be between 0 and 100';
+      if (aadharNumber.trim() !== '') {
+        const normalizedAadhar = aadharNumber.trim().replace(/\s+/g, '');
+        if (!/^\d{12}$/.test(normalizedAadhar)) {
+          nextErrors.aadharNumber = 'Aadhaar number must be exactly 12 digits.';
+        }
+      }
+      if (esiNumber.trim() !== '' && esiNumber.trim().length > 30) {
+        nextErrors.esiNumber = 'ESI number is too long (max 30 characters).';
+      }
+      if (pfNumber.trim() !== '' && pfNumber.trim().length > 30) {
+        nextErrors.pfNumber = 'PF number is too long (max 30 characters).';
+      }
     }
+
     if (
       permissionHoursOverride.trim() !== '' &&
       (Number.isNaN(Number(permissionHoursOverride)) || Number(permissionHoursOverride) < 0)
@@ -272,20 +298,6 @@ export default function EmployeeFormModal({
         nextErrors.phoneNumber =
           'Phone number must be 10-15 digits (optionally starting with +).';
       }
-    }
-
-    if (aadharNumber.trim() !== '') {
-      const normalizedAadhar = aadharNumber.trim().replace(/\s+/g, '');
-      if (!/^\d{12}$/.test(normalizedAadhar)) {
-        nextErrors.aadharNumber = 'Aadhaar number must be exactly 12 digits.';
-      }
-    }
-
-    if (esiNumber.trim() !== '' && esiNumber.trim().length > 30) {
-      nextErrors.esiNumber = 'ESI number is too long (max 30 characters).';
-    }
-    if (pfNumber.trim() !== '' && pfNumber.trim().length > 30) {
-      nextErrors.pfNumber = 'PF number is too long (max 30 characters).';
     }
 
     if (!joinDate) {
@@ -321,24 +333,24 @@ export default function EmployeeFormModal({
         department: department.trim() === '' ? null : department.trim(),
         gender: gender === '' ? null : gender,
         phone_number: normalizedPhone === '' ? null : normalizedPhone,
-        aadhar_number: normalizedAadhar === '' ? null : normalizedAadhar,
-        esi_number: esiNumber.trim() === '' ? null : esiNumber.trim(),
-        pf_number: pfNumber.trim() === '' ? null : pfNumber.trim(),
+        aadhar_number: showIndiaStatutory && normalizedAadhar !== '' ? normalizedAadhar : null,
+        esi_number: showIndiaStatutory && esiNumber.trim() !== '' ? esiNumber.trim() : null,
+        pf_number: showIndiaStatutory && pfNumber.trim() !== '' ? pfNumber.trim() : null,
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
         other_allowance: otherAllowance.trim() === '' ? 0 : Number(otherAllowance),
-        esi_mode: esiMode,
-        esi_amount: esiMode === 'fixed' ? (esiAmount.trim() === '' ? 0 : Number(esiAmount)) : 0,
+        esi_mode: showIndiaStatutory ? esiMode : 'fixed',
+        esi_amount: showIndiaStatutory && esiMode === 'fixed' ? (esiAmount.trim() === '' ? 0 : Number(esiAmount)) : 0,
         esi_percent:
-          esiMode === 'percentage'
+          showIndiaStatutory && esiMode === 'percentage'
             ? esiPercent.trim() === ''
               ? null
               : Number(esiPercent)
             : null,
-        pf_mode: pfMode,
-        pf_amount: pfMode === 'fixed' ? (pfAmount.trim() === '' ? 0 : Number(pfAmount)) : 0,
+        pf_mode: showIndiaStatutory ? pfMode : 'fixed',
+        pf_amount: showIndiaStatutory && pfMode === 'fixed' ? (pfAmount.trim() === '' ? 0 : Number(pfAmount)) : 0,
         pf_percent:
-          pfMode === 'percentage'
+          showIndiaStatutory && pfMode === 'percentage'
             ? pfPercent.trim() === ''
               ? null
               : Number(pfPercent)
@@ -606,6 +618,8 @@ export default function EmployeeFormModal({
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
+            {showIndiaStatutory && (
+            <>
             <div>
               <label className="block text-xs font-medium text-slate-700">
                 Aadhaar number (optional)
@@ -659,12 +673,14 @@ export default function EmployeeFormModal({
                 </p>
               )}
             </div>
+            </>
+            )}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-xs font-medium text-slate-700">
-                Daily travel allowance (₹)
+                Daily travel allowance ({moneySymbol})
                 <input
                   type="number"
                   min="0"
@@ -685,7 +701,7 @@ export default function EmployeeFormModal({
 
             <div>
               <label className="block text-xs font-medium text-slate-700">
-                Other allowances (₹/month)
+                Other allowances ({moneySymbol}/month)
                 <input
                   type="number"
                   min="0"
@@ -705,6 +721,8 @@ export default function EmployeeFormModal({
             </div>
           </div>
 
+          {showIndiaStatutory && (
+          <>
           <div>
             <label className="block text-xs font-medium text-slate-700">ESI deduction</label>
             <div className="mt-1 flex flex-wrap gap-4 text-[11px] text-slate-700">
@@ -716,7 +734,7 @@ export default function EmployeeFormModal({
                   onChange={() => setEsiMode('fixed')}
                   className="border-slate-300 text-blue-600"
                 />
-                Fixed amount (₹/month)
+                Fixed amount ({moneySymbol}/month)
               </label>
               <label className="inline-flex items-center gap-1.5">
                 <input
@@ -778,7 +796,7 @@ export default function EmployeeFormModal({
                   onChange={() => setPfMode('fixed')}
                   className="border-slate-300 text-blue-600"
                 />
-                Fixed amount (₹/month)
+                Fixed amount ({moneySymbol}/month)
               </label>
               <label className="inline-flex items-center gap-1.5">
                 <input
@@ -828,6 +846,8 @@ export default function EmployeeFormModal({
               <p className="mt-1 text-[11px] text-rose-600">{errors.pfPercent}</p>
             )}
           </div>
+          </>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-slate-700">

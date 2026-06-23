@@ -1,17 +1,19 @@
-import { useState, useEffect, useLayoutEffect, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   PLAN_EMPLOYEE_CAP,
   PLAN_DISPLAY_NAME,
   planDefaultLimits,
   planOptionsForAdminSelect,
+  planPricingForCountry,
+  pricingSymbolForCountry,
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
+import { formatMoneyWithSymbol } from '../utils/formatMoney';
 import AdminFinanceSection from './AdminFinanceSection';
 import AdminEnquiriesSection from './AdminEnquiriesSection';
 
 const ADMIN_KEY_STORAGE = 'attendance_saas_admin_key';
-const ADMIN_PLAN_OPTIONS = planOptionsForAdminSelect();
 
 function adminFetch(path, options = {}, key) {
   const headers = {
@@ -115,17 +117,9 @@ function paymentStatusBadgeClass(status) {
   }
 }
 
-function formatCurrencyInr(n) {
+function formatCompanyMoney(n, currency = 'INR') {
   if (n == null || n === '' || Number.isNaN(Number(n))) return '—';
-  try {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0,
-    }).format(Number(n));
-  } catch {
-    return String(n);
-  }
+  return formatMoneyWithSymbol(n, currency || 'INR');
 }
 
 function formatDateShort(iso) {
@@ -349,6 +343,22 @@ export default function AdminPage() {
       country_code: DEFAULT_COUNTRY_CODE,
     };
   });
+
+  const createPlanOptions = useMemo(
+    () => planOptionsForAdminSelect(createForm.country_code || DEFAULT_COUNTRY_CODE),
+    [createForm.country_code]
+  );
+  const approvePlanOptions = useMemo(
+    () => planOptionsForAdminSelect(approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE),
+    [approveModalCompany?.country_code]
+  );
+  const approveMoneySymbol = pricingSymbolForCountry(approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE);
+  const createMoneySymbol = pricingSymbolForCountry(createForm.country_code || DEFAULT_COUNTRY_CODE);
+  const billingPlanOptions = useMemo(
+    () => planOptionsForAdminSelect(detailsCompany?.country_code || 'IN'),
+    [detailsCompany?.country_code]
+  );
+  const billingMoneySymbol = pricingSymbolForCountry(detailsCompany?.country_code || 'IN');
 
   const loadPending = useCallback(async () => {
     if (!adminKey) return;
@@ -591,6 +601,13 @@ export default function AdminPage() {
           d.setFullYear(d.getFullYear() + 1);
           next.subscription_end_date = d.toISOString().slice(0, 10);
         }
+      }
+      if (name === 'country_code' || name === 'plan_code') {
+        const country = name === 'country_code' ? value : prev.country_code || DEFAULT_COUNTRY_CODE;
+        const plan = name === 'plan_code' ? value : prev.plan_code || 'starter';
+        const pricing = planPricingForCountry(plan, country);
+        if (pricing.onetime) next.onetime_fee_amount = pricing.onetime;
+        if (pricing.amc) next.amc_amount = pricing.amc;
       }
       return next;
     });
@@ -1654,7 +1671,7 @@ export default function AdminPage() {
                         </td>
                         <td className="px-4 py-3">
                           <PaymentStatusPill status={q.onetime_payment_status} />
-                          <div className="mt-1 text-xs text-slate-600">{formatCurrencyInr(q.onetime_fee_amount)}</div>
+                          <div className="mt-1 text-xs text-slate-600">{formatCompanyMoney(q.onetime_fee_amount, q.currency)}</div>
                           {q.last_onetime_payment_date && (
                             <div className="text-[11px] text-slate-500">Paid {formatDateShort(q.last_onetime_payment_date)}</div>
                           )}
@@ -1664,7 +1681,7 @@ export default function AdminPage() {
                           <div className={`mt-1 text-xs ${urgencyTextClass(amcUrgency.level)}`}>
                             Due {formatDateShort(q.next_amc_due_date)}
                           </div>
-                          <div className="text-[11px] text-slate-500">{formatCurrencyInr(q.amc_amount)} / yr</div>
+                          <div className="text-[11px] text-slate-500">{formatCompanyMoney(q.amc_amount, q.currency)} / yr</div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap gap-1">
@@ -1901,7 +1918,7 @@ export default function AdminPage() {
                         <td className="px-4 py-2.5">
                           <PaymentStatusPill status={c.onetime_payment_status} />
                           <div className="mt-1 text-xs font-medium text-slate-800">
-                            {formatCurrencyInr(c.onetime_fee_amount)}
+                            {formatCompanyMoney(c.onetime_fee_amount, c.currency)}
                           </div>
                           {c.last_onetime_payment_date && (
                             <div className="text-[11px] text-slate-500">
@@ -1915,7 +1932,7 @@ export default function AdminPage() {
                             Next due {formatDateShort(c.next_amc_due_date)}
                           </div>
                           <div className="text-[11px] text-slate-500">
-                            {formatCurrencyInr(c.amc_amount)} / yr
+                            {formatCompanyMoney(c.amc_amount, c.currency)} / yr
                             {c.last_amc_payment_date && (
                               <> · last {formatDateShort(c.last_amc_payment_date)}</>
                             )}
@@ -2146,7 +2163,7 @@ export default function AdminPage() {
                       <div className="mt-1 flex items-center gap-2">
                         <PaymentStatusPill status={detailsCompany.onetime_payment_status} />
                         <span className="text-sm font-semibold text-slate-900">
-                          {formatCurrencyInr(detailsCompany.onetime_fee_amount)}
+                          {formatCompanyMoney(detailsCompany.onetime_fee_amount, detailsCompany.currency)}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 mt-1">
@@ -2158,7 +2175,7 @@ export default function AdminPage() {
                       <div className="mt-1 flex items-center gap-2">
                         <PaymentStatusPill status={detailsCompany.amc_payment_status} />
                         <span className="text-sm font-semibold text-slate-900">
-                          {formatCurrencyInr(detailsCompany.amc_amount)}
+                          {formatCompanyMoney(detailsCompany.amc_amount, detailsCompany.currency)}
                         </span>
                       </div>
                       <p className={`text-xs mt-1 ${urgencyTextClass(getDateUrgency(detailsCompany.next_amc_due_date, 30).level)}`}>
@@ -2243,7 +2260,7 @@ export default function AdminPage() {
                         onChange={handleBillingChange}
                         className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
                       >
-                        {ADMIN_PLAN_OPTIONS.map((o) => (
+                        {billingPlanOptions.map((o) => (
                           <option key={o.value} value={o.value}>
                             {o.label}
                           </option>
@@ -2314,7 +2331,7 @@ export default function AdminPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">One-time amount (₹)</label>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">One-time amount ({billingMoneySymbol})</label>
                         <input
                           type="number"
                           min="0"
@@ -2359,7 +2376,7 @@ export default function AdminPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount (₹)</label>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount ({billingMoneySymbol})</label>
                         <input
                           type="number"
                           min="0"
@@ -2770,11 +2787,11 @@ export default function AdminPage() {
                     <label className="block text-xs font-medium text-slate-700 mb-1">Pack chosen</label>
                     <select
                       name="plan_code"
-                      value={approveForm.plan_code}
+                        value={approveForm.plan_code}
                       onChange={handleApproveFormChange}
                       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
                     >
-                      {ADMIN_PLAN_OPTIONS.map((o) => (
+                      {approvePlanOptions.map((o) => (
                         <option key={o.value} value={o.value}>
                           {o.label}
                         </option>
@@ -2862,7 +2879,7 @@ export default function AdminPage() {
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">One-time amount (₹)</label>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">One-time amount ({approveMoneySymbol})</label>
                       <input
                         type="number"
                         min="0"
@@ -2875,7 +2892,7 @@ export default function AdminPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount (₹)</label>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount ({approveMoneySymbol})</label>
                       <input
                         type="number"
                         min="0"
@@ -3042,7 +3059,7 @@ export default function AdminPage() {
                         onChange={handleCreateFormChange}
                         className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
                       >
-                        {ADMIN_PLAN_OPTIONS.map((o) => (
+                        {createPlanOptions.map((o) => (
                           <option key={o.value} value={o.value}>
                             {o.label}
                           </option>
@@ -3110,7 +3127,7 @@ export default function AdminPage() {
                   </label>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">One-time amount (₹)</label>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">One-time amount ({createMoneySymbol})</label>
                       <input
                         type="number"
                         min="0"
@@ -3121,7 +3138,7 @@ export default function AdminPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount (₹)</label>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount ({createMoneySymbol})</label>
                       <input
                         type="number"
                         min="0"

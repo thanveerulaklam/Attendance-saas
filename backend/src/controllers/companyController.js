@@ -8,6 +8,7 @@ const {
 } = require('../services/companyService');
 const { getEffectiveEmployeeLimit } = require('../services/employeeService');
 const branchService = require('../services/branchService');
+const { getFeaturesForCountry } = require('../config/region');
 
 /**
  * GET /api/company
@@ -49,6 +50,7 @@ async function getCurrentCompany(req, res, next) {
       success: true,
       data: {
         ...companyRest,
+        region_features: getFeaturesForCountry(company.country_code),
         next_amc_due_date,
         access_valid_until: company.subscription_end_date,
         effective_employee_limit,

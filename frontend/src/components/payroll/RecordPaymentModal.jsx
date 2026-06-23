@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../../utils/api';
+import { formatMoneyWithSymbol, currencySymbol } from '../../utils/formatMoney';
 
 export const PAYMENT_MODES = [
   { value: 'cash', label: 'Cash' },
@@ -11,15 +12,6 @@ export const PAYMENT_MODES = [
 
 export function paymentModeLabel(mode) {
   return PAYMENT_MODES.find((m) => m.value === mode)?.label || mode || '—';
-}
-
-function formatMoney(n) {
-  if (n == null || Number.isNaN(Number(n))) return '0';
-  return new Intl.NumberFormat('en-IN', {
-    style: 'decimal',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(Number(n));
 }
 
 export default function RecordPaymentModal({
@@ -38,6 +30,10 @@ export default function RecordPaymentModal({
   const [error, setError] = useState('');
   const [summary, setSummary] = useState(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [companyCurrency, setCompanyCurrency] = useState('INR');
+
+  const moneySym = currencySymbol(companyCurrency);
+  const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
 
   const balanceDue = summary != null
     ? Number(summary.balance_due || 0)
@@ -75,6 +71,10 @@ export default function RecordPaymentModal({
     setReferenceNumber('');
     setNotes('');
     setError('');
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setCompanyCurrency(json?.data?.currency || 'INR'))
+      .catch(() => setCompanyCurrency('INR'));
     loadSummary();
     return () => { cancelled = true; };
   }, [open, payrollRow?.id, payrollMode]);
@@ -151,21 +151,21 @@ export default function RecordPaymentModal({
         <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-700">
           <div className="flex justify-between">
             <span>Net salary</span>
-            <span className="font-semibold">₹{formatMoney(payrollRow.net_salary)}</span>
+            <span className="font-semibold">{fmtSym(payrollRow.net_salary)}</span>
           </div>
           <div className="mt-1 flex justify-between">
             <span>Already paid</span>
-            <span>₹{formatMoney(summary?.total_paid ?? payrollRow.total_paid ?? 0)}</span>
+            <span>{fmtSym(summary?.total_paid ?? payrollRow.total_paid ?? 0)}</span>
           </div>
           <div className="mt-1 flex justify-between font-semibold text-emerald-700">
             <span>Balance due</span>
-            <span>{loadingSummary ? '...' : `₹${formatMoney(balanceDue)}`}</span>
+            <span>{loadingSummary ? '...' : fmtSym(balanceDue)}</span>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <div>
-            <label className="mb-1 block text-[11px] font-medium text-slate-600">Amount (₹)</label>
+            <label className="mb-1 block text-[11px] font-medium text-slate-600">Amount ({moneySym})</label>
             <input
               type="number"
               min="0.01"
