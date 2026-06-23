@@ -4,6 +4,7 @@ const { computeNextAmcDueDate } = require('../services/companyService');
 const { recordPaymentsFromBillingChange } = require('../services/paymentLedgerService');
 const auditService = require('../services/auditService');
 const authService = require('../services/authService');
+const { listCountriesForSelect } = require('../config/region');
 
 async function logSuperadminAction(companyId, actionType, entityType, entityId, metadata = null) {
   if (!companyId) return;
@@ -87,6 +88,9 @@ async function getAdminOverview(req, res, next) {
          c.onetime_payment_status,
          c.amc_payment_status,
          c.last_onetime_payment_date,
+         c.country_code,
+         c.timezone,
+         c.currency,
          (
            SELECT MAX(d.last_seen_at)
            FROM devices d
@@ -162,6 +166,9 @@ async function getAdminOverview(req, res, next) {
           onetime_payment_status: row.onetime_payment_status,
           amc_payment_status: row.amc_payment_status,
           last_onetime_payment_date: row.last_onetime_payment_date,
+          country_code: row.country_code,
+          timezone: row.timezone,
+          currency: row.currency,
           next_amc_due_date: computeNextAmcDueDate(row),
           last_device_sync_at: row.last_device_sync_at,
           last_payroll_generated_at: row.last_payroll_generated_at,
@@ -285,6 +292,21 @@ async function updateDemoEnquiryNotes(req, res, next) {
       success: true,
       data: updated,
       message: 'Notes saved.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/country-profiles
+ * Supported countries for super-admin company setup.
+ */
+async function getCountryProfiles(req, res, next) {
+  try {
+    res.status(200).json({
+      success: true,
+      data: listCountriesForSelect(),
     });
   } catch (err) {
     next(err);
@@ -1736,6 +1758,7 @@ async function resetCompanyAdminPassword(req, res, next) {
 module.exports = {
   listPendingCompanies,
   getAdminOverview,
+  getCountryProfiles,
   listDemoEnquiries,
   getDemoEnquiryStats,
   getDemoEnquirySuggestions,

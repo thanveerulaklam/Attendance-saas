@@ -12,6 +12,7 @@ import {
   planDefaultLimits,
   planOptionsForAdminSelect,
 } from '../constants/pricingPlans';
+import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 
 const PLAN_OPTIONS = planOptionsForAdminSelect();
 const PAGE_SIZE = 25;
@@ -109,6 +110,7 @@ function convertFormFromLead(lead) {
     amc_amount: pricing.amc,
     onetime_fee_paid: false,
     last_amc_payment_date: '',
+    country_code: DEFAULT_COUNTRY_CODE,
   };
 }
 
@@ -394,6 +396,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             onetime_fee_amount: convertForm.onetime_fee_amount ? Number(convertForm.onetime_fee_amount) : null,
             amc_amount: convertForm.amc_amount ? Number(convertForm.amc_amount) : null,
             last_amc_payment_date: convertForm.last_amc_payment_date || null,
+            country_code: convertForm.country_code || DEFAULT_COUNTRY_CODE,
           }),
         },
         adminKey
@@ -911,6 +914,25 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   <label className="block">
                     <span className="text-xs font-medium text-slate-700">Phone</span>
                     <input name="phone" value={convertForm.phone} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-700">Country</span>
+                    <select
+                      name="country_code"
+                      value={convertForm.country_code || DEFAULT_COUNTRY_CODE}
+                      onChange={handleConvertChange}
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    >
+                      {COUNTRY_OPTIONS.map((o) => (
+                        <option key={o.country_code} value={o.country_code}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Timezone: {countryProfile(convertForm.country_code).timezone} · Currency:{' '}
+                      {countryProfile(convertForm.country_code).currency}
+                    </p>
                   </label>
                   <label className="block sm:col-span-2">
                     <span className="text-xs font-medium text-slate-700">Admin name *</span>

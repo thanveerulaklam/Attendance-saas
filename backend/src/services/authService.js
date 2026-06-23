@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const { pool } = require('../config/database');
 const { signToken } = require('../middleware/auth');
 const { AppError } = require('../utils/AppError');
+const { resolveLocaleFromCountryCode, validateCountryCode } = require('../config/region');
 
 /**
  * Register a new company and its first admin user.
@@ -166,6 +167,11 @@ async function createCompanyProvisionedBySuperadmin(payload) {
   const branch_limit_override = Math.max(0, branchesAllowed - 1);
   const employee_limit_override = staffsAllowed;
 
+  const countryCode = validateCountryCode(
+    payload.country_code ?? companyIn.country_code ?? 'IN'
+  );
+  const locale = resolveLocaleFromCountryCode(countryCode);
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -177,7 +183,8 @@ async function createCompanyProvisionedBySuperadmin(payload) {
          subscription_start_date, subscription_end_date, next_billing_date,
          is_active,
          employee_limit_override, branch_limit_override,
-         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date
+         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
+         country_code, timezone, currency
        )
        VALUES (
          $1, $2, $3, $4, 'active',
@@ -185,11 +192,13 @@ async function createCompanyProvisionedBySuperadmin(payload) {
          $7::date, $8::date, $8::date,
          TRUE,
          $9, $10,
-         $11, $12, $13, $14::date
+         $11, $12, $13, $14::date,
+         $15, $16, $17
        )
        RETURNING id, name, email, phone, address, status, created_at,
          plan_code, subscription_start_date, subscription_end_date, payment_status,
-         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date`,
+         onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
+         country_code, timezone, currency`,
       [
         companyName,
         companyEmail || null,
@@ -205,6 +214,9 @@ async function createCompanyProvisionedBySuperadmin(payload) {
         onetimeAmt,
         amcAmt,
         lastAmc,
+        locale.country_code,
+        locale.timezone,
+        locale.currency,
       ]
     );
     const companyRow = companyResult.rows[0];

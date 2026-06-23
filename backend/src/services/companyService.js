@@ -49,6 +49,7 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   onetime_payment_status, amc_payment_status, last_onetime_payment_date,
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
   enable_shift_rotation, flexible_hours_mode,
+  country_code, timezone, currency,
   whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
   whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;

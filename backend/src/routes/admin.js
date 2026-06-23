@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const {
   listPendingCompanies,
   getAdminOverview,
+  getCountryProfiles,
   listDemoEnquiries,
   getDemoEnquiryStats,
   getDemoEnquirySuggestions,
@@ -72,6 +73,7 @@ router.use(requireApprovalSecret);
 
 router.get('/pending-companies', listPendingCompanies);
 router.get('/overview', getAdminOverview);
+router.get('/country-profiles', getCountryProfiles);
 router.get('/collections-queue', getCollectionsQueue);
 router.get('/finance-overview', getFinanceOverview);
 router.get('/company-details', getCompanyDetails);

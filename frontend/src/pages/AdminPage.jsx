@@ -6,6 +6,7 @@ import {
   planDefaultLimits,
   planOptionsForAdminSelect,
 } from '../constants/pricingPlans';
+import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 import AdminFinanceSection from './AdminFinanceSection';
 import AdminEnquiriesSection from './AdminEnquiriesSection';
 
@@ -345,6 +346,7 @@ export default function AdminPage() {
       amc_amount: '',
       onetime_fee_paid: false,
       last_amc_payment_date: '',
+      country_code: DEFAULT_COUNTRY_CODE,
     };
   });
 
@@ -573,6 +575,7 @@ export default function AdminPage() {
       amc_amount: '',
       onetime_fee_paid: false,
       last_amc_payment_date: '',
+      country_code: DEFAULT_COUNTRY_CODE,
     });
     setCreateSaving(false);
     setCreateModalOpen(true);
@@ -639,6 +642,7 @@ export default function AdminPage() {
             onetime_fee_amount: createForm.onetime_fee_amount ? Number(createForm.onetime_fee_amount) : null,
             amc_amount: createForm.amc_amount ? Number(createForm.amc_amount) : null,
             last_amc_payment_date: createForm.last_amc_payment_date || null,
+            country_code: createForm.country_code || DEFAULT_COUNTRY_CODE,
           }),
         },
         adminKey
@@ -1881,6 +1885,11 @@ export default function AdminPage() {
                                 From lead #{c.source_lead_id}
                               </span>
                             )}
+                            {c.country_code && c.country_code !== 'IN' && (
+                              <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-800">
+                                {c.country_code}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-2.5">
@@ -2962,6 +2971,25 @@ export default function AdminPage() {
                       onChange={handleCreateFormChange}
                       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
                     />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">Country</label>
+                    <select
+                      name="country_code"
+                      value={createForm.country_code || DEFAULT_COUNTRY_CODE}
+                      onChange={handleCreateFormChange}
+                      className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                    >
+                      {COUNTRY_OPTIONS.map((o) => (
+                        <option key={o.country_code} value={o.country_code}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Timezone: {countryProfile(createForm.country_code).timezone} · Currency:{' '}
+                      {countryProfile(createForm.country_code).currency}
+                    </p>
                   </div>
                 </div>
                 <div className="border-t border-slate-200 pt-3 mt-1">

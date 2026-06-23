@@ -115,6 +115,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'companies' AND column_name = 'flexible_hours_mode'
   )`,
+  '073_companies_country_locale.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'companies' AND column_name = 'country_code'
+  )`,
 };
 
 async function hasExistingSchema(client) {
