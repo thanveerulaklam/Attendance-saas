@@ -774,7 +774,7 @@ function computeHoursBasedDayStatus(
   let late = false;
   let minutesLate = 0;
   if (firstInTime) {
-    const { year: y, month: mo, day: dd } = istYmdParts(firstInTime);
+    const { year: y, month: mo, day: dd } = ymdParts(firstInTime);
     const shiftStartMs = getShiftStartMsForDate(
       y,
       mo,
