@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { getCompanyCountryCode } = require('./companyService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
 const { assignShiftBulk } = require('./shiftAssignmentService');
 const { todayIstYmd, pgDateToYmd } = require('../utils/istDate');
@@ -45,7 +46,34 @@ const EMPLOYEE_SELECT_FIELDS = `
         pf_mode,
         pf_percent,
         permission_hours_override,
+        labour_card_number,
+        iban,
+        contract_type,
         created_at`;
+
+function stripIndiaStatutoryForNonIn(payload, countryCode, { isCreate = false } = {}) {
+  if (String(countryCode || 'IN').toUpperCase() === 'IN') return payload;
+  const stripped = { ...payload };
+  const indiaKeys = [
+    'aadhar_number',
+    'esi_number',
+    'pf_number',
+    'esi_amount',
+    'esi_percent',
+    'pf_amount',
+    'pf_percent',
+    'esi_mode',
+    'pf_mode',
+  ];
+  for (const key of indiaKeys) {
+    if (!isCreate && !Object.prototype.hasOwnProperty.call(payload, key)) continue;
+    if (key.endsWith('_mode')) stripped[key] = 'fixed';
+    else if (key.includes('percent')) stripped[key] = null;
+    else if (key.includes('amount')) stripped[key] = 0;
+    else stripped[key] = null;
+  }
+  return stripped;
+}
 
 /**
  * Effective cap: companies.employee_limit_override if set, else plan mapping.
@@ -190,7 +218,8 @@ function branchFilterSql(allowedBranchIds, paramIndex) {
  * @param {object} [branchContext] - role, allowedBranchIds, defaultBranchId
  */
 async function createEmployee(companyId, data, branchContext = {}) {
-  const payload = validateCreateEmployee(data);
+  const countryCode = await getCompanyCountryCode(companyId);
+  const payload = stripIndiaStatutoryForNonIn(validateCreateEmployee(data), countryCode, { isCreate: true });
 
   const shiftId = payload.shift_id != null ? payload.shift_id : null;
   const payrollFrequency = payload.payroll_frequency || 'monthly';
@@ -213,6 +242,9 @@ async function createEmployee(companyId, data, branchContext = {}) {
   const aadharNumber = payload.aadhar_number != null ? payload.aadhar_number : null;
   const esiNumber = payload.esi_number != null ? payload.esi_number : null;
   const pfNumber = payload.pf_number != null ? payload.pf_number : null;
+  const labourCardNumber = payload.labour_card_number != null ? payload.labour_card_number : null;
+  const iban = payload.iban != null ? payload.iban : null;
+  const contractType = payload.contract_type || 'unlimited';
 
   const branchId = await resolveBranchIdForCreate(companyId, payload, branchContext);
 
@@ -247,9 +279,12 @@ async function createEmployee(companyId, data, branchContext = {}) {
         pf_amount,
         pf_mode,
         pf_percent,
-        permission_hours_override
+        permission_hours_override,
+        labour_card_number,
+        iban,
+        contract_type
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -277,6 +312,9 @@ async function createEmployee(companyId, data, branchContext = {}) {
         pfMode,
         pfPercent,
         permissionHoursOverride,
+        labourCardNumber,
+        iban,
+        contractType,
       ]
     );
 
@@ -438,7 +476,8 @@ async function getEmployeeById(companyId, id, branchContext = {}) {
 async function updateEmployee(companyId, id, data, branchContext = {}) {
   await assertEmployeeVisibleToHr(companyId, id, branchContext);
 
-  const updates = validateUpdateEmployee(data);
+  const countryCode = await getCompanyCountryCode(companyId);
+  const updates = stripIndiaStatutoryForNonIn(validateUpdateEmployee(data), countryCode);
 
   if (Object.keys(updates).length === 0) {
     return getEmployeeById(companyId, id, branchContext);

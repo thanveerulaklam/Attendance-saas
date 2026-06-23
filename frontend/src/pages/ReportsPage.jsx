@@ -33,6 +33,7 @@ const REPORT_CSV_SLUG = {
   overtime: 'overtime',
   esi: 'esi',
   pf: 'pf',
+  wps: 'wps',
   salaryPayments: 'salary-payments',
 };
 
@@ -42,6 +43,8 @@ function getReportTitle(type) {
       return 'ESI Statement';
     case 'pf':
       return 'PF Statement';
+    case 'wps':
+      return 'WPS Salary File';
     case 'salaryPayments':
       return 'Salary Payment Ledger';
     default:
@@ -213,6 +216,7 @@ export default function ReportsPage() {
     overtime: 'csv',
     esi: 'csv',
     pf: 'csv',
+    wps: 'csv',
     salaryPayments: 'csv',
   });
   const [paymentSummary, setPaymentSummary] = useState({
@@ -234,6 +238,7 @@ export default function ReportsPage() {
   const companyCurrency = company?.currency || 'INR';
   const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
   const showIndiaStatutory = company?.region_features?.esi === true;
+  const showWpsExport = company?.region_features?.wps === true;
 
   const params = new URLSearchParams({ year, month });
   const base = '/api/reports';
@@ -1366,6 +1371,15 @@ export default function ReportsPage() {
                   },
                 ]
               : []),
+            ...(showWpsExport
+              ? [
+                  {
+                    key: 'wps',
+                    title: 'WPS salary file',
+                    blurb: 'UAE bank salary upload — IBAN, labour card, net pay.',
+                  },
+                ]
+              : []),
             {
               key: 'salaryPayments',
               title: 'Salary payment ledger',
@@ -1438,6 +1452,9 @@ export default function ReportsPage() {
                 <li><strong>ESI statement:</strong> Name, ESI number, gross wages, ESI deduction.</li>
                 <li><strong>PF statement:</strong> Employee code, name, type, rate, earned basic, PF deduction.</li>
               </>
+            )}
+            {showWpsExport && (
+              <li><strong>WPS salary file:</strong> Employer MOL ID, employee labour card, IBAN, pay period, net salary.</li>
             )}
             <li><strong>Salary payment ledger:</strong> Payment date, employee, period, amount, mode, reference, balance.</li>
           </ul>

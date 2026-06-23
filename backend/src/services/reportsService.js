@@ -544,6 +544,78 @@ async function getSalaryPaymentsReportCsv(companyId, year, month, allowedBranchI
   return toCsv(header, rows);
 }
 
+async function getWpsReportCsv(companyId, year, month, allowedBranchIds = null) {
+  const payrollRules = await getPayrollRulesForCompanyId(companyId);
+  if (!payrollRules.supportsWpsReports || typeof payrollRules.buildWpsExport !== 'function') {
+    throw new AppError('WPS export is only available for UAE payroll companies', 400);
+  }
+
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) {
+    throw new AppError('Valid year and month are required', 400);
+  }
+
+  const companyResult = await pool.query(
+    `SELECT id, name, mol_establishment_id, bank_routing_code, currency, country_code
+     FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  if (companyResult.rowCount === 0) {
+    throw new AppError('Company not found', 404);
+  }
+  const company = companyResult.rows[0];
+
+  const params = [companyId, y, m];
+  let branchClause = '';
+  if (allowedBranchIds != null) {
+    branchClause = ' AND e.branch_id = ANY($4::bigint[])';
+    params.push(allowedBranchIds);
+  }
+
+  const payrollResult = await pool.query(
+    `SELECT
+        p.employee_id,
+        p.net_salary,
+        p.gross_salary,
+        e.name AS employee_name,
+        e.employee_code,
+        e.basic_salary,
+        e.labour_card_number,
+        e.iban
+     FROM payroll_records p
+     INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+     WHERE p.company_id = $1 AND p.year = $2 AND p.month = $3${branchClause}
+     ORDER BY e.name`,
+    params
+  );
+
+  if (allowedBranchIds != null && allowedBranchIds.length === 0) {
+    const { header } = payrollRules.buildWpsExport({
+      company,
+      employeesById: new Map(),
+      payrollRows: [],
+      year: y,
+      month: m,
+    });
+    return toCsv(header, []);
+  }
+
+  const employeesById = new Map();
+  for (const row of payrollResult.rows) {
+    employeesById.set(Number(row.employee_id), row);
+  }
+
+  const { header, rows } = payrollRules.buildWpsExport({
+    company,
+    employeesById,
+    payrollRows: payrollResult.rows,
+    year: y,
+    month: m,
+  });
+  return toCsv(header, rows);
+}
+
 module.exports = {
   getAttendanceReportCsv,
   getPayrollReportCsv,
@@ -551,5 +623,6 @@ module.exports = {
   getDailyReportCsv,
   getEsiReportCsv,
   getPfReportCsv,
+  getWpsReportCsv,
   getSalaryPaymentsReportCsv,
 };

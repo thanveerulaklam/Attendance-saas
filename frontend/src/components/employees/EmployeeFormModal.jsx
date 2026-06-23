@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { authFetch } from '../../utils/api';
 import { GENDER_OPTIONS } from '../../utils/employeeGender';
 import { currencySymbol } from '../../utils/formatMoney';
-import { isIndiaCompany } from '../../utils/regionFeatures';
+import { isIndiaCompany, regionFeaturesForCountry } from '../../utils/regionFeatures';
 
 const STATUS_OPTIONS = [
   { value: 'active', label: 'Active' },
@@ -28,6 +28,9 @@ export default function EmployeeFormModal({
   const [aadharNumber, setAadharNumber] = useState('');
   const [esiNumber, setEsiNumber] = useState('');
   const [pfNumber, setPfNumber] = useState('');
+  const [labourCardNumber, setLabourCardNumber] = useState('');
+  const [iban, setIban] = useState('');
+  const [contractType, setContractType] = useState('unlimited');
   const [dailyTravelAllowance, setDailyTravelAllowance] = useState('');
   const [otherAllowance, setOtherAllowance] = useState('');
   const [esiAmount, setEsiAmount] = useState('');
@@ -55,6 +58,7 @@ export default function EmployeeFormModal({
   const [currentAssignment, setCurrentAssignment] = useState(null);
 
   const showIndiaStatutory = isIndiaCompany(countryCode);
+  const showUaeFields = regionFeaturesForCountry(countryCode).wps;
   const moneySymbol = currencySymbol(companyCurrency);
 
 
@@ -111,6 +115,9 @@ export default function EmployeeFormModal({
         setAadharNumber(employee.aadhar_number || '');
         setEsiNumber(employee.esi_number || '');
         setPfNumber(employee.pf_number || '');
+        setLabourCardNumber(employee.labour_card_number || '');
+        setIban(employee.iban || '');
+        setContractType(employee.contract_type || 'unlimited');
         setBasicSalary(
           employee.basic_salary != null ? String(employee.basic_salary) : ''
         );
@@ -162,6 +169,9 @@ export default function EmployeeFormModal({
         setAadharNumber('');
         setEsiNumber('');
         setPfNumber('');
+        setLabourCardNumber('');
+        setIban('');
+        setContractType('unlimited');
         setBasicSalary('');
         setDailyTravelAllowance('');
         setOtherAllowance('');
@@ -336,6 +346,9 @@ export default function EmployeeFormModal({
         aadhar_number: showIndiaStatutory && normalizedAadhar !== '' ? normalizedAadhar : null,
         esi_number: showIndiaStatutory && esiNumber.trim() !== '' ? esiNumber.trim() : null,
         pf_number: showIndiaStatutory && pfNumber.trim() !== '' ? pfNumber.trim() : null,
+        labour_card_number: showUaeFields && labourCardNumber.trim() !== '' ? labourCardNumber.trim() : null,
+        iban: showUaeFields && iban.trim() !== '' ? iban.replace(/\s+/g, '').toUpperCase() : null,
+        contract_type: showUaeFields ? contractType : 'unlimited',
         basic_salary: Number(basicSalary),
         daily_travel_allowance: dailyTravelAllowance.trim() === '' ? 0 : Number(dailyTravelAllowance),
         other_allowance: otherAllowance.trim() === '' ? 0 : Number(otherAllowance),
@@ -676,6 +689,48 @@ export default function EmployeeFormModal({
             </>
             )}
           </div>
+
+          {showUaeFields && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  Labour card number (optional)
+                  <input
+                    type="text"
+                    value={labourCardNumber}
+                    onChange={(e) => setLabourCardNumber(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                    placeholder="Work permit / labour card"
+                  />
+                </label>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  Bank IBAN (optional)
+                  <input
+                    type="text"
+                    value={iban}
+                    onChange={(e) => setIban(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                    placeholder="AE07..."
+                  />
+                </label>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  Contract type
+                  <select
+                    value={contractType}
+                    onChange={(e) => setContractType(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  >
+                    <option value="unlimited">Unlimited</option>
+                    <option value="limited">Limited</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

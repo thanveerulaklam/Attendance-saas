@@ -5,6 +5,7 @@ const PAYROLL_FREQUENCY_VALUES = ['monthly', 'weekly'];
 const SALARY_TYPE_VALUES = ['monthly', 'per_day'];
 const DEDUCTION_MODE_VALUES = ['fixed', 'percentage'];
 const GENDER_VALUES = ['male', 'female', 'other'];
+const CONTRACT_TYPE_VALUES = ['unlimited', 'limited'];
 
 const isValidDate = (value) => {
   const date = new Date(value);
@@ -323,6 +324,24 @@ const validateCreateEmployee = (payload = {}) => {
         : payload.pf_number.trim();
   }
 
+  result.contract_type = 'unlimited';
+  if (Object.prototype.hasOwnProperty.call(payload, 'contract_type')) {
+    const ct = String(payload.contract_type || 'unlimited').toLowerCase();
+    result.contract_type = CONTRACT_TYPE_VALUES.includes(ct) ? ct : 'unlimited';
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'labour_card_number')) {
+    result.labour_card_number =
+      payload.labour_card_number == null || payload.labour_card_number === ''
+        ? null
+        : String(payload.labour_card_number).trim();
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'iban')) {
+    result.iban =
+      payload.iban == null || payload.iban === ''
+        ? null
+        : String(payload.iban).replace(/\s+/g, '').toUpperCase();
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'branch_id')) {
     result.branch_id =
       payload.branch_id == null || payload.branch_id === ''
@@ -577,6 +596,35 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.pf_number = 'PF number must be a string.';
     } else {
       clean.pf_number = payload.pf_number.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'contract_type')) {
+    const ct = String(payload.contract_type || 'unlimited').toLowerCase();
+    if (!CONTRACT_TYPE_VALUES.includes(ct)) {
+      errors.contract_type = `contract_type must be one of: ${CONTRACT_TYPE_VALUES.join(', ')}`;
+    } else {
+      clean.contract_type = ct;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'labour_card_number')) {
+    if (payload.labour_card_number == null || payload.labour_card_number === '') {
+      clean.labour_card_number = null;
+    } else if (typeof payload.labour_card_number !== 'string') {
+      errors.labour_card_number = 'Labour card number must be a string.';
+    } else {
+      clean.labour_card_number = payload.labour_card_number.trim();
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'iban')) {
+    if (payload.iban == null || payload.iban === '') {
+      clean.iban = null;
+    } else if (typeof payload.iban !== 'string') {
+      errors.iban = 'IBAN must be a string.';
+    } else {
+      clean.iban = payload.iban.replace(/\s+/g, '').toUpperCase();
     }
   }
 

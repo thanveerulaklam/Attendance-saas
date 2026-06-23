@@ -248,6 +248,7 @@ export default function PayslipModal({
   const currency = companyCurrency(company);
   const regionFeatures = company?.region_features || regionFeaturesForCountry(company?.country_code);
   const showIndiaStatutory = !!regionFeatures.esi;
+  const showGratuity = !!regionFeatures.wps;
   const fmtSym = (n) => formatMoneyWithSymbol(n, currency);
   const fmtAmt = (n) => formatMoneyAmount(n, currency);
 
@@ -651,6 +652,14 @@ export default function PayslipModal({
                     {fmtSym(breakdown.breakdown?.noLeaveIncentive)}
                   </span>
                 </div>
+                {showGratuity && Number(breakdown.breakdown?.gratuityAccrual || 0) > 0 && (
+                  <div className="flex justify-between border-t border-slate-100 pt-1.5">
+                    <span>Gratuity accrual (info)</span>
+                    <span className="font-medium text-slate-700">
+                      {fmtSym(breakdown.breakdown?.gratuityAccrual)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
             <div>
@@ -771,6 +780,14 @@ export default function PayslipModal({
                   <p className="text-[11px] text-slate-600">ESI Amount</p>
                   <p className="text-sm font-medium text-slate-800">
                     {fmtSym(breakdown.breakdown?.esiDeduction)}
+                  </p>
+                </div>
+              )}
+              {showGratuity && Number(breakdown.breakdown?.gratuityEstimate || 0) > 0 && (
+                <div>
+                  <p className="text-[11px] text-slate-600">Est. gratuity (EOS)</p>
+                  <p className="text-sm font-medium text-slate-800">
+                    {fmtSym(breakdown.breakdown?.gratuityEstimate)}
                   </p>
                 </div>
               )}

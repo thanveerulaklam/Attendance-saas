@@ -1533,8 +1533,8 @@ function getDaysInMonth(year, month1to12) {
   return new Date(year, month1to12, 0).getDate(); // month1to12: 1=Jan..12=Dec
 }
 
-function resolveStatutoryDeductions(payrollRules, employee, { earnedBasic = 0, grossSalary = 0 } = {}) {
-  return payrollRules.resolveStatutoryDeductions(employee, { earnedBasic, grossSalary });
+function resolveStatutoryDeductions(payrollRules, employee, { earnedBasic = 0, grossSalary = 0, asOfDate } = {}) {
+  return payrollRules.resolveStatutoryDeductions(employee, { earnedBasic, grossSalary, asOfDate });
 }
 
 function computeOtherAllowance(employee, summary, options = {}) {
@@ -1666,7 +1666,8 @@ async function generateWeeklyPayroll(
 
     const employeeResult = await client.query(
       `SELECT id, basic_salary, status, daily_travel_allowance, other_allowance,
-              esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type
+              esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type,
+              join_date, contract_type
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1784,12 +1785,13 @@ async function generateWeeklyPayroll(
       statutoryEarnedBasic = monthBases.earnedBasic;
       statutoryGross = monthBases.grossSalary;
     }
-    const { esiDeduction, pfDeduction } = shouldDeductStatutory
+    const { esiDeduction, pfDeduction, gratuityAccrual = 0, gratuityEstimate = 0 } = shouldDeductStatutory
       ? resolveStatutoryDeductions(payrollRules, employee, {
           earnedBasic: statutoryEarnedBasic,
           grossSalary: statutoryGross,
+          asOfDate: weekEnd,
         })
-      : { esiDeduction: 0, pfDeduction: 0 };
+      : { esiDeduction: 0, pfDeduction: 0, gratuityAccrual: 0, gratuityEstimate: 0 };
     const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
 
     const salaryAdvanceBase = applySalaryAdvances
@@ -2157,7 +2159,8 @@ async function getWeeklyPayrollBreakdown(
 
   const employeeResult = await pool.query(
     `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, other_allowance,
-            esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type
+            esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type,
+            join_date, contract_type
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -2274,12 +2277,19 @@ async function getWeeklyPayrollBreakdown(
     statutoryEarnedBasic = monthBases.earnedBasic;
     statutoryGross = monthBases.grossSalary;
   }
-  const { esiDeduction, pfDeduction } = shouldDeductStatutory
+  const { esiDeduction, pfDeduction, gratuityAccrual = 0, gratuityEstimate = 0 } = shouldDeductStatutory
     ? resolveStatutoryDeductions(payrollRules, employee, {
         earnedBasic: statutoryEarnedBasic,
         grossSalary: statutoryGross,
+        asOfDate: weekEnd,
       })
-    : { esiDeduction: 0, pfDeduction: 0 };
+    : payrollRules.supportsGratuityAccrual
+      ? resolveStatutoryDeductions(payrollRules, employee, {
+          earnedBasic,
+          grossSalary,
+          asOfDate: weekEnd,
+        })
+      : { esiDeduction: 0, pfDeduction: 0, gratuityAccrual: 0, gratuityEstimate: 0 };
 
   const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
 
@@ -2346,6 +2356,8 @@ async function getWeeklyPayrollBreakdown(
       lunchOverDeduction,
       esiDeduction,
       pfDeduction,
+      gratuityAccrual,
+      gratuityEstimate,
       permissionHoursAllocated,
       permissionMinutesUsed,
       permissionOffsetAmount,
@@ -2388,7 +2400,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const employeeResult = await client.query(
       `SELECT id, basic_salary, status, join_date, daily_travel_allowance, other_allowance,
               esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
-              payroll_frequency, salary_type, permission_hours_override
+              payroll_frequency, salary_type, permission_hours_override, contract_type
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -2519,10 +2531,15 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     }
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentAmount;
-    const { esiDeduction, pfDeduction } = resolveStatutoryDeductions(payrollRules, employee, {
-      earnedBasic,
-      grossSalary,
-    });
+    const monthLastDay = summary.daysInMonth || getDaysInMonth(year, month);
+    const gratuityAsOf =
+      asOfDate || `${year}-${String(month).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
+    const { esiDeduction, pfDeduction, gratuityAccrual = 0, gratuityEstimate = 0 } =
+      resolveStatutoryDeductions(payrollRules, employee, {
+        earnedBasic,
+        grossSalary,
+        asOfDate: gratuityAsOf,
+      });
     const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
     const effectivePermissionHours =
       employee.permission_hours_override != null
@@ -2732,9 +2749,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const asOfDate = isCurrentMonth ? todayStr : null;
 
   const employeeResult = await pool.query(
-    `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, other_allowance,
+    `SELECT id, name, employee_code, basic_salary, status, join_date, daily_travel_allowance, other_allowance,
             esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
-            shift_id, salary_type, permission_hours_override
+            shift_id, salary_type, permission_hours_override, contract_type
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -2866,10 +2883,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   }
 
   const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentComputed;
-  const { esiDeduction, pfDeduction } = resolveStatutoryDeductions(payrollRules, employee, {
-    earnedBasic,
-    grossSalary: grossSalaryComputed,
-  });
+  const monthLastDay = getDaysInMonth(year, month);
+  const gratuityAsOf =
+    asOfDate || `${year}-${String(month).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
+  const { esiDeduction, pfDeduction, gratuityAccrual = 0, gratuityEstimate = 0 } =
+    resolveStatutoryDeductions(payrollRules, employee, {
+      earnedBasic,
+      grossSalary: grossSalaryComputed,
+      asOfDate: gratuityAsOf,
+    });
   const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
   const permissionOffsetComputed =
     summary.flexibleHoursMode || !isMonthComplete
@@ -3069,6 +3091,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       lunchOverDeduction,
       esiDeduction,
       pfDeduction,
+      gratuityAccrual,
+      gratuityEstimate,
       permissionHoursAllocated,
       permissionMinutesUsed,
       permissionOffsetAmount,

@@ -43,6 +43,7 @@ test('UAE rules never deduct PF/ESI even if employee fields are set', () => {
   });
   assert.equal(result.esiDeduction, 0);
   assert.equal(result.pfDeduction, 0);
+  assert.equal(result.gratuityAccrual, 0);
 });
 
 test('Generic rules return zero statutory deductions', () => {

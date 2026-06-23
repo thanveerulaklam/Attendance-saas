@@ -119,6 +119,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'companies' AND column_name = 'country_code'
   )`,
+  '074_uae_wps_fields.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'employees' AND column_name = 'iban'
+  )`,
 };
 
 async function hasExistingSchema(client) {

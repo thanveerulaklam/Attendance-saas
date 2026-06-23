@@ -9,7 +9,8 @@ module.exports = {
     return {
       esiDeduction: 0,
       pfDeduction: 0,
-      gratuityProvision: 0,
+      gratuityAccrual: 0,
+      gratuityEstimate: 0,
     };
   },
 

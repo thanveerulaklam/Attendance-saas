@@ -59,6 +59,8 @@ export default function CompanySettingsPage() {
     name: '',
     phone: '',
     address: '',
+    mol_establishment_id: '',
+    bank_routing_code: '',
   });
   const [whatsappForm, setWhatsappForm] = useState({
     whatsapp_auto_enabled: false,
@@ -143,6 +145,8 @@ export default function CompanySettingsPage() {
           name: data.name || '',
           phone: data.phone || '',
           address: data.address || '',
+          mol_establishment_id: data.mol_establishment_id || '',
+          bank_routing_code: data.bank_routing_code || '',
         });
         setWhatsappForm({
           whatsapp_auto_enabled: Boolean(data.whatsapp_auto_enabled),
@@ -227,6 +231,8 @@ export default function CompanySettingsPage() {
         name: data.name || '',
         phone: data.phone || '',
         address: data.address || '',
+        mol_establishment_id: data.mol_establishment_id || '',
+        bank_routing_code: data.bank_routing_code || '',
       });
       setSaved(true);
     } catch (err) {
@@ -572,6 +578,37 @@ export default function CompanySettingsPage() {
               />
             </div>
           </div>
+
+          {localeInfo.country_code === 'AE' && (
+            <div className="mt-4 grid gap-3 rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 sm:grid-cols-2">
+              <p className="sm:col-span-2 text-xs font-semibold text-slate-800">WPS (UAE salary file)</p>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">MOL establishment ID</label>
+                <input
+                  type="text"
+                  value={form.mol_establishment_id}
+                  onChange={handleChange('mol_establishment_id')}
+                  disabled={loading || saving}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                  placeholder="Employer ID for WPS"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-700">Bank routing code</label>
+                <input
+                  type="text"
+                  value={form.bank_routing_code}
+                  onChange={handleChange('bank_routing_code')}
+                  disabled={loading || saving}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900"
+                  placeholder="Agent / routing code"
+                />
+              </div>
+              <p className="sm:col-span-2 text-[11px] text-slate-500">
+                Used when exporting the monthly WPS salary file from Reports. Employee IBAN and labour card are set per employee.
+              </p>
+            </div>
+          )}
 
           <p className="mt-2 text-[11px] text-slate-500">
             These details are used on payslips, reports, and onboarding progress.

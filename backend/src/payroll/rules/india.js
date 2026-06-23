@@ -16,7 +16,8 @@ module.exports = {
     return {
       esiDeduction: computeEsiDeduction(employee, { grossSalary }),
       pfDeduction: computePfDeduction(employee, { earnedBasic }),
-      gratuityProvision: 0,
+      gratuityAccrual: 0,
+      gratuityEstimate: 0,
     };
   },
 

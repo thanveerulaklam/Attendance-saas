@@ -50,6 +50,7 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
   enable_shift_rotation, flexible_hours_mode,
   country_code, timezone, currency,
+  mol_establishment_id, bank_routing_code,
   whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
   whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;
@@ -134,6 +135,8 @@ async function updateCompany(companyId, data) {
     'whatsapp_send_time',
     'enable_shift_rotation',
     'flexible_hours_mode',
+    'mol_establishment_id',
+    'bank_routing_code',
   ];
   const raw = data || {};
   const normalized = { ...raw };
