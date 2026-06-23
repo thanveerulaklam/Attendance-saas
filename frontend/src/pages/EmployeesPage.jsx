@@ -4,6 +4,10 @@ import { authFetch } from '../utils/api';
 import EmployeeFormModal from '../components/employees/EmployeeFormModal';
 import EmployeeBulkImportModal from '../components/employees/EmployeeBulkImportModal';
 import EmployeeFilters from '../components/employees/EmployeeFilters';
+import {
+  downloadEmployeeListPdf,
+  fetchAllEmployeesForExport,
+} from '../utils/employeeListPdf';
 
 const PAGE_SIZE = 15;
 
@@ -38,6 +42,8 @@ export default function EmployeesPage() {
   const [toast, setToast] = useState(null);
   const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [devices, setDevices] = useState([]);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
 
   const shiftNameById = Object.fromEntries(
     (shifts || []).map((s) => [String(s.id), s.shift_name])
@@ -114,6 +120,13 @@ export default function EmployeesPage() {
       .then((res) => res.json())
       .then((json) => setBranches(Array.isArray(json.data) ? json.data : []))
       .catch(() => setBranches([]));
+  }, []);
+
+  useEffect(() => {
+    authFetch('/api/device?limit=100')
+      .then((res) => res.json())
+      .then((json) => setDevices(Array.isArray(json.data) ? json.data : []))
+      .catch(() => setDevices([]));
   }, []);
 
   useEffect(() => {
@@ -242,6 +255,64 @@ export default function EmployeesPage() {
   const canPrev = page > 1;
   const canNext = page < totalPages;
 
+  const buildExportFilterLabel = () => {
+    const parts = [];
+    if (search.trim()) parts.push(`Search: ${search.trim()}`);
+    if (statusFilter !== 'all') parts.push(`Status: ${statusFilter}`);
+    if (branchFilter) {
+      parts.push(`Branch: ${branchNameById[branchFilter] || branchFilter}`);
+    }
+    if (departmentFilter.trim()) parts.push(`Department: ${departmentFilter.trim()}`);
+    if (genderFilter !== 'all') parts.push(`Gender: ${genderFilter}`);
+    return parts.length > 0 ? parts.join(' · ') : 'All employees';
+  };
+
+  const handleDownloadPdf = async () => {
+    try {
+      setPdfDownloading(true);
+      setToast(null);
+
+      const query = {};
+      if (search.trim()) query.search = search.trim();
+      if (statusFilter !== 'all') query.status = statusFilter;
+      if (branchFilter) query.branch_id = branchFilter;
+      if (departmentFilter.trim()) query.department = departmentFilter.trim();
+      if (genderFilter !== 'all') query.gender = genderFilter;
+
+      const [companyRes, allEmployees] = await Promise.all([
+        authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
+        fetchAllEmployeesForExport(authFetch, query),
+      ]);
+
+      if (allEmployees.length === 0) {
+        throw new Error('No employees to export');
+      }
+
+      const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
+
+      downloadEmployeeListPdf({
+        company: companyJson.data || {},
+        employees: allEmployees,
+        branches,
+        shifts,
+        devices,
+        filterLabel: buildExportFilterLabel(),
+      });
+
+      setToast({
+        type: 'success',
+        message: `Downloaded employee list (${allEmployees.length} employees)`,
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to download employee PDF',
+      });
+    } finally {
+      setPdfDownloading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Toast */}
@@ -283,6 +354,14 @@ export default function EmployeesPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleDownloadPdf()}
+            disabled={pdfDownloading || loading}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-50"
+          >
+            {pdfDownloading ? 'Preparing PDF…' : 'Download PDF'}
+          </button>
           <button
             type="button"
             onClick={() => setShowBulkImportModal(true)}
