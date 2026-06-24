@@ -6,6 +6,7 @@ import RecordPaymentModal from '../components/payroll/RecordPaymentModal';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 import { buildBulkPayslipsDoc, openBulkPayslipsForPrint } from '../utils/payslipPdf';
 import { formatMoneyAmount, formatMoneyWithSymbol, currencySymbol } from '../utils/formatMoney';
+import { formatWorkedHours } from '../utils/durationFormat';
 import { regionFeaturesForCountry } from '../utils/regionFeatures';
 
 const PAGE_SIZE = 50;
@@ -3185,7 +3186,7 @@ export default function PayrollPage() {
                           )}
                           {day.totalHoursInside != null && Number(day.totalHoursInside) > 0 && (
                             <span className="block text-[10px] text-slate-500">
-                              {Number(day.totalHoursInside).toFixed(2)}h worked
+                              {formatWorkedHours(day.totalHoursInside)} worked
                             </span>
                           )}
                           {day.override_note && (

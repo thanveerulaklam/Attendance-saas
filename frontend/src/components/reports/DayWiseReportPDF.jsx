@@ -1,5 +1,6 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
 import { formatIstTime } from '../../utils/istDisplay';
+import { formatWorkedHours } from '../../utils/durationFormat';
 
 function getFirstInTime(row) {
   const firstIn = (row.punches || []).find(
@@ -30,8 +31,8 @@ function formatPunchTimings(punches) {
 }
 
 function getDayTotalHours(row) {
-  if (row.total_hours_inside != null) return String(row.total_hours_inside);
-  if (row.total_hours_from_shift_start != null) return String(row.total_hours_from_shift_start);
+  if (row.total_hours_inside != null) return formatWorkedHours(row.total_hours_inside);
+  if (row.total_hours_from_shift_start != null) return formatWorkedHours(row.total_hours_from_shift_start);
   return '';
 }
 

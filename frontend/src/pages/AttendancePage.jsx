@@ -7,6 +7,7 @@ import {
   formatYmdLong,
   todayYmdInTimezone,
 } from '../utils/companyLocalDisplay';
+import { formatWorkedHours } from '../utils/durationFormat';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -758,7 +759,7 @@ export default function AttendancePage() {
                             ? ` by ${diffH}h ${diffM}m`
                             : ` by ${diffM}m`;
                       const met = total >= required && required > 0;
-                      hoursLabel = `Total inside: ${total.toFixed(2)}h — ${
+                      hoursLabel = `Total inside: ${formatWorkedHours(total)} — ${
                         met ? 'Met' : 'Short'
                       }${diffStr}`;
                     }
@@ -786,7 +787,7 @@ export default function AttendancePage() {
                         : 'text-slate-600';
                     const totalHoursNum = Number(row.total_hours_from_shift_start ?? 0);
                     const totalHoursDisplay =
-                      row.present || totalHoursNum > 0 ? `${totalHoursNum.toFixed(2)}h` : '—';
+                      row.present || totalHoursNum > 0 ? formatWorkedHours(totalHoursNum) : '—';
                     return (
                       <tr key={row.employee_id} className="border-t border-slate-100 hover:bg-slate-50/50">
                         <td className="py-1.5 px-2 font-medium text-slate-800">{row.name}</td>

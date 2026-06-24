@@ -10,6 +10,7 @@ import {
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 import { formatMoneyAmount, formatMoneyWithSymbol } from '../utils/formatMoney';
 import { formatIstTime, IST } from '../utils/istDisplay';
+import { formatWorkedHours } from '../utils/durationFormat';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../utils/whatsapp';
 import {
   computeRegularOffenders,
@@ -114,8 +115,8 @@ function getDayStatusLabel(row) {
 }
 
 function getDayTotalHours(row) {
-  if (row.total_hours_inside != null) return `${row.total_hours_inside} h`;
-  if (row.total_hours_from_shift_start != null) return `${row.total_hours_from_shift_start} h`;
+  if (row.total_hours_inside != null) return formatWorkedHours(row.total_hours_inside);
+  if (row.total_hours_from_shift_start != null) return formatWorkedHours(row.total_hours_from_shift_start);
   return '—';
 }
 

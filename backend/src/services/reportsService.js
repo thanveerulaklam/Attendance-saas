@@ -1,4 +1,5 @@
 const { pool } = require('../config/database');
+const { formatWorkedHours } = require('../utils/durationFormat');
 const { AppError } = require('../utils/AppError');
 const { getMonthlyAttendance, getDailyAttendance } = require('./attendanceService');
 const { getPayrollBreakdown, getWeeklyPayrollBreakdown } = require('./payrollService');
@@ -203,8 +204,8 @@ function formatPunchTimingsForCsv(punches) {
 }
 
 function formatDailyTotalHours(row) {
-  if (row.total_hours_inside != null) return row.total_hours_inside;
-  if (row.total_hours_from_shift_start != null) return row.total_hours_from_shift_start;
+  if (row.total_hours_inside != null) return formatWorkedHours(row.total_hours_inside);
+  if (row.total_hours_from_shift_start != null) return formatWorkedHours(row.total_hours_from_shift_start);
   return '';
 }
 

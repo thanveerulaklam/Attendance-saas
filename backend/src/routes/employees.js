@@ -9,6 +9,9 @@ const {
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
+  getEmployeeAppAccess,
+  provisionEmployeeAppAccess,
+  revokeEmployeeAppAccess,
   deleteEmployee,
 } = require('../controllers/employeeController');
 const {
@@ -67,6 +70,10 @@ router.get('/', withEmployeeAuth, getEmployees);
 router.get('/departments', withEmployeeAuth, getDepartments);
 
 // GET /api/employees/:id
+router.get('/:id/app-access', withEmployeeAuth, getEmployeeAppAccess);
+router.post('/:id/app-access', withEmployeeAuth, requireHrBranchForMutation, provisionEmployeeAppAccess);
+router.delete('/:id/app-access', withEmployeeAuth, requireHrBranchForMutation, revokeEmployeeAppAccess);
+
 router.get('/:id', withEmployeeAuth, getEmployeeById);
 
 // PUT /api/employees/:id

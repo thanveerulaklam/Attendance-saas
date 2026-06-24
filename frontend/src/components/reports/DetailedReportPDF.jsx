@@ -1,14 +1,15 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
 import { authFetch } from '../../utils/api';
 import { formatIstTime } from '../../utils/istDisplay';
+import { formatWorkedHours } from '../../utils/durationFormat';
 
 function formatTotalHoursForPdf(day) {
   if (!day) return '';
   if (day.total_hours_inside != null) {
-    return `${day.total_hours_inside} h`;
+    return formatWorkedHours(day.total_hours_inside);
   }
   if (day.total_hours_from_shift_start != null) {
-    return `${day.total_hours_from_shift_start} h`;
+    return formatWorkedHours(day.total_hours_from_shift_start);
   }
   return '';
 }

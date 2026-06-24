@@ -10,9 +10,11 @@ async function listBranches(companyId, allowedBranchIds = null) {
     return [];
   }
 
+  const selectFields = `id, company_id, name, address, latitude, longitude, geofence_radius_m, created_at`;
+
   if (allowedBranchIds == null) {
     const result = await pool.query(
-      `SELECT id, company_id, name, address, created_at
+      `SELECT ${selectFields}
        FROM branches
        WHERE company_id = $1
        ORDER BY name ASC, id ASC`,
@@ -22,7 +24,7 @@ async function listBranches(companyId, allowedBranchIds = null) {
   }
 
   const result = await pool.query(
-    `SELECT id, company_id, name, address, created_at
+    `SELECT ${selectFields}
      FROM branches
      WHERE company_id = $1 AND id = ANY($2::bigint[])
      ORDER BY name ASC, id ASC`,
@@ -34,7 +36,25 @@ async function listBranches(companyId, allowedBranchIds = null) {
 /**
  * Create a branch (company admin only at API layer).
  */
-async function createBranch(companyId, { name, address }) {
+function parseOptionalCoord(value, label) {
+  if (value === '' || value == null || value === undefined) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    throw new AppError(`Invalid ${label}`, 400);
+  }
+  return n;
+}
+
+function parseGeofenceRadius(value) {
+  if (value === '' || value == null || value === undefined) return 200;
+  const n = Math.round(Number(value));
+  if (!Number.isInteger(n) || n < 50 || n > 5000) {
+    throw new AppError('geofence_radius_m must be between 50 and 5000', 400);
+  }
+  return n;
+}
+
+async function createBranch(companyId, { name, address, latitude, longitude, geofence_radius_m }) {
   const trimmed = String(name || '').trim();
   if (!trimmed) {
     throw new AppError('Branch name is required', 400);
@@ -68,17 +88,30 @@ async function createBranch(companyId, { name, address }) {
     }
   }
 
+  const lat = parseOptionalCoord(latitude, 'latitude');
+  const lon = parseOptionalCoord(longitude, 'longitude');
+  if ((lat == null) !== (lon == null)) {
+    throw new AppError('Both latitude and longitude are required for geofence', 400);
+  }
+  if (lat != null && (lat < -90 || lat > 90)) {
+    throw new AppError('latitude must be between -90 and 90', 400);
+  }
+  if (lon != null && (lon < -180 || lon > 180)) {
+    throw new AppError('longitude must be between -180 and 180', 400);
+  }
+  const radiusM = parseGeofenceRadius(geofence_radius_m);
+
   const result = await pool.query(
-    `INSERT INTO branches (company_id, name, address)
-     VALUES ($1, $2, $3)
-     RETURNING id, company_id, name, address, created_at`,
-    [companyId, trimmed, addr]
+    `INSERT INTO branches (company_id, name, address, latitude, longitude, geofence_radius_m)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id, company_id, name, address, latitude, longitude, geofence_radius_m, created_at`,
+    [companyId, trimmed, addr, lat, lon, radiusM]
   );
 
   return result.rows[0];
 }
 
-async function updateBranch(companyId, branchId, { name, address }) {
+async function updateBranch(companyId, branchId, { name, address, latitude, longitude, geofence_radius_m }) {
   const id = Number(branchId);
   if (!Number.isInteger(id) || id <= 0) {
     throw new AppError('Invalid branch id', 400);
@@ -90,12 +123,25 @@ async function updateBranch(companyId, branchId, { name, address }) {
   }
   const addr = address != null && String(address).trim() !== '' ? String(address).trim() : null;
 
+  const lat = parseOptionalCoord(latitude, 'latitude');
+  const lon = parseOptionalCoord(longitude, 'longitude');
+  if ((lat == null) !== (lon == null)) {
+    throw new AppError('Both latitude and longitude are required for geofence', 400);
+  }
+  if (lat != null && (lat < -90 || lat > 90)) {
+    throw new AppError('latitude must be between -90 and 90', 400);
+  }
+  if (lon != null && (lon < -180 || lon > 180)) {
+    throw new AppError('longitude must be between -180 and 180', 400);
+  }
+  const radiusM = parseGeofenceRadius(geofence_radius_m);
+
   const result = await pool.query(
     `UPDATE branches
-     SET name = $3, address = $4
+     SET name = $3, address = $4, latitude = $5, longitude = $6, geofence_radius_m = $7
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, name, address, created_at`,
-    [companyId, id, trimmed, addr]
+     RETURNING id, company_id, name, address, latitude, longitude, geofence_radius_m, created_at`,
+    [companyId, id, trimmed, addr, lat, lon, radiusM]
   );
   if (result.rowCount === 0) {
     throw new AppError('Branch not found', 404);

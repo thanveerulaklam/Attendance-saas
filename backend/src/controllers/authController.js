@@ -49,14 +49,26 @@ async function login(req, res, next) {
  */
 async function me(req, res, next) {
   try {
+    const payload = {
+      user_id: req.user.user_id,
+      company_id: req.user.company_id,
+      email: req.user.email,
+      role: req.user.role,
+      employee_id: req.user.employee_id || null,
+    };
+    if (req.user.role === 'employee' && req.user.employee_id && req.companyId) {
+      const employeeAppService = require('../services/employeeAppService');
+      const status = await employeeAppService.getEmployeeAppStatus(
+        req.companyId,
+        req.user.employee_id
+      );
+      payload.name = status.employee?.name;
+      payload.employee = status.employee;
+      payload.company = status.company;
+    }
     res.status(200).json({
       success: true,
-      data: {
-        user_id: req.user.user_id,
-        company_id: req.user.company_id,
-        email: req.user.email,
-        role: req.user.role,
-      },
+      data: payload,
     });
   } catch (err) {
     next(err);

@@ -24,6 +24,7 @@ const advanceLoansRouter = require('./routes/advanceLoans');
 const salaryPaymentsRouter = require('./routes/salaryPayments');
 const demoEnquiriesRouter = require('./routes/demoEnquiries');
 const admsRouter = require('./routes/adms');
+const employeeAppRouter = require('./routes/employeeApp');
 
 const app = express();
 
@@ -120,6 +121,7 @@ app.use('/api/shifts', shiftsRouter);
 app.use('/api/shift-rotation', shiftRotationRouter);
 app.use('/api/holidays', holidaysRouter);
 app.use('/api/attendance', attendanceRouter);
+app.use('/api/employee-app', employeeAppRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/dashboard', dashboardRouter);

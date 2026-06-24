@@ -1,4 +1,5 @@
 const employeeService = require('../services/employeeService');
+const employeeAppService = require('../services/employeeAppService');
 const employeeBulkImportService = require('../services/employeeBulkImportService');
 const { buildEmployeeImportTemplateBuffer } = require('../services/employeeImportTemplate');
 const auditService = require('../services/auditService');
@@ -210,6 +211,52 @@ const deactivateEmployee = asyncHandler(async (req, res) => {
 });
 
 /**
+ * GET /api/employees/:id/app-access
+ */
+const getEmployeeAppAccess = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+  const user = await employeeAppService.getEmployeeAppAccess(companyId, id);
+  return res.json({ success: true, data: user });
+});
+
+/**
+ * POST /api/employees/:id/app-access
+ * Body: { email, password, name? }
+ */
+const provisionEmployeeAppAccess = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+  const result = await employeeAppService.provisionEmployeeAppAccess(companyId, id, req.body || {});
+  auditService
+    .log(companyId, req.user?.user_id, 'employee.app_access', 'employee', id, {
+      email: result.user.email,
+      created: result.created,
+    })
+    .catch(() => {});
+  return res.status(result.created ? 201 : 200).json({
+    success: true,
+    data: result.user,
+    message: result.created ? 'Employee app login created' : 'Employee app login updated',
+  });
+});
+
+/**
+ * DELETE /api/employees/:id/app-access
+ */
+const revokeEmployeeAppAccess = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+  const removed = await employeeAppService.revokeEmployeeAppAccess(companyId, id);
+  auditService
+    .log(companyId, req.user?.user_id, 'employee.app_access_revoke', 'employee', id, {
+      email: removed.email,
+    })
+    .catch(() => {});
+  return res.json({ success: true, message: 'Employee app login removed' });
+});
+
+/**
  * DELETE /api/employees/:id
  */
 const deleteEmployee = asyncHandler(async (req, res) => {
@@ -241,6 +288,9 @@ module.exports = {
   getEmployeeById,
   updateEmployee,
   deactivateEmployee,
+  getEmployeeAppAccess,
+  provisionEmployeeAppAccess,
+  revokeEmployeeAppAccess,
   deleteEmployee,
 };
 
