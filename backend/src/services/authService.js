@@ -263,7 +263,7 @@ async function login(email, password) {
   }
 
   const result = await pool.query(
-    `SELECT u.id, u.company_id, u.name, u.email, u.password, u.role, u.created_at, c.status AS company_status
+    `SELECT u.id, u.company_id, u.name, u.email, u.password, u.role, u.employee_id, u.created_at, c.status AS company_status
      FROM users u
      JOIN companies c ON c.id = u.company_id
      WHERE LOWER(TRIM(u.email)) = LOWER(TRIM($1))
@@ -298,6 +298,7 @@ async function login(email, password) {
         company_id: row.company_id,
         role: row.role,
         email: row.email,
+        employee_id: row.employee_id || null,
       });
       return {
         user: {
@@ -306,6 +307,7 @@ async function login(email, password) {
           name: row.name,
           email: row.email,
           role: row.role,
+          employee_id: row.employee_id || null,
           created_at: row.created_at,
         },
         token,

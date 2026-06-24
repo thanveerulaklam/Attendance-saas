@@ -1163,7 +1163,19 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const json = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      let json = {};
+      if (contentType.includes('application/json')) {
+        json = await res.json();
+      } else {
+        const text = await res.text();
+        if (res.status === 502 || res.status === 503) {
+          setError('Server is temporarily unavailable. Please try again in a minute or contact support.');
+          return;
+        }
+        setError('Unexpected server response. Please contact support if this continues.');
+        return;
+      }
       if (!res.ok) { setError(json.message || 'Login failed'); return; }
       const token    = json.data?.token;
       const userData = json.data?.user;
