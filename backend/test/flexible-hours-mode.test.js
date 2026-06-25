@@ -87,6 +87,22 @@ test('raw pair hours: unpaired IN on past date contributes zero', () => {
   assert.equal(ms, 0);
 });
 
+test('raw pair hours: different IN times on same in-progress day yield different totals', () => {
+  const nowMs = new Date('2026-06-25T06:02:00.000Z').getTime(); // 11:32 IST
+  const ms37 = computeRawWorkedMsFromPairs(
+    [{ punch_time: '2026-06-25T04:07:00.000Z', punch_type: 'in' }],
+    true,
+    nowMs
+  );
+  const ms43 = computeRawWorkedMsFromPairs(
+    [{ punch_time: '2026-06-25T04:13:00.000Z', punch_type: 'in' }],
+    true,
+    nowMs
+  );
+  assert.notEqual(ms37, ms43);
+  assert.equal(ms37 - ms43, 6 * 60 * 1000);
+});
+
 test('flexible compensation scenario: 14h + 6h meets 20h over two days at 10h/day contract', () => {
   const logs = [
     { punch_time: '2026-01-06T08:00:00+05:30', punch_type: 'in' },

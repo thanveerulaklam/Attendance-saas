@@ -998,15 +998,14 @@ async function getDailyAttendance(
         device_id: l.device_id || null,
       }));
 
-      const workedMsFromShiftStart = computeWorkedMsFromShiftStartToNow(
+      // Daily punch table: hours from actual IN→OUT pairs (or IN→now while still working).
+      const workedMsFromPunches = computeRawWorkedMsFromPairs(
         dayLogs,
-        shiftConfig,
-        dateStr,
         isCurrentDate,
         nowMs
       );
       const total_hours_from_shift_start =
-        Math.round((workedMsFromShiftStart / (60 * 60 * 1000)) * 100) / 100;
+        Math.round((workedMsFromPunches / (60 * 60 * 1000)) * 100) / 100;
       return {
         employee_id: emp.id,
         name: emp.name,
