@@ -2,6 +2,7 @@ const express = require('express');
 const {
   getAssignments,
   postAssignment,
+  getEffectiveShifts,
   getEmployeeHistory,
   getEmployeeCurrent,
   getGroups,
@@ -17,6 +18,7 @@ const auth = [authenticate, requireRole(['admin', 'hr']), enforceCompanyFromToke
 
 router.get('/assignments', auth, getAssignments);
 router.post('/assignments', auth, postAssignment);
+router.get('/assignments/effective-shifts', auth, getEffectiveShifts);
 router.get('/assignments/employee/:employeeId', auth, getEmployeeHistory);
 router.get('/assignments/employee/:employeeId/current', auth, getEmployeeCurrent);
 

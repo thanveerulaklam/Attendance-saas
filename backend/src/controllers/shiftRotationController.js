@@ -3,6 +3,7 @@ const {
   assignShiftBulk,
   getEmployeeAssignmentHistory,
   getCurrentAssignment,
+  listEffectiveShiftAssignments,
 } = require('../services/shiftAssignmentService');
 const {
   listRotationGroups,
@@ -49,6 +50,21 @@ async function postAssignment(req, res, next) {
       createdBy: req.user?.id,
     });
     return res.status(201).json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getEffectiveShifts(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({ success: false, message: 'companyId required' });
+    }
+    await assertShiftRotationEnabled(companyId);
+    const { as_of, shift_id } = req.query || {};
+    const result = await listEffectiveShiftAssignments(companyId, as_of, shift_id);
+    return res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }
@@ -164,6 +180,7 @@ async function postRotateNow(req, res, next) {
 module.exports = {
   getAssignments,
   postAssignment,
+  getEffectiveShifts,
   getEmployeeHistory,
   getEmployeeCurrent,
   getGroups,

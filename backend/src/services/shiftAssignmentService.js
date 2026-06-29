@@ -234,6 +234,58 @@ async function getCurrentAssignment(companyId, employeeId) {
   return r.rows[0] || null;
 }
 
+/**
+ * Effective shift per active employee on a calendar date (assignment row or employees.shift_id).
+ * @param {number} [filterShiftId] - when set, only return employees on this shift
+ */
+async function listEffectiveShiftAssignments(companyId, asOfDate, filterShiftId = null) {
+  await assertShiftRotationEnabled(companyId);
+  const asOf = String(asOfDate || todayIstYmd()).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    throw new AppError('as_of must be YYYY-MM-DD', 400);
+  }
+
+  const params = [companyId, asOf];
+  let shiftFilter = '';
+  if (filterShiftId != null && filterShiftId !== '') {
+    const sid = Number(filterShiftId);
+    if (!Number.isInteger(sid) || sid < 1) throw new AppError('Invalid shift_id', 400);
+    params.push(sid);
+    shiftFilter = ` AND COALESCE(esa.shift_id, e.shift_id) = $${params.length}`;
+  }
+
+  const r = await pool.query(
+    `SELECT e.id AS employee_id,
+            e.name AS employee_name,
+            e.employee_code,
+            e.department,
+            COALESCE(esa.shift_id, e.shift_id) AS shift_id,
+            s.shift_name,
+            esa.effective_from,
+            esa.source
+     FROM employees e
+     LEFT JOIN LATERAL (
+       SELECT a.shift_id, a.effective_from, a.source
+       FROM employee_shift_assignments a
+       WHERE a.company_id = e.company_id
+         AND a.employee_id = e.id
+         AND a.effective_from <= $2::date
+         AND (a.effective_to IS NULL OR a.effective_to >= $2::date)
+       ORDER BY a.effective_from DESC
+       LIMIT 1
+     ) esa ON TRUE
+     LEFT JOIN shifts s ON s.id = COALESCE(esa.shift_id, e.shift_id)
+     WHERE e.company_id = $1
+       AND e.status = 'active'
+       AND COALESCE(esa.shift_id, e.shift_id) IS NOT NULL
+       ${shiftFilter}
+     ORDER BY e.name ASC`,
+    params
+  );
+
+  return { as_of: asOf, data: r.rows };
+}
+
 module.exports = {
   resolveShiftIdForEmployeeOnDate,
   resolveShiftIdsForEmployeesOnDate,
@@ -243,4 +295,5 @@ module.exports = {
   listAssignments,
   getEmployeeAssignmentHistory,
   getCurrentAssignment,
+  listEffectiveShiftAssignments,
 };

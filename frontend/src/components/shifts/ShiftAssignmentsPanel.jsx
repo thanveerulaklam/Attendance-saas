@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../../utils/api';
 import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
@@ -6,7 +6,9 @@ import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
 export default function ShiftAssignmentsPanel({ shifts }) {
   const [employees, setEmployees] = useState([]);
   const [assignments, setAssignments] = useState([]);
+  const [effectiveShifts, setEffectiveShifts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [effectiveLoading, setEffectiveLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
   const [shiftId, setShiftId] = useState('');
@@ -35,9 +37,55 @@ export default function ShiftAssignmentsPanel({ shifts }) {
     }
   };
 
+  const loadEffectiveShifts = useCallback(async (asOf) => {
+    if (!asOf) return;
+    try {
+      setEffectiveLoading(true);
+      const res = await authFetch(
+        `/api/shift-rotation/assignments/effective-shifts?as_of=${encodeURIComponent(asOf)}`
+      );
+      if (!res.ok) throw new Error('Failed to load shift roster');
+      const json = await res.json();
+      setEffectiveShifts(arrayFromApi(json));
+    } catch (err) {
+      setError(err.message || 'Unable to load shift roster');
+      setEffectiveShifts([]);
+    } finally {
+      setEffectiveLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    loadEffectiveShifts(effectiveFrom);
+  }, [effectiveFrom, loadEffectiveShifts]);
+
+  const effectiveShiftByEmployeeId = useMemo(() => {
+    const map = new Map();
+    effectiveShifts.forEach((row) => {
+      map.set(row.employee_id, row.shift_id);
+    });
+    return map;
+  }, [effectiveShifts]);
+
+  const selectedShift = useMemo(
+    () => shifts.find((s) => String(s.id) === String(shiftId)),
+    [shifts, shiftId]
+  );
+
+  const rosterOnSelectedShift = useMemo(() => {
+    if (!shiftId) return [];
+    const sid = Number(shiftId);
+    return effectiveShifts.filter((row) => Number(row.shift_id) === sid);
+  }, [effectiveShifts, shiftId]);
+
+  const isAssignedToTarget = (employeeId) => {
+    if (!shiftId) return false;
+    return Number(effectiveShiftByEmployeeId.get(employeeId)) === Number(shiftId);
+  };
 
   const toggleEmployee = (id) => {
     setSelectedIds((prev) =>
@@ -73,7 +121,7 @@ export default function ShiftAssignmentsPanel({ shifts }) {
       if (!res.ok) throw new Error(json.message || 'Failed to assign shift');
       setSuccess(`Assigned ${selectedIds.length} employee(s) from ${effectiveFrom}.`);
       setSelectedIds([]);
-      await load();
+      await Promise.all([load(), loadEffectiveShifts(effectiveFrom)]);
     } catch (err) {
       setError(err.message || 'Failed to assign shift');
     } finally {
@@ -165,24 +213,83 @@ export default function ShiftAssignmentsPanel({ shifts }) {
             ) : employees.length === 0 ? (
               <p className="p-3 text-xs text-slate-500">No active employees.</p>
             ) : (
-              employees.map((emp) => (
-                <label
-                  key={emp.id}
-                  className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs hover:bg-slate-50"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.includes(emp.id)}
-                    onChange={() => toggleEmployee(emp.id)}
-                  />
-                  <span className="font-medium text-slate-800">{emp.name}</span>
-                  <span className="text-slate-400">{emp.employee_code}</span>
-                </label>
-              ))
+              employees.map((emp) => {
+                const assigned = isAssignedToTarget(emp.id);
+                return (
+                  <label
+                    key={emp.id}
+                    className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs hover:bg-slate-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(emp.id)}
+                      onChange={() => toggleEmployee(emp.id)}
+                    />
+                    <span className="font-medium text-slate-800">{emp.name}</span>
+                    <span className="text-slate-400">{emp.employee_code}</span>
+                    {assigned && (
+                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-emerald-100">
+                        Assigned
+                      </span>
+                    )}
+                  </label>
+                );
+              })
             )}
           </div>
         </div>
       </form>
+
+      {shiftId && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold text-slate-900">Shift details</h2>
+            <p className="text-[11px] text-slate-500">
+              {selectedShift?.shift_name || 'Selected shift'} · as of {effectiveFrom}
+            </p>
+          </div>
+          {effectiveLoading ? (
+            <p className="mt-2 text-xs text-slate-500">Loading roster…</p>
+          ) : rosterOnSelectedShift.length === 0 ? (
+            <p className="mt-2 text-xs text-slate-500">
+              No employees are assigned to this shift on {effectiveFrom}.
+            </p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 text-slate-500">
+                    <th className="py-2 pr-4 font-medium">Employee</th>
+                    <th className="py-2 pr-4 font-medium">Department</th>
+                    <th className="py-2 font-medium">Since</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rosterOnSelectedShift.map((row) => (
+                    <tr key={row.employee_id} className="border-b border-slate-50">
+                      <td className="py-2 pr-4">
+                        {row.employee_name}
+                        <span className="ml-1 text-slate-400">{row.employee_code}</span>
+                      </td>
+                      <td className="py-2 pr-4 text-slate-600">{row.department || '—'}</td>
+                      <td className="py-2 text-slate-600">
+                        {row.effective_from
+                          ? String(row.effective_from).slice(0, 10)
+                          : 'Default'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-[11px] text-slate-500">
+                {rosterOnSelectedShift.length} employee
+                {rosterOnSelectedShift.length === 1 ? '' : 's'} on this shift. Select others above to
+                move them here or assign a different shift.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
         <h2 className="text-sm font-semibold text-slate-900">Recent changes</h2>
