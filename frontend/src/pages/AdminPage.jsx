@@ -1054,6 +1054,21 @@ export default function AdminPage() {
       });
       return;
     }
+    if (name === 'plan_code' && detailsCompany?.country_code) {
+      const pricing = planPricingForCountry(value, detailsCompany.country_code);
+      setBillingForm((prev) => {
+        const next = { ...prev, plan_code: value };
+        if (isAnnualOnlyBilling(detailsCompany.country_code)) {
+          next.onetime_fee_amount = '';
+          next.amc_amount = pricing.amc || '';
+        } else {
+          if (pricing.onetime) next.onetime_fee_amount = pricing.onetime;
+          if (pricing.amc) next.amc_amount = pricing.amc;
+        }
+        return next;
+      });
+      return;
+    }
     setBillingForm((prev) => ({
       ...prev,
       [name]: type === 'checkbox' ? checked : value,

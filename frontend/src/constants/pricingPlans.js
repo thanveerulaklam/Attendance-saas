@@ -149,6 +149,16 @@ function parsePlanPrice(value) {
   return Number.isFinite(n) && n >= 0 ? String(n) : '';
 }
 
+/** Amount shown on the tenant company page (catalog for standard AE plans; DB for custom). */
+export function tenantDisplayAmcAmount(planCode, countryCode = 'IN', storedAmcAmount) {
+  const pricing = planPricingForCountry(planCode, countryCode);
+  if (isAnnualOnlyBilling(countryCode) && pricing.amc) {
+    return pricing.amc;
+  }
+  if (storedAmcAmount == null || storedAmcAmount === '') return null;
+  return storedAmcAmount;
+}
+
 /** Parsed billing amounts for admin lead/convert forms. */
 export function planPricingForCountry(planCode, countryCode = 'IN') {
   const plans = pricingPlansForCountry(countryCode);

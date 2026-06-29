@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { PLAN_DISPLAY_NAME, planDefaultLimits, isAnnualOnlyBilling } from '../constants/pricingPlans';
+import {
+  PLAN_DISPLAY_NAME,
+  planDefaultLimits,
+  isAnnualOnlyBilling,
+  tenantDisplayAmcAmount,
+} from '../constants/pricingPlans';
 import { countryProfile } from '../constants/countryProfiles';
 import { formatMoneyWithSymbol } from '../utils/formatMoney';
 
@@ -527,6 +532,11 @@ export default function CompanySettingsPage() {
   };
 
   const planDefaults = planSnapshot ? planDefaultLimits(planSnapshot.plan_code) : null;
+  const displayAmcAmount =
+    planSnapshot == null
+      ? null
+      : tenantDisplayAmcAmount(planSnapshot.plan_code, localeInfo.country_code, planSnapshot.amc_amount);
+  const annualOnlyBilling = isAnnualOnlyBilling(localeInfo.country_code);
 
   return (
     <div className="space-y-4">
@@ -1112,9 +1122,9 @@ export default function CompanySettingsPage() {
       <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
         <h2 className="text-sm font-semibold text-slate-900">Plan &amp; access</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
-          Your one-time fee covers the first year of software access. Annual AMC renews access for each following year; the
-          first AMC is due one year after your one-time payment. Dates and limits are managed by the service provider—contact
-          support to make changes.
+          {annualOnlyBilling
+            ? 'Your annual subscription covers software access for one year. Renewal is due each year on the date shown below. Dates and limits are managed by the service provider—contact support to make changes.'
+            : 'Your one-time fee covers the first year of software access. Annual AMC renews access for each following year; the first AMC is due one year after your one-time payment. Dates and limits are managed by the service provider—contact support to make changes.'}
         </p>
         <div className="mt-4 space-y-3 rounded-lg bg-slate-50 px-4 py-3">
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
@@ -1172,15 +1182,13 @@ export default function CompanySettingsPage() {
                   </div>
                 </div>
               )}
-            {planSnapshot && planSnapshot.amc_amount != null && planSnapshot.amc_amount !== '' && (
+            {displayAmcAmount != null && displayAmcAmount !== '' && (
               <div className="text-sm">
                 <span className="text-slate-500">
-                  {isAnnualOnlyBilling(localeInfo.country_code)
-                    ? 'Annual subscription (excl. VAT)'
-                    : 'AMC per year (excl. GST)'}
+                  {annualOnlyBilling ? 'Annual subscription (excl. VAT)' : 'AMC per year (excl. GST)'}
                 </span>
                 <div className="font-medium text-slate-900">
-                  {formatMoneyWithSymbol(planSnapshot.amc_amount, localeInfo.currency)}
+                  {formatMoneyWithSymbol(displayAmcAmount, localeInfo.currency)}
                 </div>
               </div>
             )}
@@ -1213,15 +1221,16 @@ export default function CompanySettingsPage() {
           </div>
           {(planSnapshot?.last_onetime_payment_date || planSnapshot?.last_amc_payment_date) && (
             <div className="border-t border-slate-200/80 pt-3 text-[11px] text-slate-500">
-              {planSnapshot.last_onetime_payment_date && (
+              {!annualOnlyBilling && planSnapshot.last_onetime_payment_date && (
                 <p>
                   Last one-time payment recorded: {formatDateLabel(planSnapshot.last_onetime_payment_date)}
                   {planSnapshot.onetime_payment_status ? ` (${planSnapshot.onetime_payment_status})` : ''}
                 </p>
               )}
               {planSnapshot.last_amc_payment_date && (
-                <p className="mt-0.5">
-                  Last AMC payment: {formatDateLabel(planSnapshot.last_amc_payment_date)}
+                <p className={annualOnlyBilling ? '' : 'mt-0.5'}>
+                  {annualOnlyBilling ? 'Last subscription payment' : 'Last AMC payment'}:{' '}
+                  {formatDateLabel(planSnapshot.last_amc_payment_date)}
                   {planSnapshot.amc_payment_status ? ` (${planSnapshot.amc_payment_status})` : ''}
                 </p>
               )}
