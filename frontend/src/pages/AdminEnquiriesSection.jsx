@@ -12,6 +12,7 @@ import {
   planOptionsForAdminSelect,
   planPricingForCountry,
   pricingSymbolForCountry,
+  isAnnualOnlyBilling,
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 
@@ -93,9 +94,9 @@ function convertFormFromLead(lead) {
     subscription_end_date: end.toISOString().slice(0, 10),
     branches_allowed: limits.branchTotal ?? 1,
     staffs_allowed: limits.staffCap ?? 25,
-    onetime_fee_amount: pricing.onetime,
+    onetime_fee_amount: isAnnualOnlyBilling(countryCode) ? '' : pricing.onetime,
     amc_amount: pricing.amc,
-    onetime_fee_paid: false,
+    onetime_fee_paid: isAnnualOnlyBilling(countryCode),
     last_amc_payment_date: '',
     country_code: DEFAULT_COUNTRY_CODE,
   };
@@ -133,6 +134,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     [convertForm?.country_code]
   );
   const convertMoneySymbol = pricingSymbolForCountry(convertForm?.country_code || DEFAULT_COUNTRY_CODE);
+  const convertIsAnnualOnly = isAnnualOnlyBilling(convertForm?.country_code);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -335,8 +337,14 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       if (name === 'plan_code' || name === 'country_code') {
         const plan = name === 'plan_code' ? value : prev.plan_code;
         const pricing = planPricingForCountry(plan, countryCode);
-        next.onetime_fee_amount = pricing.onetime;
-        next.amc_amount = pricing.amc;
+        if (isAnnualOnlyBilling(countryCode)) {
+          next.onetime_fee_amount = '';
+          next.onetime_fee_paid = true;
+          next.amc_amount = pricing.amc || '';
+        } else {
+          next.onetime_fee_amount = pricing.onetime;
+          next.amc_amount = pricing.amc;
+        }
         if (name === 'plan_code') {
           const limits = planDefaultLimits(value);
           if (limits.staffCap != null) next.staffs_allowed = limits.staffCap;
@@ -389,9 +397,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             subscription_end_date: convertForm.subscription_end_date,
             branches_allowed: Number(convertForm.branches_allowed),
             staffs_allowed: Number(convertForm.staffs_allowed),
-            payment_status: convertForm.onetime_fee_paid ? 'paid' : 'unpaid',
-            onetime_fee_paid: convertForm.onetime_fee_paid === true,
-            onetime_fee_amount: convertForm.onetime_fee_amount ? Number(convertForm.onetime_fee_amount) : null,
+            payment_status: convertIsAnnualOnly ? 'unpaid' : convertForm.onetime_fee_paid ? 'paid' : 'unpaid',
+            onetime_fee_paid: convertIsAnnualOnly ? true : convertForm.onetime_fee_paid === true,
+            onetime_fee_amount: convertIsAnnualOnly
+              ? 0
+              : convertForm.onetime_fee_amount
+                ? Number(convertForm.onetime_fee_amount)
+                : null,
             amc_amount: convertForm.amc_amount ? Number(convertForm.amc_amount) : null,
             last_amc_payment_date: convertForm.last_amc_payment_date || null,
             country_code: convertForm.country_code || DEFAULT_COUNTRY_CODE,
@@ -960,6 +972,15 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     <span className="text-xs font-medium text-slate-700">Staff limit</span>
                     <input name="staffs_allowed" type="number" min={1} value={convertForm.staffs_allowed} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
+                  {convertIsAnnualOnly ? (
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-700">
+                        Annual subscription ({convertMoneySymbol}/year, excl. VAT)
+                      </span>
+                      <input name="amc_amount" value={convertForm.amc_amount} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                    </label>
+                  ) : (
+                    <>
                   <label className="block">
                     <span className="text-xs font-medium text-slate-700">One-time fee ({convertMoneySymbol})</span>
                     <input name="onetime_fee_amount" value={convertForm.onetime_fee_amount} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
@@ -972,6 +993,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     <input type="checkbox" name="onetime_fee_paid" checked={convertForm.onetime_fee_paid} onChange={handleConvertChange} />
                     One-time fee already received
                   </label>
+                    </>
+                  )}
                 </div>
                 <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
                   <button type="button" onClick={() => { setConvertLead(null); setConvertForm(null); }} className="rounded-lg border px-4 py-2 text-sm">

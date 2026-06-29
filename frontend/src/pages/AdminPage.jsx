@@ -7,6 +7,7 @@ import {
   planOptionsForAdminSelect,
   planPricingForCountry,
   pricingSymbolForCountry,
+  isAnnualOnlyBilling,
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 import { formatMoneyWithSymbol } from '../utils/formatMoney';
@@ -354,11 +355,13 @@ export default function AdminPage() {
   );
   const approveMoneySymbol = pricingSymbolForCountry(approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE);
   const createMoneySymbol = pricingSymbolForCountry(createForm.country_code || DEFAULT_COUNTRY_CODE);
+  const createIsAnnualOnly = isAnnualOnlyBilling(createForm.country_code);
   const billingPlanOptions = useMemo(
     () => planOptionsForAdminSelect(detailsCompany?.country_code || 'IN'),
     [detailsCompany?.country_code]
   );
   const billingMoneySymbol = pricingSymbolForCountry(detailsCompany?.country_code || 'IN');
+  const billingIsAnnualOnly = isAnnualOnlyBilling(detailsCompany?.country_code);
 
   const loadPending = useCallback(async () => {
     if (!adminKey) return;
@@ -606,8 +609,14 @@ export default function AdminPage() {
         const country = name === 'country_code' ? value : prev.country_code || DEFAULT_COUNTRY_CODE;
         const plan = name === 'plan_code' ? value : prev.plan_code || 'starter';
         const pricing = planPricingForCountry(plan, country);
-        if (pricing.onetime) next.onetime_fee_amount = pricing.onetime;
-        if (pricing.amc) next.amc_amount = pricing.amc;
+        if (isAnnualOnlyBilling(country)) {
+          next.onetime_fee_amount = '';
+          next.onetime_fee_paid = true;
+          next.amc_amount = pricing.amc || '';
+        } else {
+          if (pricing.onetime) next.onetime_fee_amount = pricing.onetime;
+          if (pricing.amc) next.amc_amount = pricing.amc;
+        }
       }
       return next;
     });
@@ -655,8 +664,12 @@ export default function AdminPage() {
             branches_allowed: Number(createForm.branches_allowed),
             staffs_allowed: Number(createForm.staffs_allowed),
             payment_status: 'unpaid',
-            onetime_fee_paid: createForm.onetime_fee_paid === true,
-            onetime_fee_amount: createForm.onetime_fee_amount ? Number(createForm.onetime_fee_amount) : null,
+            onetime_fee_paid: createIsAnnualOnly ? true : createForm.onetime_fee_paid === true,
+            onetime_fee_amount: createIsAnnualOnly
+              ? 0
+              : createForm.onetime_fee_amount
+                ? Number(createForm.onetime_fee_amount)
+                : null,
             amc_amount: createForm.amc_amount ? Number(createForm.amc_amount) : null,
             last_amc_payment_date: createForm.last_amc_payment_date || null,
             country_code: createForm.country_code || DEFAULT_COUNTRY_CODE,
@@ -1060,10 +1073,11 @@ export default function AdminPage() {
       })();
     setBillingSaving(true);
     try {
-      const otcStatus = billingForm.onetime_payment_status || 'unpaid';
+      const otcStatus = billingIsAnnualOnly ? 'paid' : billingForm.onetime_payment_status || 'unpaid';
       const amcStatus = billingForm.amc_payment_status || 'unpaid';
-      const onetimeAmt =
-        billingForm.onetime_fee_amount === '' || billingForm.onetime_fee_amount == null
+      const onetimeAmt = billingIsAnnualOnly
+        ? 0
+        : billingForm.onetime_fee_amount === '' || billingForm.onetime_fee_amount == null
           ? null
           : Number(billingForm.onetime_fee_amount);
       const amcAmt =
@@ -2158,6 +2172,7 @@ export default function AdminPage() {
                         Started {formatDateShort(detailsCompany.subscription_start_date)}
                       </p>
                     </div>
+                    {!billingIsAnnualOnly && (
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">One-time fee</p>
                       <div className="mt-1 flex items-center gap-2">
@@ -2170,8 +2185,11 @@ export default function AdminPage() {
                         Last received {formatDateShort(detailsCompany.last_onetime_payment_date)}
                       </p>
                     </div>
+                    )}
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">AMC (annual)</p>
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        {billingIsAnnualOnly ? 'Annual subscription' : 'AMC (annual)'}
+                      </p>
                       <div className="mt-1 flex items-center gap-2">
                         <PaymentStatusPill status={detailsCompany.amc_payment_status} />
                         <span className="text-sm font-semibold text-slate-900">
@@ -2179,12 +2197,12 @@ export default function AdminPage() {
                         </span>
                       </div>
                       <p className={`text-xs mt-1 ${urgencyTextClass(getDateUrgency(detailsCompany.next_amc_due_date, 30).level)}`}>
-                        Next due {formatDateShort(detailsCompany.next_amc_due_date)}
+                        {billingIsAnnualOnly ? 'Renewal due' : 'Next due'} {formatDateShort(detailsCompany.next_amc_due_date)}
                         {' · '}
                         {getDateUrgency(detailsCompany.next_amc_due_date, 30).text}
                       </p>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        Last AMC {formatDateShort(detailsCompany.last_amc_payment_date)}
+                        {billingIsAnnualOnly ? 'Last paid' : 'Last AMC'} {formatDateShort(detailsCompany.last_amc_payment_date)}
                       </p>
                     </div>
                   </div>
@@ -2313,6 +2331,7 @@ export default function AdminPage() {
                       </div>
                     </div>
 
+                    {!billingIsAnnualOnly && (
                     <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-4">
                       <p className="text-xs font-semibold text-slate-800">One-time fee</p>
                       <div>
@@ -2357,9 +2376,12 @@ export default function AdminPage() {
                         </p>
                       </div>
                     </div>
+                    )}
 
                     <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
-                      <p className="text-xs font-semibold text-slate-800">AMC (annual)</p>
+                      <p className="text-xs font-semibold text-slate-800">
+                        {billingIsAnnualOnly ? 'Annual subscription' : 'AMC (annual)'}
+                      </p>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">Payment status</label>
                         <select
@@ -2376,7 +2398,11 @@ export default function AdminPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">AMC amount ({billingMoneySymbol})</label>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          {billingIsAnnualOnly
+                            ? `Annual subscription (${billingMoneySymbol}/year, excl. VAT)`
+                            : `AMC amount (${billingMoneySymbol})`}
+                        </label>
                         <input
                           type="number"
                           min="0"
@@ -2385,11 +2411,13 @@ export default function AdminPage() {
                           value={billingForm.amc_amount}
                           onChange={handleBillingChange}
                           className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
-                          placeholder="Annual maintenance"
+                          placeholder={billingIsAnnualOnly ? 'Yearly subscription' : 'Annual maintenance'}
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">Last AMC payment date</label>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          {billingIsAnnualOnly ? 'Last subscription paid on' : 'Last AMC payment date'}
+                        </label>
                         <input
                           type="date"
                           name="last_amc_payment_date"
@@ -2398,12 +2426,16 @@ export default function AdminPage() {
                           className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
                         />
                         <p className="mt-1 text-[11px] text-slate-500">
-                          Next AMC due in the customer list is this date + 1 year.
+                          {billingIsAnnualOnly
+                            ? 'Renewal due = this date + 1 year.'
+                            : 'Next AMC due in the customer list is this date + 1 year.'}
                         </p>
                       </div>
                       {detailsCompany.next_amc_due_date && (
                         <p className="text-xs text-slate-600">
-                          <span className="font-medium text-slate-700">Next AMC due: </span>
+                          <span className="font-medium text-slate-700">
+                            {billingIsAnnualOnly ? 'Renewal due: ' : 'Next AMC due: '}
+                          </span>
                           {new Date(detailsCompany.next_amc_due_date).toLocaleDateString(undefined, {
                             dateStyle: 'medium',
                           })}
@@ -3115,6 +3147,35 @@ export default function AdminPage() {
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  {createIsAnnualOnly ? (
+                    <>
+                      <p className="text-xs font-semibold text-slate-800">Annual subscription (excl. VAT)</p>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Yearly amount ({createMoneySymbol})
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          name="amc_amount"
+                          value={createForm.amc_amount}
+                          onChange={handleCreateFormChange}
+                          className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Last subscription paid on</label>
+                        <input
+                          type="date"
+                          name="last_amc_payment_date"
+                          value={createForm.last_amc_payment_date}
+                          onChange={handleCreateFormChange}
+                          className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
                   <label className="flex items-center gap-2 text-xs text-slate-700">
                     <input
                       type="checkbox"
@@ -3159,6 +3220,8 @@ export default function AdminPage() {
                       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
                     />
                   </div>
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-2">
                   <button

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
-import { PLAN_DISPLAY_NAME, planDefaultLimits } from '../constants/pricingPlans';
+import { PLAN_DISPLAY_NAME, planDefaultLimits, isAnnualOnlyBilling } from '../constants/pricingPlans';
 import { countryProfile } from '../constants/countryProfiles';
 import { formatMoneyWithSymbol } from '../utils/formatMoney';
 
@@ -1155,16 +1155,18 @@ export default function CompanySettingsPage() {
               <div className="font-medium text-slate-900">{formatDateLabel(subscriptionForm.subscription_end_date)}</div>
             </div>
             <div className="text-sm">
-              <span className="text-slate-500">Next AMC due</span>
+              <span className="text-slate-500">
+                {isAnnualOnlyBilling(localeInfo.country_code) ? 'Renewal due' : 'Next AMC due'}
+              </span>
               <div className="font-medium text-slate-900">{formatDateLabel(planSnapshot?.next_amc_due_date)}</div>
             </div>
             {planSnapshot &&
+              !isAnnualOnlyBilling(localeInfo.country_code) &&
               planSnapshot.onetime_fee_amount != null &&
-              planSnapshot.onetime_fee_amount !== '' && (
+              planSnapshot.onetime_fee_amount !== '' &&
+              Number(planSnapshot.onetime_fee_amount) > 0 && (
                 <div className="text-sm">
-                  <span className="text-slate-500">
-                    One-time fee ({localeInfo.country_code === 'AE' ? 'excl. VAT' : 'excl. GST'})
-                  </span>
+                  <span className="text-slate-500">One-time fee (excl. GST)</span>
                   <div className="font-medium text-slate-900">
                     {formatMoneyWithSymbol(planSnapshot.onetime_fee_amount, localeInfo.currency)}
                   </div>
@@ -1173,7 +1175,9 @@ export default function CompanySettingsPage() {
             {planSnapshot && planSnapshot.amc_amount != null && planSnapshot.amc_amount !== '' && (
               <div className="text-sm">
                 <span className="text-slate-500">
-                  AMC per year ({localeInfo.country_code === 'AE' ? 'excl. VAT' : 'excl. GST'})
+                  {isAnnualOnlyBilling(localeInfo.country_code)
+                    ? 'Annual subscription (excl. VAT)'
+                    : 'AMC per year (excl. GST)'}
                 </span>
                 <div className="font-medium text-slate-900">
                   {formatMoneyWithSymbol(planSnapshot.amc_amount, localeInfo.currency)}

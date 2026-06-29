@@ -150,13 +150,25 @@ async function createCompanyProvisionedBySuperadmin(payload) {
     throw new AppError(`payment_status must be one of: ${allowedPay.join(', ')}`, 400);
   }
 
-  const onetimeFeePaid = payload.onetime_fee_paid === true;
-  const onetimeAmt =
+  const countryCode = validateCountryCode(
+    payload.country_code ?? companyIn.country_code ?? 'IN'
+  );
+  const locale = resolveLocaleFromCountryCode(countryCode);
+  const annualOnlyBilling = countryCode === 'AE';
+
+  let onetimeFeePaid = payload.onetime_fee_paid === true;
+  let onetimeAmt =
     payload.onetime_fee_amount != null && payload.onetime_fee_amount !== ''
       ? Number(payload.onetime_fee_amount)
       : null;
-  const amcAmt =
+  let amcAmt =
     payload.amc_amount != null && payload.amc_amount !== '' ? Number(payload.amc_amount) : null;
+
+  if (annualOnlyBilling) {
+    onetimeFeePaid = true;
+    onetimeAmt = 0;
+  }
+
   if (onetimeAmt != null && (!Number.isFinite(onetimeAmt) || onetimeAmt < 0)) {
     throw new AppError('onetime_fee_amount must be a non-negative number', 400);
   }
@@ -166,11 +178,6 @@ async function createCompanyProvisionedBySuperadmin(payload) {
 
   const branch_limit_override = Math.max(0, branchesAllowed - 1);
   const employee_limit_override = staffsAllowed;
-
-  const countryCode = validateCountryCode(
-    payload.country_code ?? companyIn.country_code ?? 'IN'
-  );
-  const locale = resolveLocaleFromCountryCode(countryCode);
 
   const client = await pool.connect();
   try {
