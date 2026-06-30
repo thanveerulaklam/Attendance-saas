@@ -2078,6 +2078,27 @@ async function listWeeklyPayrollRecords(
           AND r.year = EXTRACT(YEAR FROM w.week_end_date)::int
           AND r.month = EXTRACT(MONTH FROM w.week_end_date)::int
           AND r.status = 'deducted') AS deducted_loan_repayment,
+       (SELECT COALESCE(
+          json_agg(
+            json_build_object(
+              'id', r.id,
+              'loan_id', r.loan_id,
+              'repayment_amount', r.repayment_amount,
+              'outstanding_balance', l.outstanding_balance,
+              'loan_amount', l.loan_amount
+            )
+            ORDER BY r.id
+          ),
+          '[]'::json
+        )
+        FROM employee_advance_repayments r
+        INNER JOIN employee_advance_loans l
+          ON l.id = r.loan_id AND l.company_id = r.company_id
+        WHERE r.company_id = w.company_id
+          AND r.employee_id = w.employee_id
+          AND r.year = EXTRACT(YEAR FROM w.week_end_date)::int
+          AND r.month = EXTRACT(MONTH FROM w.week_end_date)::int
+          AND r.status = 'pending') AS pending_loan_repayments,
        (SELECT COALESCE(a.amount, 0)
         FROM employee_advances a
         WHERE a.company_id = w.company_id
@@ -3226,6 +3247,27 @@ async function listPayrollRecords(
            AND r.year = p.year
            AND r.month = p.month
            AND r.status = 'deducted') AS deducted_loan_repayment,
+        (SELECT COALESCE(
+           json_agg(
+             json_build_object(
+               'id', r.id,
+               'loan_id', r.loan_id,
+               'repayment_amount', r.repayment_amount,
+               'outstanding_balance', l.outstanding_balance,
+               'loan_amount', l.loan_amount
+             )
+             ORDER BY r.id
+           ),
+           '[]'::json
+         )
+         FROM employee_advance_repayments r
+         INNER JOIN employee_advance_loans l
+           ON l.id = r.loan_id AND l.company_id = r.company_id
+         WHERE r.company_id = p.company_id
+           AND r.employee_id = p.employee_id
+           AND r.year = p.year
+           AND r.month = p.month
+           AND r.status = 'pending') AS pending_loan_repayments,
         (SELECT COALESCE(a.amount, 0)
          FROM employee_advances a
          WHERE a.company_id = p.company_id

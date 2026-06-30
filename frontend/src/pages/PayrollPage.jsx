@@ -94,6 +94,20 @@ function hasLoanAdvanceRepayment(row) {
   return pending > 0 || deducted > 0;
 }
 
+function getPendingLoanRepayments(row) {
+  const raw = row?.pending_loan_repayments;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 function isLoanAdvanceDeducted(row) {
   return Number(row?.deducted_loan_repayment || 0) > 0;
 }
@@ -589,6 +603,15 @@ export default function PayrollPage() {
     note: '',
   });
   const [manualAdvanceSaving, setManualAdvanceSaving] = useState(false);
+  const [loanAdjustModal, setLoanAdjustModal] = useState({
+    open: false,
+    row: null,
+    repayments: [],
+    selectedRepaymentId: null,
+    amount: '',
+    note: '',
+  });
+  const [loanAdjustSaving, setLoanAdjustSaving] = useState(false);
   const [attendanceAlterModal, setAttendanceAlterModal] = useState({
     open: false,
     row: null,
@@ -1892,6 +1915,84 @@ export default function PayrollPage() {
     }
   };
 
+  const openLoanAdjustModal = (row) => {
+    if (!subscriptionAllowed || isLoanAdvanceDeducted(row)) return;
+    const repayments = getPendingLoanRepayments(row);
+    if (!repayments.length) return;
+    const primary = repayments[0];
+    setLoanAdjustModal({
+      open: true,
+      row,
+      repayments,
+      selectedRepaymentId: primary.id,
+      amount: String(primary.repayment_amount ?? ''),
+      note: '',
+    });
+  };
+
+  const closeLoanAdjustModal = () => {
+    setLoanAdjustModal({
+      open: false,
+      row: null,
+      repayments: [],
+      selectedRepaymentId: null,
+      amount: '',
+      note: '',
+    });
+  };
+
+  const saveLoanAdjust = async () => {
+    const { row, selectedRepaymentId, amount, note, repayments } = loanAdjustModal;
+    if (!row || !selectedRepaymentId || !subscriptionAllowed || loanAdjustSaving) return;
+    const repaymentAmount = Number(amount);
+    if (!Number.isFinite(repaymentAmount) || repaymentAmount <= 0) {
+      setToast({ type: 'error', message: 'Enter a valid amount greater than 0' });
+      return;
+    }
+    const selected = repayments.find((r) => Number(r.id) === Number(selectedRepaymentId));
+    const outstanding = Number(selected?.outstanding_balance || 0);
+    if (outstanding > 0 && repaymentAmount > outstanding) {
+      setToast({
+        type: 'error',
+        message: `Amount cannot exceed outstanding loan balance (${fmt(outstanding)})`,
+      });
+      return;
+    }
+    setLoanAdjustSaving(true);
+    setToast(null);
+    try {
+      const res = await authFetch(`/api/advance-loans/repayments/${selectedRepaymentId}/adjust`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repayment_amount: repaymentAmount,
+          override_reason: note?.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || 'Failed to adjust loan repayment');
+      }
+      const json = await res.json();
+      const reschedule = json.data?.reschedule?.rescheduled_to;
+      closeLoanAdjustModal();
+      setReloadKey((k) => k + 1);
+      setToast({
+        type: 'success',
+        message: reschedule
+          ? `Loan set to ${fmtSym(repaymentAmount)} this month. Balance ${fmtSym(reschedule.repayment_amount)} moved to ${new Date(reschedule.year, reschedule.month - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' })}.`
+          : `Loan repayment updated to ${fmtSym(repaymentAmount)} for ${row.employee_name || 'employee'}.`,
+      });
+    } catch (err) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to adjust loan repayment',
+      });
+    } finally {
+      setLoanAdjustSaving(false);
+    }
+  };
+
   const activeCount = employeesEligibleForGenerate.length;
   const canGeneratePayroll = modalEmployeeId ? Boolean(selectedGenerateEmployee) : activeCount > 0;
 
@@ -2743,10 +2844,18 @@ export default function PayrollPage() {
                                       : 'text-slate-500'
                                   }`}
                                 >
-                                  Loan −{fmt(
-                                    isLoanAdvanceDeducted(row)
-                                      ? Number(row.deducted_loan_repayment || 0)
-                                      : Number(row.pending_loan_repayment || 0)
+                                  {isLoanAdvanceDeducted(row) ? (
+                                    <>Loan −{fmt(Number(row.deducted_loan_repayment || 0))}</>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      disabled={!subscriptionAllowed || advanceUpdatingId === row.id}
+                                      onClick={() => openLoanAdjustModal(row)}
+                                      className="underline decoration-dotted underline-offset-2 hover:text-amber-700 disabled:opacity-50"
+                                      title="Click to set a partial loan repayment for this month"
+                                    >
+                                      Loan −{fmt(Number(row.pending_loan_repayment || 0))}
+                                    </button>
                                   )}
                                 </span>
                               </label>
@@ -3224,6 +3333,134 @@ export default function PayrollPage() {
                 className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {manualAdvanceSaving ? 'Saving…' : 'Save & deduct'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loanAdjustModal.open && loanAdjustModal.row && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3">
+          <div className="w-full max-w-md rounded-xl bg-white p-4 shadow-soft">
+            <h2 className="text-sm font-semibold text-slate-900">Adjust loan repayment</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {loanAdjustModal.row.employee_name} ({loanAdjustModal.row.employee_code})
+              {' — '}
+              {payrollMode === 'monthly'
+                ? new Date(
+                    loanAdjustModal.row.year,
+                    loanAdjustModal.row.month - 1,
+                    1
+                  ).toLocaleString('default', { month: 'long', year: 'numeric' })
+                : formatWeekLabel(
+                    loanAdjustModal.row.week_start_date,
+                    loanAdjustModal.row.week_end_date
+                  )}
+            </p>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Set how much to deduct from salary this month. Any remaining balance is automatically
+              rescheduled to the next month.
+            </p>
+            {(() => {
+              const selected = loanAdjustModal.repayments.find(
+                (r) => Number(r.id) === Number(loanAdjustModal.selectedRepaymentId)
+              );
+              const scheduled = Number(selected?.repayment_amount || 0);
+              const outstanding = Number(selected?.outstanding_balance || 0);
+              const loanTotal = Number(selected?.loan_amount || 0);
+              return (
+                <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+                  <div className="flex justify-between gap-2">
+                    <span>Scheduled this month</span>
+                    <span className="font-medium text-slate-800">{fmt(scheduled)}</span>
+                  </div>
+                  {loanTotal > 0 && (
+                    <div className="mt-1 flex justify-between gap-2">
+                      <span>Original loan</span>
+                      <span>{fmt(loanTotal)}</span>
+                    </div>
+                  )}
+                  {outstanding > 0 && (
+                    <div className="mt-1 flex justify-between gap-2">
+                      <span>Outstanding balance</span>
+                      <span className="font-medium text-amber-800">{fmt(outstanding)}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            <div className="mt-4 space-y-3">
+              {loanAdjustModal.repayments.length > 1 && (
+                <div>
+                  <label className="text-[11px] font-medium text-slate-700">Loan</label>
+                  <select
+                    value={loanAdjustModal.selectedRepaymentId ?? ''}
+                    onChange={(e) => {
+                      const id = Number(e.target.value);
+                      const selected = loanAdjustModal.repayments.find((r) => Number(r.id) === id);
+                      setLoanAdjustModal((m) => ({
+                        ...m,
+                        selectedRepaymentId: id,
+                        amount: String(selected?.repayment_amount ?? ''),
+                      }));
+                    }}
+                    className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                  >
+                    {loanAdjustModal.repayments.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        Loan #{r.loan_id} — {fmt(r.repayment_amount)} due
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Deduct this month ({moneySym})
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={loanAdjustModal.amount}
+                  onChange={(e) =>
+                    setLoanAdjustModal((m) => ({ ...m, amount: e.target.value }))
+                  }
+                  placeholder="e.g. 1500"
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] font-medium text-slate-700">
+                  Note <span className="font-normal text-slate-400">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={loanAdjustModal.note}
+                  onChange={(e) =>
+                    setLoanAdjustModal((m) => ({ ...m, note: e.target.value }))
+                  }
+                  placeholder="e.g. Employee requested partial payment"
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeLoanAdjustModal}
+                disabled={loanAdjustSaving}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveLoanAdjust()}
+                disabled={loanAdjustSaving}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {loanAdjustSaving ? 'Saving…' : 'Save amount'}
               </button>
             </div>
           </div>

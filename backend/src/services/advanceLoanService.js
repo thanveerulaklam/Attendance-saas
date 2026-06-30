@@ -501,6 +501,111 @@ async function updateRepayment(companyId, repaymentId, data) {
   return result.rows[0];
 }
 
+/**
+ * Reduce or change a pending installment for this payroll month.
+ * When the new amount is lower than scheduled, the difference is rescheduled to the next month.
+ */
+async function adjustPendingRepaymentAmount(companyId, repaymentId, data) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const current = await client.query(
+      `SELECT r.*, l.outstanding_balance, l.loan_amount, l.status AS loan_status
+       FROM employee_advance_repayments r
+       INNER JOIN employee_advance_loans l
+         ON l.id = r.loan_id AND l.company_id = r.company_id
+       WHERE r.company_id = $1 AND r.id = $2
+       FOR UPDATE OF r`,
+      [companyId, Number(repaymentId)]
+    );
+    if (current.rowCount === 0) throw new AppError('Repayment not found', 404);
+
+    const row = current.rows[0];
+    if (row.status !== 'pending') {
+      throw new AppError(
+        'Only pending installments can be adjusted. Uncheck the payroll loan deduction first if it was already deducted.',
+        400
+      );
+    }
+    if (!['active', 'on_hold'].includes(row.loan_status)) {
+      throw new AppError('Loan must be active or on hold to adjust installments', 400);
+    }
+
+    const oldAmount = toMoney(row.repayment_amount);
+    const newAmount = toMoney(data.repayment_amount);
+    if (newAmount <= 0) throw new AppError('repayment_amount must be greater than 0', 400);
+    if (newAmount > toMoney(row.outstanding_balance)) {
+      throw new AppError(
+        `Amount cannot exceed outstanding loan balance (${toMoney(row.outstanding_balance)})`,
+        400
+      );
+    }
+
+    const overrideReason =
+      data.override_reason != null
+        ? String(data.override_reason).trim() || null
+        : data.note != null
+          ? String(data.note).trim() || null
+          : row.override_reason;
+
+    let reschedule = null;
+
+    if (newAmount < oldAmount) {
+      const remainder = toMoney(oldAmount - newAmount);
+      const note = `Partial repayment ₹${newAmount} this month; ₹${remainder} rescheduled`;
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET repayment_amount = $3,
+             is_overridden = true,
+             override_reason = $4,
+             notes = CASE
+               WHEN notes IS NULL OR notes = '' THEN $5
+               ELSE notes || E'\n' || $5
+             END,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, Number(repaymentId), newAmount, overrideReason, note]
+      );
+      reschedule = await rescheduleSkippedAmount(
+        client,
+        row,
+        remainder,
+        overrideReason || `Balance from ${row.month}/${row.year}`
+      );
+    } else {
+      const amountChanged = newAmount !== oldAmount;
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET repayment_amount = $3,
+             is_overridden = CASE WHEN $5 THEN true ELSE is_overridden END,
+             override_reason = COALESCE($4, override_reason),
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, Number(repaymentId), newAmount, overrideReason, amountChanged]
+      );
+    }
+
+    const updatedResult = await client.query(
+      `SELECT * FROM employee_advance_repayments WHERE company_id = $1 AND id = $2`,
+      [companyId, Number(repaymentId)]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      repayment: updatedResult.rows[0],
+      reschedule,
+      previous_amount: oldAmount,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function markRepaymentDeducted(companyId, loanId, year, month, actualAmount, opts = {}) {
   const client = opts.client || await pool.connect();
   const ownClient = !opts.client;
@@ -1011,6 +1116,7 @@ module.exports = {
   getEmployeeLoans,
   getMonthlyRepayments,
   updateRepayment,
+  adjustPendingRepaymentAmount,
   markRepaymentDeducted,
   revertRepaymentDeducted,
   markRepaymentPaidManually,

@@ -8,6 +8,7 @@ const {
   remove,
   getOne,
   updateRepayment,
+  adjustRepayment,
   skip,
   markPaid,
 } = require('../controllers/advanceLoanController');
@@ -21,6 +22,7 @@ router.post('/', withAuth, createLoan);
 router.get('/employee/:employeeId', withAuth, getEmployeeLoans);
 router.get('/monthly', withAuth, getMonthly);
 router.put('/repayments/:repaymentId', withAuth, updateRepayment);
+router.post('/repayments/:repaymentId/adjust', withAuth, adjustRepayment);
 router.post('/repayments/:repaymentId/skip', withAuth, skip);
 router.post('/repayments/:repaymentId/mark-paid', withAuth, markPaid);
 router.put('/:loanId/waive', withAuth, waive);

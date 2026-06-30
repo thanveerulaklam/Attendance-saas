@@ -96,6 +96,17 @@ async function updateRepayment(req, res, next) {
   }
 }
 
+async function adjustRepayment(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const repaymentId = Number(req.params.repaymentId);
+    const data = await service.adjustPendingRepaymentAmount(companyId, repaymentId, req.body || {});
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function skip(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -128,6 +139,7 @@ module.exports = {
   remove,
   getOne,
   updateRepayment,
+  adjustRepayment,
   skip,
   markPaid,
 };
