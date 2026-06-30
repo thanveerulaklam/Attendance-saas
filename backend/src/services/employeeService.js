@@ -51,6 +51,39 @@ const EMPLOYEE_SELECT_FIELDS = `
         contract_type,
         created_at`;
 
+const EMPLOYEE_LIST_SELECT_FIELDS = `
+        e.id,
+        e.company_id,
+        e.branch_id,
+        b.name AS branch_name,
+        e.name,
+        e.employee_code,
+        e.department,
+        e.gender,
+        e.phone_number,
+        e.aadhar_number,
+        e.esi_number,
+        e.pf_number,
+        e.basic_salary,
+        e.join_date,
+        e.status,
+        e.payroll_frequency,
+        e.salary_type,
+        e.shift_id,
+        e.daily_travel_allowance,
+        e.other_allowance,
+        e.esi_amount,
+        e.esi_mode,
+        e.esi_percent,
+        e.pf_amount,
+        e.pf_mode,
+        e.pf_percent,
+        e.permission_hours_override,
+        e.labour_card_number,
+        e.iban,
+        e.contract_type,
+        e.created_at`;
+
 function stripIndiaStatutoryForNonIn(payload, countryCode, { isCreate = false } = {}) {
   if (String(countryCode || 'IN').toUpperCase() === 'IN') return payload;
   const stripped = { ...payload };
@@ -198,7 +231,7 @@ async function assertEmployeeVisibleToHr(companyId, employeeId, branchContext = 
   }
 }
 
-function branchFilterSql(allowedBranchIds, paramIndex) {
+function branchFilterSql(allowedBranchIds, paramIndex, columnName = 'branch_id') {
   if (allowedBranchIds == null) {
     return { clause: '', params: [], nextIndex: paramIndex };
   }
@@ -206,7 +239,7 @@ function branchFilterSql(allowedBranchIds, paramIndex) {
     return { clause: ' AND FALSE', params: [], nextIndex: paramIndex };
   }
   return {
-    clause: ` AND branch_id = ANY($${paramIndex}::bigint[])`,
+    clause: ` AND ${columnName} = ANY($${paramIndex}::bigint[])`,
     params: [allowedBranchIds],
     nextIndex: paramIndex + 1,
   };
@@ -368,9 +401,9 @@ async function getEmployees(
   };
 
   const baseParams = [companyId];
-  let whereClause = 'WHERE company_id = $1';
+  let whereClause = 'WHERE e.company_id = $1';
 
-  const bf = branchFilterSql(allowedBranchIds, 2);
+  const bf = branchFilterSql(allowedBranchIds, 2, 'e.branch_id');
   whereClause += bf.clause;
   baseParams.push(...bf.params);
   let p = bf.nextIndex;
@@ -384,13 +417,13 @@ async function getEmployees(
       return emptyResult;
     }
     baseParams.push(bid);
-    whereClause += ` AND branch_id = $${p}`;
+    whereClause += ` AND e.branch_id = $${p}`;
     p += 1;
   }
 
   if (search && String(search).trim() !== '') {
     baseParams.push(`%${String(search).trim()}%`);
-    whereClause += ` AND (name ILIKE $${p} OR employee_code ILIKE $${p})`;
+    whereClause += ` AND (e.name ILIKE $${p} OR e.employee_code ILIKE $${p})`;
     p += 1;
   }
 
@@ -398,31 +431,31 @@ async function getEmployees(
     const s = String(status).trim().toLowerCase();
     if (s === 'active' || s === 'inactive') {
       baseParams.push(s);
-      whereClause += ` AND status = $${p}`;
+      whereClause += ` AND e.status = $${p}`;
       p += 1;
     }
   }
 
   if (department && String(department).trim() !== '') {
     baseParams.push(String(department).trim());
-    whereClause += ` AND department = $${p}`;
+    whereClause += ` AND e.department = $${p}`;
     p += 1;
   }
 
   if (gender && String(gender).trim() !== '' && String(gender) !== 'all') {
     const g = String(gender).trim().toLowerCase();
     if (g === 'unset' || g === 'not_specified') {
-      whereClause += ' AND gender IS NULL';
+      whereClause += ' AND e.gender IS NULL';
     } else if (g === 'male' || g === 'female' || g === 'other') {
       baseParams.push(g);
-      whereClause += ` AND gender = $${p}`;
+      whereClause += ` AND e.gender = $${p}`;
       p += 1;
     }
   }
 
   const countResult = await pool.query(
     `SELECT COUNT(*) AS total
-     FROM employees
+     FROM employees e
      ${whereClause}`,
     baseParams
   );
@@ -433,10 +466,11 @@ async function getEmployees(
   const offsetIndex = baseParams.length + 2;
 
   const listResult = await pool.query(
-    `SELECT ${EMPLOYEE_SELECT_FIELDS}
-     FROM employees
+    `SELECT ${EMPLOYEE_LIST_SELECT_FIELDS}
+     FROM employees e
+     LEFT JOIN branches b ON b.id = e.branch_id AND b.company_id = e.company_id
      ${whereClause}
-     ORDER BY name ASC
+     ORDER BY e.name ASC
      LIMIT $${limitIndex}
      OFFSET $${offsetIndex}`,
     [...baseParams, pageSize, offset]

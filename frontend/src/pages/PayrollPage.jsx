@@ -45,6 +45,49 @@ function currentYear() {
   return new Date().getFullYear();
 }
 
+function normalizeBranchesPayload(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.branches)) return payload.branches;
+  return [];
+}
+
+function branchesFromEmployees(employees) {
+  const map = new Map();
+  for (const emp of employees || []) {
+    if (emp?.branch_id == null || emp.branch_id === '') continue;
+    const id = Number(emp.branch_id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    if (!map.has(id)) {
+      map.set(id, {
+        id,
+        name: emp.branch_name || `Branch #${id}`,
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''))
+  );
+}
+
+function mergeBranchLists(...lists) {
+  const map = new Map();
+  for (const list of lists) {
+    for (const branch of list || []) {
+      if (branch?.id == null) continue;
+      const id = Number(branch.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      const existing = map.get(id);
+      map.set(id, {
+        id,
+        name: branch.name || existing?.name || `Branch #${id}`,
+      });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) =>
+    String(a.name || '').localeCompare(String(b.name || ''))
+  );
+}
+
 function hasLoanAdvanceRepayment(row) {
   const pending = Number(row?.pending_loan_repayment || 0);
   const deducted = Number(row?.deducted_loan_repayment || 0);
@@ -616,6 +659,11 @@ export default function PayrollPage() {
     return map;
   }, [employees]);
 
+  const branchOptions = useMemo(
+    () => mergeBranchLists(branches, branchesFromEmployees(employees)),
+    [branches, employees]
+  );
+
   const displayRecords = useMemo(() => {
     if (!branchFilter) return records;
     const bid = Number(branchFilter);
@@ -640,11 +688,11 @@ export default function PayrollPage() {
 
   const generateBranchLabel = useMemo(() => {
     if (!modalBranchId) {
-      return branches.length > 1 ? 'all branches' : 'all employees';
+      return branchOptions.length > 1 ? 'all branches' : 'all employees';
     }
-    const branch = branches.find((b) => String(b.id) === String(modalBranchId));
+    const branch = branchOptions.find((b) => String(b.id) === String(modalBranchId));
     return branch?.name || `branch #${modalBranchId}`;
-  }, [modalBranchId, branches]);
+  }, [modalBranchId, branchOptions]);
 
   const modalEmployeeId =
     payrollMode === 'monthly' ? generateForm.employee_id : weeklyGenerateForm.employee_id;
@@ -671,47 +719,57 @@ export default function PayrollPage() {
 
   useEffect(() => {
     let isMounted = true;
-    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
-        if (isMounted && json?.data) setCompany(json.data);
-      })
-      .catch(() => {});
-    return () => { isMounted = false; };
+
+    async function loadFilterOptions() {
+      try {
+        const [companyRes, branchRes, employeeRes] = await Promise.all([
+          authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
+          authFetch('/api/company/branches', { headers: { 'Content-Type': 'application/json' } }),
+          authFetch('/api/employees?limit=500', { headers: { 'Content-Type': 'application/json' } }),
+        ]);
+
+        const companyJson = companyRes.ok ? await companyRes.json() : null;
+        const branchJson = branchRes.ok ? await branchRes.json() : null;
+        const employeeJson = employeeRes.ok ? await employeeRes.json() : null;
+
+        if (!isMounted) return;
+
+        if (companyJson?.data) setCompany(companyJson.data);
+
+        const fromCompany = normalizeBranchesPayload(companyJson?.data);
+        const fromBranchesApi = normalizeBranchesPayload(branchJson?.data);
+        const employeeList = employeeJson?.data?.data || [];
+        setEmployees(employeeList);
+        setBranches(mergeBranchLists(fromCompany, fromBranchesApi, branchesFromEmployees(employeeList)));
+      } catch {
+        if (!isMounted) return;
+        setBranches([]);
+      }
+    }
+
+    loadFilterOptions();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
     let isMounted = true;
-    const params = new URLSearchParams({ limit: '200' });
+    const params = new URLSearchParams({ limit: '500' });
     if (branchFilter) params.set('branch_id', branchFilter);
     authFetch(`/api/employees?${params.toString()}`, {
       headers: { 'Content-Type': 'application/json' },
     })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load employees'))))
       .then((json) => {
-        if (isMounted) setEmployees(json.data?.data || []);
+        if (!isMounted) return;
+        const employeeList = json.data?.data || [];
+        setEmployees(employeeList);
+        setBranches((prev) => mergeBranchLists(prev, branchesFromEmployees(employeeList)));
       })
       .catch(() => {});
     return () => { isMounted = false; };
   }, [branchFilter]);
-
-  useEffect(() => {
-    let isMounted = true;
-    authFetch('/api/company/branches', {
-      headers: { 'Content-Type': 'application/json' },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Failed to load branches');
-        const json = await res.json();
-        if (!isMounted) return;
-        setBranches(Array.isArray(json.data) ? json.data : []);
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setBranches([]);
-      });
-    return () => { isMounted = false; };
-  }, []);
 
   useEffect(() => {
     if (!branchFilter || !employeeId) return;
@@ -750,6 +808,15 @@ export default function PayrollPage() {
         const d = json.data;
         setRecords(Array.isArray(d?.data) ? d.data : []);
         setTotal(Number(d?.total ?? 0));
+        const recordBranches = (d?.data || [])
+          .filter((row) => row?.branch_id != null)
+          .map((row) => ({
+            id: Number(row.branch_id),
+            name: row.branch_name || `Branch #${row.branch_id}`,
+          }));
+        if (recordBranches.length > 0) {
+          setBranches((prev) => mergeBranchLists(prev, recordBranches));
+        }
       })
       .catch((err) => {
         if (isMounted) {
@@ -2169,7 +2236,7 @@ export default function PayrollPage() {
               className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800 min-w-[140px]"
             >
               <option value="">All branches</option>
-              {(branches || []).map((b) => (
+              {(branchOptions || []).map((b) => (
                 <option key={String(b.id)} value={String(b.id)}>
                   {b.name || `Branch #${b.id}`}
                 </option>
@@ -2229,7 +2296,7 @@ export default function PayrollPage() {
           <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-700">
             Branch:{' '}
             {branchFilter
-              ? branches.find((b) => String(b.id) === String(branchFilter))?.name || `#${branchFilter}`
+              ? branchOptions.find((b) => String(b.id) === String(branchFilter))?.name || `#${branchFilter}`
               : 'All'}
             {branchFilter && (
               <button
@@ -2784,7 +2851,7 @@ export default function PayrollPage() {
                   className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
                 >
                   <option value="">All branches</option>
-                  {(branches || []).map((b) => (
+                  {(branchOptions || []).map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.name}
                     </option>

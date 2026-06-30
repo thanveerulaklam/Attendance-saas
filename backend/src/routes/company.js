@@ -17,7 +17,12 @@ const {
 
 const router = express.Router();
 
-const withCompanyAuth = [authenticate, requireRole(['admin', 'hr']), enforceCompanyFromToken];
+const withCompanyAuth = [
+  authenticate,
+  requireRole(['admin', 'hr']),
+  enforceCompanyFromToken,
+  attachBranchScopes,
+];
 const withBranchScope = [
   authenticate,
   requireRole(['admin', 'hr']),
