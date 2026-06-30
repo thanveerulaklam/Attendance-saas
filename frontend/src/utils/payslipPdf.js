@@ -111,27 +111,55 @@ function buildAdvanceInfoRows(breakdown, payrollRow) {
   const { pendingLoanBalance, repayments } = resolveAdvanceTotals(breakdown, payrollRow);
   const rows = [];
 
-  for (const [index, repayment] of repayments.entries()) {
-    const outstandingAfter = Number(repayment?.outstanding_balance_after || 0);
-    if (outstandingAfter > 0) {
-      rows.push([
-        `Loan #${index + 1} balance after`,
-        money(outstandingAfter),
-      ]);
+  if (repayments.length > 1) {
+    for (const [index, repayment] of repayments.entries()) {
+      const outstandingAfter = Number(repayment?.outstanding_balance_after || 0);
+      if (outstandingAfter > 0) {
+        rows.push([`Loan #${index + 1} outstanding`, money(outstandingAfter)]);
+      }
     }
   }
 
   if (pendingLoanBalance > 0) {
-    const hasPerLoanRows = rows.length > 0;
-    if (!hasPerLoanRows) {
-      rows.push(['Outstanding loan balance', money(pendingLoanBalance)]);
-    }
+    rows.push(['Outstanding loan balance', money(pendingLoanBalance)]);
   }
 
   return rows;
 }
 
-function buildAttendanceRows(breakdown, attendanceDetails) {
+function drawAdvanceInfoSection(doc, { marginLeft, marginRight, layout, startY, rows, fixedPage, slot }) {
+  if (!rows.length) return startY;
+  if (fixedPage) doc.setPage(fixedPage);
+
+  let y = startY;
+  const lineHeight = layout.tableFont + 2;
+
+  doc.setFillColor(241, 245, 249);
+  doc.setDrawColor(226, 232, 240);
+  const blockHeight = lineHeight * (rows.length + 1) + layout.tablePadding * 2;
+  doc.roundedRect(marginLeft, y, marginRight - marginLeft, blockHeight, 2, 2, 'FD');
+
+  y += layout.tablePadding + 1;
+  doc.setFontSize(layout.tableFont);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(51, 65, 85);
+  doc.text('Advances & loans (info)', marginLeft + 4, y + lineHeight - 2);
+  y += lineHeight;
+
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(71, 85, 105);
+  for (const [label, value] of rows) {
+    doc.text(String(label), marginLeft + 4, y + lineHeight - 2);
+    doc.text(String(value), marginRight - 4, y + lineHeight - 2, { align: 'right' });
+    y += lineHeight;
+  }
+
+  if (fixedPage) trimPagesAfter(doc, fixedPage);
+  return startY + blockHeight + layout.sectionGap / 2;
+}
+
+function buildAttendanceRows(breakdown, attendanceDetails, options = {}) {
+  const compact = Boolean(options.compact);
   const att = breakdown?.attendance || {};
   const allowOvertime = Boolean(att.allowOvertime ?? breakdown?.breakdown?.allowOvertime);
   const { absentDates, lateDetails, weeklyOffDates } = resolvePayslipAttendanceDates(
@@ -146,8 +174,13 @@ function buildAttendanceRows(breakdown, attendanceDetails) {
   ];
 
   if (weeklyOffDates.length > 0) {
-    rows.push(['Week off / holidays', `${weeklyOffDates.length} d`]);
-    rows.push(['Week off dates', formatGroupedDayNumbersText(weeklyOffDates)]);
+    const weekOffDatesText = formatGroupedDayNumbersText(weeklyOffDates);
+    if (compact) {
+      rows.push(['Week off / holidays', `${weeklyOffDates.length} d · ${weekOffDatesText}`]);
+    } else {
+      rows.push(['Week off / holidays', `${weeklyOffDates.length} d`]);
+      rows.push(['Week off dates', weekOffDatesText]);
+    }
   }
 
   rows.push(['Late', `${att.lateDays ?? 0}`]);
@@ -156,8 +189,11 @@ function buildAttendanceRows(breakdown, attendanceDetails) {
     rows.push(['Overtime', `${formatHours(att.overtimeHours)} h`]);
   }
 
-  rows.push(['Absent dates', formatGroupedDayNumbersText(absentDates)]);
-  rows.push(['Late dates', formatGroupedLateDetailsText(lateDetails)]);
+  const absentDatesText = formatGroupedDayNumbersText(absentDates);
+  rows.push(['Absent dates', compact && absentDatesText.length > 42 ? `${absentDatesText.slice(0, 39)}…` : absentDatesText]);
+
+  const lateDatesText = formatGroupedLateDetailsText(lateDetails);
+  rows.push(['Late dates', compact && lateDatesText.length > 42 ? `${lateDatesText.slice(0, 39)}…` : lateDatesText]);
 
   return rows;
 }
@@ -310,7 +346,7 @@ function renderCompactPayslip(
       layout,
       startY: y,
       head: [['Attendance', '']],
-      body: buildAttendanceRows(breakdown, attendanceDetails),
+      body: buildAttendanceRows(breakdown, attendanceDetails, { compact: layoutKey === 'a4-half' }),
       columnStylesOverride: {
         0: { cellWidth: layout === LAYOUTS.a5 ? 58 : 42 },
         1: { halign: 'left', cellWidth: 'auto' },
@@ -372,38 +408,41 @@ function renderCompactPayslip(
   y = Math.max(earningsEndY, deductionsEndY) + layout.sectionGap;
 
   const advanceInfoRows = buildAdvanceInfoRows(breakdown, payrollRow);
-  if (advanceInfoRows.length > 0) {
-    y =
-      drawPayslipTable(doc, {
-        fixedPage,
-        slot,
-        marginLeft,
-        marginRight,
-        layout,
-        startY: y,
-        head: [['Advances & loans (info)', '']],
-        body: advanceInfoRows,
-        columnStylesOverride: {
-          0: { cellWidth: layout === LAYOUTS.a5 ? 120 : 90 },
-          1: { halign: 'right', cellWidth: layout === LAYOUTS.a5 ? 72 : 50 },
-        },
-      }) + layout.sectionGap;
-  }
-
-  if (fixedPage) doc.setPage(fixedPage);
-  doc.setDrawColor(226, 232, 240);
-  doc.line(marginLeft, y, marginRight, y);
-  y += layout.sectionGap;
-  doc.setFontSize(layout.netFont);
-  doc.setFont(undefined, 'bold');
-  doc.setTextColor(5, 150, 105);
   const resolvedNet =
     Number(b.grossSalary || 0) -
     Number(b.totalDeductions || 0) -
     totalAdvance +
     Number(b.noLeaveIncentive || 0);
   const netDisplay = Number.isFinite(resolvedNet) ? resolvedNet : Number(b.netSalary || 0);
-  doc.text(`NET SALARY: ${money(netDisplay)}`, marginRight, y, { align: 'right' });
+
+  const slotBottom = slot ? slot.y + slot.height - 6 : doc.internal.pageSize.getHeight() - 12;
+  const advanceInfoHeight =
+    advanceInfoRows.length > 0
+      ? (layout.tableFont + 2) * (advanceInfoRows.length + 1) + layout.tablePadding * 2 + layout.sectionGap
+      : 0;
+  const netBlockHeight = layout.netFont + layout.sectionGap + 4;
+
+  if (advanceInfoRows.length > 0) {
+    const infoStartY = Math.min(y, slotBottom - advanceInfoHeight - netBlockHeight);
+    y = drawAdvanceInfoSection(doc, {
+      fixedPage,
+      slot,
+      marginLeft,
+      marginRight,
+      layout,
+      startY: infoStartY,
+      rows: advanceInfoRows,
+    });
+  }
+
+  if (fixedPage) doc.setPage(fixedPage);
+  const netY = Math.max(y + layout.sectionGap, slotBottom - netBlockHeight + 4);
+  doc.setDrawColor(226, 232, 240);
+  doc.line(marginLeft, netY - layout.sectionGap / 2, marginRight, netY - layout.sectionGap / 2);
+  doc.setFontSize(layout.netFont);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(5, 150, 105);
+  doc.text(`NET SALARY: ${money(netDisplay)}`, marginRight, netY, { align: 'right' });
 
   if (layout.showFooter) {
     const footerY = doc.internal.pageSize.getHeight() - 16;
@@ -489,6 +528,7 @@ export function downloadCompactPayslipPdf({
     periodLabel,
     breakdown,
     attendanceDetails,
+    payrollRow,
     isFirstPage: true,
   });
   const filename = buildCompactPayslipFilename({
