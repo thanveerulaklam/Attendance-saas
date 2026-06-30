@@ -415,34 +415,27 @@ function renderCompactPayslip(
     Number(b.noLeaveIncentive || 0);
   const netDisplay = Number.isFinite(resolvedNet) ? resolvedNet : Number(b.netSalary || 0);
 
-  const slotBottom = slot ? slot.y + slot.height - 6 : doc.internal.pageSize.getHeight() - 12;
-  const advanceInfoHeight =
-    advanceInfoRows.length > 0
-      ? (layout.tableFont + 2) * (advanceInfoRows.length + 1) + layout.tablePadding * 2 + layout.sectionGap
-      : 0;
-  const netBlockHeight = layout.netFont + layout.sectionGap + 4;
-
   if (advanceInfoRows.length > 0) {
-    const infoStartY = Math.min(y, slotBottom - advanceInfoHeight - netBlockHeight);
     y = drawAdvanceInfoSection(doc, {
       fixedPage,
       slot,
       marginLeft,
       marginRight,
       layout,
-      startY: infoStartY,
+      startY: y,
       rows: advanceInfoRows,
     });
   }
 
   if (fixedPage) doc.setPage(fixedPage);
-  const netY = Math.max(y + layout.sectionGap, slotBottom - netBlockHeight + 4);
+  y += layout.sectionGap;
   doc.setDrawColor(226, 232, 240);
-  doc.line(marginLeft, netY - layout.sectionGap / 2, marginRight, netY - layout.sectionGap / 2);
+  doc.line(marginLeft, y, marginRight, y);
+  y += layout.sectionGap;
   doc.setFontSize(layout.netFont);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(5, 150, 105);
-  doc.text(`NET SALARY: ${money(netDisplay)}`, marginRight, netY, { align: 'right' });
+  doc.text(`NET SALARY: ${money(netDisplay)}`, marginRight, y, { align: 'right' });
 
   if (layout.showFooter) {
     const footerY = doc.internal.pageSize.getHeight() - 16;
