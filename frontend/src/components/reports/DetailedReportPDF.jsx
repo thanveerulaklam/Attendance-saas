@@ -1,6 +1,7 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
 import { authFetch } from '../../utils/api';
-import { formatIstTime } from '../../utils/istDisplay';
+import { formatLocalTime, todayYmdInTimezone } from '../../utils/companyLocalDisplay';
+import { IST } from '../../utils/istDisplay';
 import { formatWorkedHours } from '../../utils/durationFormat';
 
 function formatTotalHoursForPdf(day) {
@@ -20,8 +21,8 @@ function formatMonthLabel(year, month) {
   return d.toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
-function todayIstYmd() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+function todayYmdInCompanyTz(timezone = IST) {
+  return todayYmdInTimezone(timezone);
 }
 
 function toYearMonthFromYmd(value) {
@@ -31,12 +32,12 @@ function toYearMonthFromYmd(value) {
   return { year: y, month: m };
 }
 
-function formatPunchTimings(punches) {
+function formatPunchTimings(punches, timezone = IST) {
   const list = Array.isArray(punches) ? punches : [];
   if (list.length === 0) return '';
   return list
     .map((p) => {
-      const timeLabel = p?.punch_time ? formatIstTime(p.punch_time) : '';
+      const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, timezone) : '';
       const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
       if (!timeLabel) return '';
       return `${timeLabel} (${typeLabel})`;
@@ -110,6 +111,7 @@ export async function generateDetailedAttendancePdf({
   const shiftsJson = shiftsRes.ok ? await shiftsRes.json() : { data: [] };
 
   const company = companyJson.data || {};
+  const companyTz = company.timezone || IST;
   const monthly = monthlyJson.data;
   if (!monthly || !Array.isArray(monthly.employees) || monthly.employees.length === 0) {
     throw new Error('No attendance data available for selected period');
@@ -155,11 +157,11 @@ export async function generateDetailedAttendancePdf({
     : formatMonthLabel(effectiveYear, effectiveMonth);
   const isCurrentMonthView = (() => {
     const now = new Date();
-    const nowYear = Number(now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric' }));
-    const nowMonth = Number(now.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata', month: '2-digit' }));
+    const nowYear = Number(now.toLocaleDateString('en-CA', { timeZone: companyTz, year: 'numeric' }));
+    const nowMonth = Number(now.toLocaleDateString('en-CA', { timeZone: companyTz, month: '2-digit' }));
     return Number(effectiveYear) === nowYear && Number(effectiveMonth) === nowMonth;
   })();
-  const todayCapYmd = todayIstYmd();
+  const todayCapYmd = todayYmdInCompanyTz(companyTz);
 
   const doc = createPdf();
   const startY = addReportHeader(doc, {
@@ -275,10 +277,10 @@ export async function generateDetailedAttendancePdf({
       bodyRows.push([
         date,
         weekday,
-        day.first_in_time ? formatIstTime(day.first_in_time) : '',
-        day.last_out_time ? formatIstTime(day.last_out_time) : '',
+        day.first_in_time ? formatLocalTime(day.first_in_time, companyTz) : '',
+        day.last_out_time ? formatLocalTime(day.last_out_time, companyTz) : '',
         String(Array.isArray(day.punches) ? day.punches.length : 0),
-        formatPunchTimings(day.punches),
+        formatPunchTimings(day.punches, companyTz),
         formatTotalHoursForPdf(day),
         status,
         day.late ? 'Yes' : 'No',

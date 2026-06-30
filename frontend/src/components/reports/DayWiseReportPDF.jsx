@@ -1,12 +1,32 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
-import { formatIstTime } from '../../utils/istDisplay';
+import { formatLocalTime } from '../../utils/companyLocalDisplay';
+import { IST } from '../../utils/istDisplay';
 import { formatWorkedHours } from '../../utils/durationFormat';
 
-function getFirstInTime(row) {
-  const firstIn = (row.punches || []).find(
-    (p) => String(p.punch_type || '').toLowerCase() === 'in'
-  );
-  return firstIn?.punch_time ? formatIstTime(firstIn.punch_time) : '—';
+function makeTimeHelpers(timezone = IST) {
+  const tz = timezone || IST;
+
+  function getFirstInTime(row) {
+    const firstIn = (row.punches || []).find(
+      (p) => String(p.punch_type || '').toLowerCase() === 'in'
+    );
+    return firstIn?.punch_time ? formatLocalTime(firstIn.punch_time, tz) : '—';
+  }
+
+  function formatPunchTimings(punches) {
+    const list = Array.isArray(punches) ? punches : [];
+    if (list.length === 0) return '';
+    return list
+      .map((p) => {
+        const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, tz) : '';
+        const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+        return timeLabel ? `${timeLabel} (${typeLabel})` : '';
+      })
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  return { getFirstInTime, formatPunchTimings };
 }
 
 function getDayStatusLabel(row) {
@@ -15,19 +35,6 @@ function getDayStatusLabel(row) {
   if (row.half_day) return row.late ? 'Half day (late)' : 'Half day';
   if (row.left_during_lunch) return 'Left at lunch';
   return row.late ? 'Present (late)' : 'Present';
-}
-
-function formatPunchTimings(punches) {
-  const list = Array.isArray(punches) ? punches : [];
-  if (list.length === 0) return '';
-  return list
-    .map((p) => {
-      const timeLabel = p?.punch_time ? formatIstTime(p.punch_time) : '';
-      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
-      return timeLabel ? `${timeLabel} (${typeLabel})` : '';
-    })
-    .filter(Boolean)
-    .join(', ');
 }
 
 function getDayTotalHours(row) {
@@ -104,7 +111,9 @@ export function buildDayWiseReportDoc({
   absentees,
   lateComers,
   allEmployees,
+  timezone,
 }) {
+  const { getFirstInTime, formatPunchTimings } = makeTimeHelpers(timezone || company?.timezone);
   const scopeParts = [dateLabel, branchLabel, departmentLabel].filter(Boolean);
   const doc = createPdf({ orientation: 'portrait' });
   let y = addReportHeader(doc, {
@@ -117,7 +126,6 @@ export function buildDayWiseReportDoc({
     totalEmployees: summary.total,
   });
 
-  // Make the PDF "Summary" section stand out more, while keeping other sections unchanged.
   y = sectionTitle(doc, y, 'Summary', 12);
   y = tableAfterTitle(
     doc,
@@ -230,7 +238,9 @@ export function buildDayWiseReportCsv({
   absentees,
   lateComers,
   allEmployees,
+  timezone,
 }) {
+  const { getFirstInTime, formatPunchTimings } = makeTimeHelpers(timezone);
   const lines = [];
   lines.push(csvRow(['Day-wise Attendance Report']));
   lines.push(csvRow(['Date', dateLabel]));

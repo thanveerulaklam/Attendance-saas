@@ -9,7 +9,13 @@ import {
 } from '../components/reports/DayWiseReportPDF';
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 import { formatMoneyAmount, formatMoneyWithSymbol } from '../utils/formatMoney';
-import { formatIstTime, IST } from '../utils/istDisplay';
+import {
+  formatLocalTime,
+  formatYmdLong,
+  todayYmdInTimezone,
+  yesterdayYmdFrom,
+} from '../utils/companyLocalDisplay';
+import { IST } from '../utils/istDisplay';
 import { formatWorkedHours } from '../utils/durationFormat';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../utils/whatsapp';
 import {
@@ -61,44 +67,12 @@ function currentYear() {
   return new Date().getFullYear();
 }
 
-function todayIstYmd() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: IST });
-}
-
-function istYmdFromDate(d) {
-  return d.toLocaleDateString('en-CA', { timeZone: IST });
-}
-
-function istDateFromYmd(ymd) {
-  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  // Use midday to avoid DST/offset edge cases when converting back and forth.
-  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`);
-}
-
-function yesterdayIstYmdFrom(ymd) {
-  const dt = istDateFromYmd(ymd);
-  if (!dt) return todayIstYmd();
-  return istYmdFromDate(new Date(dt.getTime() - 24 * 60 * 60 * 1000));
-}
-
-function formatDateLongIstYmd(ymd) {
-  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return '—';
-  return new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00+05:30`).toLocaleDateString('en-IN', {
-    timeZone: IST,
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-}
-
-function formatPunchTimings(punches) {
+function formatPunchTimings(punches, timezone = IST) {
   const list = Array.isArray(punches) ? punches : [];
   if (list.length === 0) return '—';
   return list
     .map((p) => {
-      const timeLabel = p?.punch_time ? formatIstTime(p.punch_time) : '';
+      const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, timezone) : '';
       const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
       return timeLabel ? `${timeLabel} (${typeLabel})` : '';
     })
@@ -120,11 +94,11 @@ function getDayTotalHours(row) {
   return '—';
 }
 
-function getFirstInTime(row) {
+function getFirstInTime(row, timezone = IST) {
   const firstIn = (row.punches || []).find(
     (p) => String(p.punch_type || '').toLowerCase() === 'in'
   );
-  return firstIn?.punch_time ? formatIstTime(firstIn.punch_time) : '—';
+  return firstIn?.punch_time ? formatLocalTime(firstIn.punch_time, timezone) : '—';
 }
 
 /**
@@ -226,7 +200,7 @@ export default function ReportsPage() {
     total_outstanding: 0,
     employee_count: 0,
   });
-  const [dayReportDate, setDayReportDate] = useState(todayIstYmd);
+  const [dayReportDate, setDayReportDate] = useState(() => todayYmdInTimezone(IST));
   const [dayReportDepartment, setDayReportDepartment] = useState('');
   const [dayReportData, setDayReportData] = useState([]);
   const [dayReportLoading, setDayReportLoading] = useState(false);
@@ -236,6 +210,7 @@ export default function ReportsPage() {
   const [reportBranchFilter, setReportBranchFilter] = useState('');
   const [company, setCompany] = useState(null);
 
+  const companyTz = company?.timezone || IST;
   const companyCurrency = company?.currency || 'INR';
   const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
   const showIndiaStatutory = company?.region_features?.esi === true;
@@ -436,11 +411,11 @@ export default function ReportsPage() {
   }, [dayReportDate, dayReportDepartment, reportBranchFilter]);
 
   const dayReportScopeLabel = useMemo(() => {
-    const parts = [formatDateLongIstYmd(dayReportDate)];
+    const parts = [formatYmdLong(dayReportDate, companyTz)];
     if (selectedBranchLabel) parts.push(selectedBranchLabel);
     if (dayReportDepartment) parts.push(dayReportDepartment);
     return parts.join(' · ');
-  }, [dayReportDate, selectedBranchLabel, dayReportDepartment]);
+  }, [dayReportDate, selectedBranchLabel, dayReportDepartment, companyTz]);
 
   const dayReportSummary = useMemo(() => {
     const rows = dayReportData || [];
@@ -473,13 +448,14 @@ export default function ReportsPage() {
       throw new Error('No data available for selected day. Wait for the report to load.');
     }
     return {
-      dateLabel: formatDateLongIstYmd(dayReportDate),
+      dateLabel: formatYmdLong(dayReportDate, companyTz),
       branchLabel: selectedBranchLabel,
       departmentLabel: dayReportDepartment || null,
       summary: dayReportSummary,
       absentees: dayReportAbsentees,
       lateComers: dayReportLateComers,
       allEmployees: dayReportData,
+      timezone: companyTz,
     };
   };
 
@@ -559,7 +535,7 @@ export default function ReportsPage() {
   };
 
   const handleSendYesterdayDayReportWhatsApp = async () => {
-    const yesterdayYmd = yesterdayIstYmdFrom(dayReportDate);
+    const yesterdayYmd = yesterdayYmdFrom(dayReportDate, companyTz);
     try {
       setLoading('yesterday-whatsapp');
       setToast(null);
@@ -608,7 +584,7 @@ export default function ReportsPage() {
 
       const shareText = buildDayWiseWhatsAppMessage({
         companyName: company.name,
-        dateLabel: formatDateLongIstYmd(yesterdayYmd),
+        dateLabel: formatYmdLong(yesterdayYmd, companyTz),
         branchLabel: selectedBranchLabel,
         departmentLabel: dayReportDepartment || null,
         summary,
@@ -628,7 +604,7 @@ export default function ReportsPage() {
   };
 
   const handleDownloadYesterdayDayReportPdf = async () => {
-    const yesterdayYmd = yesterdayIstYmdFrom(dayReportDate);
+    const yesterdayYmd = yesterdayYmdFrom(dayReportDate, companyTz);
     try {
       setLoading('yesterday-pdf');
       setToast(null);
@@ -674,7 +650,7 @@ export default function ReportsPage() {
       await generateDayWiseReportPdf({
         company: companyJson.data || {},
         filename: `daily-attendance-${yesterdayYmd}.pdf`,
-        dateLabel: formatDateLongIstYmd(yesterdayYmd),
+        dateLabel: formatYmdLong(yesterdayYmd, companyTz),
         branchLabel: selectedBranchLabel,
         departmentLabel: dayReportDepartment || null,
         summary,
@@ -823,7 +799,7 @@ export default function ReportsPage() {
   };
 
   const selectedMonthLabel = MONTHS.find((m) => m.value === month)?.label || '';
-  const heroDayLabel = formatDateLongIstYmd(dayReportDate);
+  const heroDayLabel = formatYmdLong(dayReportDate, companyTz);
 
   return (
     <div className="space-y-8">
@@ -897,7 +873,7 @@ export default function ReportsPage() {
               <input
                 type="date"
                 value={dayReportDate}
-                max={todayIstYmd()}
+                max={todayYmdInTimezone(companyTz)}
                 onChange={(e) => setDayReportDate(e.target.value)}
                 className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800"
               />
@@ -1087,7 +1063,7 @@ export default function ReportsPage() {
                           <tr key={row.employee_id} className="border-t border-amber-50">
                             <td className="px-3 py-2 font-medium text-slate-800">{row.name || '—'}</td>
                             <td className="px-3 py-2 text-slate-700">{row.employee_code || '—'}</td>
-                            <td className="px-3 py-2 font-medium text-amber-800">{getFirstInTime(row)}</td>
+                            <td className="px-3 py-2 font-medium text-amber-800">{getFirstInTime(row, companyTz)}</td>
                             <td className="px-3 py-2 text-right text-amber-800">
                               {row.minutes_late != null && row.minutes_late > 0
                                 ? `${Math.round(row.minutes_late)} min`
@@ -1141,8 +1117,8 @@ export default function ReportsPage() {
                           <td className="px-3 py-2 text-slate-700">{row.employee_code || '—'}</td>
                           <td className="px-3 py-2 text-slate-700">{row.branch_name || '—'}</td>
                           <td className={`px-3 py-2 font-medium ${statusCls}`}>{status}</td>
-                          <td className="px-3 py-2 text-slate-700 max-w-xs truncate" title={formatPunchTimings(row.punches)}>
-                            {formatPunchTimings(row.punches)}
+                          <td className="px-3 py-2 text-slate-700 max-w-xs truncate" title={formatPunchTimings(row.punches, companyTz)}>
+                            {formatPunchTimings(row.punches, companyTz)}
                           </td>
                           <td className="px-3 py-2 text-right text-slate-700">{getDayTotalHours(row)}</td>
                           <td className="px-3 py-2 text-right text-slate-700">

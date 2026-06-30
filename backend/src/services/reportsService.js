@@ -5,6 +5,7 @@ const { getMonthlyAttendance, getDailyAttendance } = require('./attendanceServic
 const { getPayrollBreakdown, getWeeklyPayrollBreakdown } = require('./payrollService');
 const { formatStatutoryModeLabel } = require('../utils/statutoryDeductions');
 const { getPayrollRulesForCompanyId } = require('../payroll/rules');
+const { getCompanyTimezone } = require('./companyService');
 
 /**
  * Escape a value for CSV (wrap in quotes if needed, escape internal quotes).
@@ -181,16 +182,17 @@ function formatDailyStatus(row) {
   return row.late ? 'Present (late)' : 'Present';
 }
 
-function formatPunchTimingsForCsv(punches) {
+function formatPunchTimingsForCsv(punches, timezone = 'Asia/Kolkata') {
   const list = Array.isArray(punches) ? punches : [];
   if (list.length === 0) return '';
+  const tz = timezone || 'Asia/Kolkata';
   return list
     .map((p) => {
       const t = p.punch_time ? new Date(p.punch_time) : null;
       const timeLabel =
         t && !Number.isNaN(t.getTime())
           ? t.toLocaleTimeString('en-IN', {
-              timeZone: 'Asia/Kolkata',
+              timeZone: tz,
               hour: '2-digit',
               minute: '2-digit',
               hour12: true,
@@ -220,6 +222,7 @@ async function getDailyReportCsv(companyId, dateStr, department = null, allowedB
   }
 
   const dept = department ? String(department).trim() : null;
+  const timezone = await getCompanyTimezone(companyId);
   const rows = await getDailyAttendance(companyId, dateStr.trim(), null, dept, allowedBranchIds);
   const header = [
     'Employee Code',
@@ -241,7 +244,7 @@ async function getDailyReportCsv(companyId, dateStr, department = null, allowedB
     formatDailyStatus(row),
     row.late ? 'Yes' : 'No',
     row.full_day ? 'Yes' : 'No',
-    formatPunchTimingsForCsv(row.punches),
+    formatPunchTimingsForCsv(row.punches, timezone),
     formatDailyTotalHours(row),
     row.overtime_hours ?? 0,
   ]);

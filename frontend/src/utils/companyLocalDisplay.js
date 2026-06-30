@@ -52,3 +52,16 @@ export function formatYmdLong(ymd, timezone = IST) {
     year: 'numeric',
   });
 }
+
+/** Add calendar days to YYYY-MM-DD in the given IANA timezone. */
+export function addDaysYmd(ymd, deltaDays, timezone = IST) {
+  const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return todayYmdInTimezone(timezone);
+  const ref = new Date(`${m[1]}-${m[2]}-${m[3]}T12:00:00Z`);
+  ref.setUTCDate(ref.getUTCDate() + Number(deltaDays || 0));
+  return ref.toLocaleDateString('en-CA', { timeZone: timezone || IST });
+}
+
+export function yesterdayYmdFrom(ymd, timezone = IST) {
+  return addDaysYmd(ymd, -1, timezone);
+}
