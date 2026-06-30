@@ -49,6 +49,15 @@ function money(n) {
   return `Rs ${formatMoney(n)}`;
 }
 
+function resolvePayslipCompany(company, breakdown) {
+  const fromBreakdown = breakdown?.company || null;
+  return {
+    name: company?.name || company?.company_name || fromBreakdown?.name || '',
+    phone: company?.phone || fromBreakdown?.phone || '',
+    address: company?.address || fromBreakdown?.address || '',
+  };
+}
+
 function formatDayCount(value) {
   if (value == null || Number.isNaN(Number(value))) return '—';
   const num = Number(value);
@@ -279,19 +288,20 @@ function renderCompactPayslip(
   const att = breakdown?.attendance || {};
   const b = breakdown?.breakdown || {};
   const allowOvertime = Boolean(att.allowOvertime ?? b.allowOvertime);
+  const payslipCompany = resolvePayslipCompany(company, breakdown);
   let y = slotY + layout.startY;
 
   doc.setFontSize(layout.companyTitleSize);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(String(company?.name || 'Company'), centerX, y, { align: 'center' });
+  doc.text(String(payslipCompany.name || 'Company'), centerX, y, { align: 'center' });
 
   y += layout.companyTitleSize + 1;
   if (layoutKey === 'a5') {
     doc.setFontSize(7);
     doc.setFont(undefined, 'normal');
     doc.setTextColor(100, 116, 139);
-    const companyLine = [company?.address, company?.phone].filter(Boolean).join(' | ');
+    const companyLine = [payslipCompany.address, payslipCompany.phone].filter(Boolean).join(' | ');
     if (companyLine) {
       const lines = doc.splitTextToSize(companyLine, contentWidth);
       doc.text(lines, centerX, y, { align: 'center' });
@@ -537,8 +547,10 @@ export function buildBulkPayslipsDoc(company, rows, payloads, payrollMode, forma
   const doc = createPdf({ orientation: 'p', format: 'a4' });
   const items = rows.map((row, i) => {
     const payload = payloads[i];
+    const breakdown = payload?.breakdown;
+    const resolvedCompany = resolvePayslipCompany(company, breakdown);
     return {
-      company,
+      company: resolvedCompany.name ? resolvedCompany : company,
       employeeName: row.employee_name,
       employeeCode: row.employee_code,
       periodLabel: formatPayslipPeriodLabel(row, payrollMode),

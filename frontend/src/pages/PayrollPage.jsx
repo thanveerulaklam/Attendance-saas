@@ -1455,6 +1455,21 @@ export default function PayrollPage() {
     };
   }
 
+  async function ensureCompanyForPayslipExport() {
+    if (company?.name) return company;
+    try {
+      const res = await authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          setCompany(json.data);
+          return json.data;
+        }
+      }
+    } catch (_) {}
+    return company;
+  }
+
   async function downloadPayslipsPdf(rows) {
     if (!rows.length) {
       setToast({ type: 'error', message: 'No payroll records selected' });
@@ -1475,8 +1490,10 @@ export default function PayrollPage() {
         });
       }
 
+      const exportCompany = await ensureCompanyForPayslipExport();
+
       const doc = buildBulkPayslipsDoc(
-        company,
+        exportCompany,
         rows,
         payloadByIndex,
         payrollMode,
@@ -1531,8 +1548,10 @@ export default function PayrollPage() {
         });
       }
 
+      const exportCompany = await ensureCompanyForPayslipExport();
+
       const doc = buildBulkPayslipsDoc(
-        company,
+        exportCompany,
         rows,
         payloadByIndex,
         payrollMode,

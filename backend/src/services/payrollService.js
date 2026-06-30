@@ -38,6 +38,20 @@ async function withCompanyIdTimezone(companyId, fn) {
   return runWithCompanyTimezone(tz, fn);
 }
 
+async function getCompanyProfileForPayslip(companyId) {
+  const result = await pool.query(
+    `SELECT name, phone, address FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    name: row.name,
+    phone: row.phone,
+    address: row.address,
+  };
+}
+
 async function assertEmployeePayrollScope(companyId, employeeId, allowedBranchIds) {
   if (allowedBranchIds == null) return;
   const r = await pool.query(
@@ -2347,8 +2361,10 @@ async function getWeeklyPayrollBreakdown(
 
   const salaryAdvance = Number(weekPayrollRow.salary_advance || 0);
   const netSalary = Number(weekPayrollRow.net_salary || 0);
+  const companyProfile = await getCompanyProfileForPayslip(companyId);
 
   return {
+    company: companyProfile,
     employee: {
       id: employee.id,
       name: employee.name,
@@ -3099,6 +3115,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
         )
       : grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
 
+  const companyProfile = await getCompanyProfileForPayslip(companyId);
+
   /** Attendance numbers shown on payslip: match payroll run when snapshot exists. */
   const presentDaysForDisplay =
     payrollRecordSnap != null
@@ -3116,6 +3134,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   }
 
   return {
+    company: companyProfile,
     employee: {
       id: employee.id,
       name: employee.name,
