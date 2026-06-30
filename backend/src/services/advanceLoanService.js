@@ -1,5 +1,6 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { todayYmd } = require('../utils/companyDate');
 
 function toMoney(value) {
   const n = Number(value);
@@ -40,6 +41,37 @@ function isOnOrBeforeMonth(year, month, compareYear, compareMonth) {
   const cy = Number(compareYear);
   const cm = Number(compareMonth);
   return y < cy || (y === cy && m <= cm);
+}
+
+function isBeforeMonth(year, month, compareYear, compareMonth) {
+  const y = Number(year);
+  const m = Number(month);
+  const cy = Number(compareYear);
+  const cm = Number(compareMonth);
+  return y < cy || (y === cy && m < cm);
+}
+
+function isAfterMonth(year, month, compareYear, compareMonth) {
+  const y = Number(year);
+  const m = Number(month);
+  const cy = Number(compareYear);
+  const cm = Number(compareMonth);
+  return y > cy || (y === cy && m > cm);
+}
+
+function isFlexibleLoan(loan) {
+  return Number(loan.total_installments || 1) === 1;
+}
+
+async function getCompanyCalendarMonth(companyId, queryable = pool) {
+  const result = await queryable.query(
+    `SELECT timezone FROM companies WHERE id = $1`,
+    [companyId]
+  );
+  const tz = result.rows[0]?.timezone?.trim() || 'Asia/Kolkata';
+  const today = todayYmd(tz);
+  const [year, month] = today.split('-').map(Number);
+  return { year, month, timezone: tz };
 }
 
 async function insertPendingRepayment(client, loan, companyId, year, month, amount, notes = null) {
@@ -101,6 +133,165 @@ async function insertPendingRepayment(client, loan, companyId, year, month, amou
 }
 
 /**
+ * Single-installment loans track one "next deduction" month at a time.
+ * Default to the payroll/current month; roll forward only when that month passes unpaid.
+ */
+async function syncFlexibleLoanDeduction(
+  client,
+  loan,
+  companyId,
+  payrollYear,
+  payrollMonth,
+  currentYm,
+  payrollIsFuture
+) {
+  const targetYear = payrollIsFuture ? currentYm.year : payrollYear;
+  const targetMonth = payrollIsFuture ? currentYm.month : payrollMonth;
+  const amount = toMoney(
+    Math.min(
+      Number(loan.monthly_installment || 0),
+      Number(loan.outstanding_balance || 0)
+    )
+  );
+  if (amount <= 0) return;
+
+  const pendingResult = await client.query(
+    `SELECT id, year, month, repayment_amount
+     FROM employee_advance_repayments
+     WHERE company_id = $1 AND loan_id = $2 AND status = 'pending'
+     ORDER BY year ASC, month ASC`,
+    [companyId, loan.id]
+  );
+  const pending = pendingResult.rows;
+  const rollNote = `Moved to ${targetMonth}/${targetYear} for payroll`;
+
+  if (pending.length === 0) {
+    await insertPendingRepayment(
+      client,
+      loan,
+      companyId,
+      targetYear,
+      targetMonth,
+      amount,
+      'Auto-scheduled from outstanding balance'
+    );
+    return;
+  }
+
+  const consolidatedAmount = toMoney(
+    Math.min(
+      pending.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0),
+      Number(loan.outstanding_balance || 0)
+    )
+  );
+  const primary = pending[0];
+  const primaryYear = Number(primary.year);
+  const primaryMonth = Number(primary.month);
+  const ty = Number(targetYear);
+  const tm = Number(targetMonth);
+  const needsMove =
+    pending.length > 1 ||
+    isBeforeMonth(primaryYear, primaryMonth, ty, tm) ||
+    isAfterMonth(primaryYear, primaryMonth, ty, tm);
+
+  if (!needsMove) {
+    if (consolidatedAmount !== Number(primary.repayment_amount || 0)) {
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET repayment_amount = $3,
+             suggested_amount = $3,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, primary.id, consolidatedAmount]
+      );
+    }
+    return;
+  }
+
+  for (let i = 1; i < pending.length; i += 1) {
+    await client.query(
+      `UPDATE employee_advance_repayments
+       SET status = 'skipped',
+           notes = CASE
+             WHEN notes IS NULL OR notes = '' THEN 'Consolidated into next deduction'
+             ELSE notes || E'\nConsolidated into next deduction'
+           END,
+           updated_at = NOW()
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, pending[i].id]
+    );
+  }
+
+  if (primaryYear === ty && primaryMonth === tm) {
+    await client.query(
+      `UPDATE employee_advance_repayments
+       SET repayment_amount = $3,
+           suggested_amount = $3,
+           updated_at = NOW()
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, primary.id, consolidatedAmount]
+    );
+    return;
+  }
+
+  const targetExists = await client.query(
+    `SELECT id, status, repayment_amount
+     FROM employee_advance_repayments
+     WHERE company_id = $1 AND loan_id = $2 AND year = $3 AND month = $4`,
+    [companyId, loan.id, ty, tm]
+  );
+
+  if (targetExists.rowCount > 0 && targetExists.rows[0].id !== primary.id) {
+    const targetRow = targetExists.rows[0];
+    if (targetRow.status === 'pending') {
+      const mergedAmount = toMoney(
+        Number(targetRow.repayment_amount || 0) + consolidatedAmount
+      );
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET repayment_amount = $3,
+             suggested_amount = $3,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, targetRow.id, mergedAmount]
+      );
+    } else if (targetRow.status === 'skipped') {
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET status = 'pending',
+             repayment_amount = $3,
+             suggested_amount = $3,
+             notes = $4,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, targetRow.id, consolidatedAmount, rollNote]
+      );
+    }
+    await client.query(
+      `UPDATE employee_advance_repayments
+       SET status = 'skipped',
+           notes = CASE WHEN notes IS NULL OR notes = '' THEN $3 ELSE notes || E'\n' || $3 END,
+           updated_at = NOW()
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, primary.id, rollNote]
+    );
+    return;
+  }
+
+  await client.query(
+    `UPDATE employee_advance_repayments
+     SET year = $3,
+         month = $4,
+         repayment_amount = $5,
+         suggested_amount = $5,
+         notes = CASE WHEN notes IS NULL OR notes = '' THEN $6 ELSE notes || E'\n' || $6 END,
+         updated_at = NOW()
+     WHERE company_id = $1 AND id = $2`,
+    [companyId, primary.id, ty, tm, consolidatedAmount, rollNote]
+  );
+}
+
+/**
  * Active loans with outstanding balance must always have a due pending installment
  * for the payroll month (or rolled forward from overdue months).
  */
@@ -113,8 +304,11 @@ async function ensureDueRepaymentsForPayrollMonth(companyId, payrollYear, payrol
   try {
     if (ownClient) await client.query('BEGIN');
 
+    const currentYm = await getCompanyCalendarMonth(companyId, client);
+    const payrollIsFuture = isAfterMonth(py, pm, currentYm.year, currentYm.month);
+
     const loansResult = await client.query(
-      `SELECT id, employee_id, monthly_installment, outstanding_balance
+      `SELECT id, employee_id, monthly_installment, outstanding_balance, total_installments
        FROM employee_advance_loans
        WHERE company_id = $1
          AND status IN ('active', 'on_hold')
@@ -123,6 +317,23 @@ async function ensureDueRepaymentsForPayrollMonth(companyId, payrollYear, payrol
     );
 
     for (const loan of loansResult.rows) {
+      if (isFlexibleLoan(loan)) {
+        await syncFlexibleLoanDeduction(
+          client,
+          loan,
+          companyId,
+          py,
+          pm,
+          currentYm,
+          payrollIsFuture
+        );
+        continue;
+      }
+
+      if (payrollIsFuture) {
+        continue;
+      }
+
       const pendingResult = await client.query(
         `SELECT id, year, month, repayment_amount
          FROM employee_advance_repayments
@@ -226,6 +437,10 @@ async function ensureDueRepaymentsForPayrollMonth(companyId, payrollYear, payrol
 }
 
 async function createRepaymentSchedule(client, loan, loanDateStr, installments, monthlyInstallment) {
+  if (Number(installments) <= 1) {
+    return;
+  }
+
   const loanDate = new Date(`${loanDateStr}T00:00:00Z`);
   if (Number.isNaN(loanDate.getTime())) {
     throw new AppError('Invalid loan date provided', 400);
@@ -315,6 +530,12 @@ async function createAdvanceLoan(companyId, data, opts = {}) {
     const loan = loanResult.rows[0];
 
     await createRepaymentSchedule(client, loan, loanDate, totalInstallments, monthlyInstallment);
+    if (totalInstallments <= 1) {
+      const currentYm = await getCompanyCalendarMonth(companyId, client);
+      await ensureDueRepaymentsForPayrollMonth(companyId, currentYm.year, currentYm.month, {
+        client,
+      });
+    }
 
     if (ownClient) await client.query('COMMIT');
 
@@ -333,11 +554,11 @@ async function createAdvanceLoan(companyId, data, opts = {}) {
 }
 
 async function getCompanyLoans(companyId, filters = {}) {
-  const now = new Date();
+  const currentYm = await getCompanyCalendarMonth(companyId);
   await ensureDueRepaymentsForPayrollMonth(
     companyId,
-    filters.year || now.getFullYear(),
-    filters.month || now.getMonth() + 1
+    filters.year ? Number(filters.year) : currentYm.year,
+    filters.month ? Number(filters.month) : currentYm.month
   );
 
   const conditions = ['l.company_id = $1'];
@@ -445,7 +666,12 @@ async function getEmployeeLoans(companyId, employeeId) {
 }
 
 async function getMonthlyRepayments(companyId, year, month) {
-  await ensureDueRepaymentsForPayrollMonth(companyId, year, month);
+  const currentYm = await getCompanyCalendarMonth(companyId);
+  const y = Number(year);
+  const m = Number(month);
+  if (!isAfterMonth(y, m, currentYm.year, currentYm.month)) {
+    await ensureDueRepaymentsForPayrollMonth(companyId, y, m);
+  }
 
   const result = await pool.query(
     `SELECT
@@ -1176,6 +1402,12 @@ async function updateAdvanceLoan(companyId, loanId, data) {
         totalInstallments,
         monthlyInstallment
       );
+      if (totalInstallments <= 1) {
+        const currentYm = await getCompanyCalendarMonth(companyId, client);
+        await ensureDueRepaymentsForPayrollMonth(companyId, currentYm.year, currentYm.month, {
+          client,
+        });
+      }
       await client.query('COMMIT');
       return getLoanById(companyId, loanId);
     }
@@ -1302,5 +1534,8 @@ module.exports = {
   updateAdvanceLoan,
   deleteLoan,
   addCalendarMonths,
+  isBeforeMonth,
+  isAfterMonth,
+  isFlexibleLoan,
   ensureDueRepaymentsForPayrollMonth,
 };
