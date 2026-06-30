@@ -136,5 +136,12 @@ export function resolvePayslipAttendanceDates(breakdown, attendanceDetails) {
     absentDates: filterYmdOnOrBefore(payrollAsOfYmd, rawAbsentDates),
     halfDayDates: filterYmdOnOrBefore(payrollAsOfYmd, rawHalfDayDates),
     lateDetails: filterLateDetailsOnOrBefore(payrollAsOfYmd, rawLateDetails),
+    weeklyOffDates: filterYmdOnOrBefore(
+      payrollAsOfYmd,
+      dayDetails
+        .filter((d) => d?.status === 'weekly_off')
+        .map((d) => d.date)
+        .filter(Boolean)
+    ),
   };
 }

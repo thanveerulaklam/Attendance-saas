@@ -14,6 +14,7 @@ const LAYOUTS = {
     companyTitleSize: 13,
     payslipTitleSize: 10,
     periodSize: 8,
+    employeeNameSize: 14,
     tableFont: 7,
     tablePadding: 4,
     sectionGap: 8,
@@ -26,6 +27,7 @@ const LAYOUTS = {
     companyTitleSize: 8,
     payslipTitleSize: 7,
     periodSize: 6,
+    employeeNameSize: 10,
     tableFont: 5.5,
     tablePadding: 1.5,
     sectionGap: 3,
@@ -62,6 +64,66 @@ function rowsWithAmount(labelValuePairs) {
   return labelValuePairs
     .filter(([, amount]) => Number(amount || 0) !== 0)
     .map(([label, amount]) => [label, money(amount)]);
+}
+
+function buildAdvanceDeductionRows(breakdown, payrollRow) {
+  const b = breakdown?.breakdown || {};
+  const repayments = Array.isArray(breakdown?.advance_repayments) ? breakdown.advance_repayments : [];
+  const diaryAmount = Number(payrollRow?.manual_advance_amount || 0);
+  const loanAmountFromRepayments = repayments.reduce(
+    (sum, row) => sum + Number(row?.this_month_deduction || 0),
+    0
+  );
+  const loanAmount =
+    loanAmountFromRepayments > 0
+      ? loanAmountFromRepayments
+      : Math.max(0, Number(b.salaryAdvance || 0) - diaryAmount);
+
+  const rows = [];
+  if (diaryAmount > 0) {
+    rows.push(['Diary advance', money(diaryAmount)]);
+  }
+  if (loanAmount > 0) {
+    rows.push(['Loan repayment', money(loanAmount)]);
+  }
+
+  const pendingLoanBalance = Number(b.pendingAdvanceBalance || 0);
+  if (pendingLoanBalance > 0) {
+    rows.push(['Loan balance pending', money(pendingLoanBalance)]);
+  }
+
+  return rows;
+}
+
+function buildAttendanceRows(breakdown, attendanceDetails) {
+  const att = breakdown?.attendance || {};
+  const allowOvertime = Boolean(att.allowOvertime ?? breakdown?.breakdown?.allowOvertime);
+  const { absentDates, lateDetails, weeklyOffDates } = resolvePayslipAttendanceDates(
+    breakdown,
+    attendanceDetails
+  );
+
+  const rows = [
+    ['Working days', String(att.workingDays ?? '—')],
+    ['Present', `${formatDayCount(att.presentDays)} d`],
+    ['Absent', `${formatDayCount(att.absenceDays)} d`],
+  ];
+
+  if (weeklyOffDates.length > 0) {
+    rows.push(['Week off / holidays', `${weeklyOffDates.length} d`]);
+    rows.push(['Week off dates', formatGroupedDayNumbersText(weeklyOffDates)]);
+  }
+
+  rows.push(['Late', `${att.lateDays ?? 0}`]);
+
+  if (allowOvertime) {
+    rows.push(['Overtime', `${formatHours(att.overtimeHours)} h`]);
+  }
+
+  rows.push(['Absent dates', formatGroupedDayNumbersText(absentDates)]);
+  rows.push(['Late dates', formatGroupedLateDetailsText(lateDetails)]);
+
+  return rows;
 }
 
 function trimPagesAfter(doc, anchorPage) {
@@ -125,6 +187,7 @@ function renderCompactPayslip(
     periodLabel,
     breakdown,
     attendanceDetails,
+    payrollRow = null,
     slot = null,
     layoutKey = 'a5',
     fixedPage = null,
@@ -143,7 +206,7 @@ function renderCompactPayslip(
 
   const att = breakdown?.attendance || {};
   const b = breakdown?.breakdown || {};
-  const { absentDates, lateDetails } = resolvePayslipAttendanceDates(breakdown, attendanceDetails);
+  const allowOvertime = Boolean(att.allowOvertime ?? b.allowOvertime);
   let y = slotY + layout.startY;
 
   doc.setFontSize(layout.companyTitleSize);
@@ -175,6 +238,14 @@ function renderCompactPayslip(
   doc.text(`Period: ${periodLabel}`, centerX, y, { align: 'center' });
   y += layout.periodSize + layout.sectionGap;
 
+  doc.setFontSize(layout.employeeNameSize);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(15, 23, 42);
+  const employeeLine = `${employeeName || '—'} (${employeeCode || '—'})`;
+  const nameLines = doc.splitTextToSize(employeeLine, contentWidth);
+  doc.text(nameLines, marginLeft, y);
+  y += nameLines.length * (layout.employeeNameSize + 1) + layout.sectionGap / 2;
+
   y =
     drawPayslipTable(doc, {
       fixedPage,
@@ -185,7 +256,6 @@ function renderCompactPayslip(
       startY: y,
       head: [['Employee details', '']],
       body: [
-        ['Name', `${employeeName || '—'} (${employeeCode || '—'})`],
         ['Department', attendanceDetails?.department || '—'],
         ['Shift', attendanceDetails?.shift_name || '—'],
         [
@@ -204,15 +274,7 @@ function renderCompactPayslip(
       layout,
       startY: y,
       head: [['Attendance', '']],
-      body: [
-        ['Working days', String(att.workingDays ?? '—')],
-        ['Present', `${formatDayCount(att.presentDays)} d`],
-        ['Absent', `${formatDayCount(att.absenceDays)} d`],
-        ['Late', `${att.lateDays ?? 0}`],
-        ['Overtime', `${formatHours(att.overtimeHours)} h`],
-        ['Absent dates', formatGroupedDayNumbersText(absentDates)],
-        ['Late dates', formatGroupedLateDetailsText(lateDetails)],
-      ],
+      body: buildAttendanceRows(breakdown, attendanceDetails),
       columnStylesOverride: {
         0: { cellWidth: layout === LAYOUTS.a5 ? 58 : 42 },
         1: { halign: 'left', cellWidth: 'auto' },
@@ -223,7 +285,7 @@ function renderCompactPayslip(
     ['Earned basic', b.basicSalary],
     ['Travel', b.travelAllowance],
     ['Other allow.', b.otherAllowance],
-    ['Overtime', b.overtimePay],
+    ...(allowOvertime ? [['Overtime', b.overtimePay]] : []),
     ['Leave encash', b.paidLeaveEncashmentAmount],
     ['Incentive', b.noLeaveIncentive],
   ]);
@@ -235,8 +297,8 @@ function renderCompactPayslip(
     ['Lunch', b.lunchOverDeduction],
     ['ESI', b.esiDeduction],
     ['PF', b.pfDeduction],
-    ['Advance', b.salaryAdvance],
   ]);
+  deductionRows.push(...buildAdvanceDeductionRows(breakdown, payrollRow));
   const permissionOffset = Number(b.permissionOffsetAmount || 0);
   if (permissionOffset > 0) {
     deductionRows.push(['Perm. offset', `(Rs ${formatMoney(permissionOffset)})`]);
@@ -387,6 +449,7 @@ export function buildBulkPayslipsDoc(company, rows, payloads, payrollMode, forma
       periodLabel: formatPayslipPeriodLabel(row, payrollMode),
       breakdown: payload.breakdown,
       attendanceDetails: payload.attendanceMeta,
+      payrollRow: row,
     };
   });
   addBulkCompactPayslipsToDoc(doc, items);
