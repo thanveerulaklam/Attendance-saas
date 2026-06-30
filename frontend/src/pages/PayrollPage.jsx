@@ -1116,7 +1116,7 @@ export default function PayrollPage() {
       const res = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date, action }),
+        body: JSON.stringify({ date: String(date).slice(0, 10), action }),
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));

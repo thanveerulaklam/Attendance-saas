@@ -1,11 +1,22 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 
-function parseDateOnly(value) {
+function normalizeAttendanceDateKey(value) {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new AppError('date must be a valid date', 400);
+    }
+    return value.toISOString().slice(0, 10);
+  }
   const str = String(value || '').trim().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     throw new AppError('date must be YYYY-MM-DD', 400);
   }
+  return str;
+}
+
+function parseDateOnly(value) {
+  const str = normalizeAttendanceDateKey(value);
   const parsed = new Date(`${str}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) {
     throw new AppError('date must be a valid date', 400);
@@ -35,7 +46,7 @@ async function loadOverridesMap(client, companyId, employeeId, startDate, endDat
   try {
     const result = await client.query(
       `SELECT
-         attendance_date::text AS date,
+         to_char(attendance_date, 'YYYY-MM-DD') AS date,
          override_status,
          note
        FROM attendance_day_overrides
@@ -47,7 +58,7 @@ async function loadOverridesMap(client, companyId, employeeId, startDate, endDat
     );
     const map = new Map();
     for (const row of result.rows) {
-      map.set(String(row.date).slice(0, 10), row);
+      map.set(normalizeAttendanceDateKey(row.date), row);
     }
     return map;
   } catch (err) {
@@ -131,24 +142,30 @@ async function removeDayOverride(companyId, employeeIdRaw, date, allowedBranchId
   const client = await pool.connect();
   try {
     await assertEmployeeInScope(client, companyId, employeeId, allowedBranchIds);
-    const result = await client.query(
-      `DELETE FROM attendance_day_overrides
-       WHERE company_id = $1
-         AND employee_id = $2
-         AND attendance_date = $3::date
-       RETURNING id`,
-      [companyId, employeeId, attendanceDate]
-    );
-    if (result.rowCount === 0) {
-      throw new AppError('Override not found', 404);
+    try {
+      const result = await client.query(
+        `DELETE FROM attendance_day_overrides
+         WHERE company_id = $1
+           AND employee_id = $2
+           AND to_char(attendance_date, 'YYYY-MM-DD') = $3
+         RETURNING id`,
+        [companyId, employeeId, attendanceDate]
+      );
+      // Clearing is idempotent: payroll should recalculate even if the row was already removed.
+      return { removed: result.rowCount > 0 };
+    } catch (err) {
+      if (err && err.code === '42P01') {
+        return { removed: false };
+      }
+      throw err;
     }
-    return { removed: true };
   } finally {
     client.release();
   }
 }
 
 module.exports = {
+  normalizeAttendanceDateKey,
   loadOverridesMap,
   listOverrides,
   upsertDayOverride,

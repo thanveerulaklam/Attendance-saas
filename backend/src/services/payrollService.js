@@ -20,7 +20,7 @@ const {
 const { getWeeklyOffs } = require('./holidayService');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted, revertRepaymentDeducted, ensureDueRepaymentsForPayrollMonth } = require('./advanceLoanService');
-const { loadOverridesMap } = require('./attendanceOverrideService');
+const { loadOverridesMap, normalizeAttendanceDateKey } = require('./attendanceOverrideService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
 const { resolveShiftIdForEmployeeOnDate } = require('./shiftAssignmentService');
 const {
@@ -176,9 +176,10 @@ function applyAttendanceOverridesToSummary(
   let deltaPresentWorking = 0;
 
   for (const detail of summary.dayDetails) {
-    const ov = overridesMap.get(detail.date);
+    const dayKey = normalizeAttendanceDateKey(detail.date);
+    const ov = overridesMap.get(dayKey);
     if (!ov || ov.override_status !== 'on_duty') continue;
-    if (holidaySet?.has(detail.date)) continue;
+    if (holidaySet?.has(dayKey)) continue;
     if (detail.status === 'on_duty' || detail.status === 'present') continue;
 
     if (detail.status === 'absent') {
