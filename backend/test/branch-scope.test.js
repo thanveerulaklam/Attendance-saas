@@ -37,3 +37,10 @@ test('branch filter: HR list uses ANY array', () => {
   assert.deepEqual(r.params, [[1, 2]]);
   assert.equal(r.nextIndex, 3);
 });
+
+test('branch filter: single selected branch narrows to one id', () => {
+  const r = employeesBranchFilterSql([7], 4);
+  assert.match(r.clause, /\$4::bigint\[\]/);
+  assert.deepEqual(r.params, [[7]]);
+  assert.equal(r.nextIndex, 5);
+});

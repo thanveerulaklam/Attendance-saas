@@ -608,6 +608,26 @@ export default function PayrollPage() {
     return (employees || []).filter((e) => Number(e.branch_id) === bid);
   }, [employees, branchFilter]);
 
+  const employeeBranchById = useMemo(() => {
+    const map = new Map();
+    for (const emp of employees || []) {
+      if (emp?.id != null) map.set(Number(emp.id), Number(emp.branch_id));
+    }
+    return map;
+  }, [employees]);
+
+  const displayRecords = useMemo(() => {
+    if (!branchFilter) return records;
+    const bid = Number(branchFilter);
+    if (!Number.isFinite(bid)) return records;
+    return (records || []).filter((row) => {
+      if (row.branch_id != null && row.branch_id !== '') {
+        return Number(row.branch_id) === bid;
+      }
+      return employeeBranchById.get(Number(row.employee_id)) === bid;
+    });
+  }, [records, branchFilter, employeeBranchById]);
+
   const modalBranchId =
     payrollMode === 'monthly' ? generateForm.branch_id : weeklyGenerateForm.branch_id;
 
@@ -662,7 +682,9 @@ export default function PayrollPage() {
 
   useEffect(() => {
     let isMounted = true;
-    authFetch('/api/employees?limit=200', {
+    const params = new URLSearchParams({ limit: '200' });
+    if (branchFilter) params.set('branch_id', branchFilter);
+    authFetch(`/api/employees?${params.toString()}`, {
       headers: { 'Content-Type': 'application/json' },
     })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load employees'))))
@@ -671,7 +693,7 @@ export default function PayrollPage() {
       })
       .catch(() => {});
     return () => { isMounted = false; };
-  }, []);
+  }, [branchFilter]);
 
   useEffect(() => {
     let isMounted = true;
@@ -801,15 +823,15 @@ export default function PayrollPage() {
   }, [payrollMode, year, month, employeeId, branchFilter, reloadKey]);
 
   const allOnPageSelected =
-    records.length > 0 && records.every((r) => selectedPayroll.has(r.id));
-  const someOnPageSelected = records.some((r) => selectedPayroll.has(r.id));
+    displayRecords.length > 0 && displayRecords.every((r) => selectedPayroll.has(r.id));
+  const someOnPageSelected = displayRecords.some((r) => selectedPayroll.has(r.id));
 
   useEffect(() => {
     const el = selectAllHeaderRef.current;
     if (el) {
       el.indeterminate = someOnPageSelected && !allOnPageSelected;
     }
-  }, [someOnPageSelected, allOnPageSelected, records]);
+  }, [someOnPageSelected, allOnPageSelected, displayRecords]);
 
   useEffect(() => {
     try {
@@ -1164,9 +1186,9 @@ export default function PayrollPage() {
     setSelectedPayroll((prev) => {
       const next = new Map(prev);
       if (checked) {
-        records.forEach((r) => next.set(r.id, r));
+        displayRecords.forEach((r) => next.set(r.id, r));
       } else {
-        records.forEach((r) => next.delete(r.id));
+        displayRecords.forEach((r) => next.delete(r.id));
       }
       return next;
     });
@@ -2334,7 +2356,7 @@ export default function PayrollPage() {
               />
             ))}
           </div>
-        ) : records.length === 0 ? (
+        ) : displayRecords.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-8 text-center text-xs text-slate-500">
             No payroll records for this period. Use &quot;Generate payroll&quot; to create records from attendance.
           </div>
@@ -2410,7 +2432,7 @@ export default function PayrollPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {records.map((row) => (
+                  {displayRecords.map((row) => (
                     <tr
                       key={row.id}
                       onClick={() => openDetailModal(row)}

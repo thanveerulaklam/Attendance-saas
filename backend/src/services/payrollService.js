@@ -51,6 +51,20 @@ async function assertEmployeePayrollScope(companyId, employeeId, allowedBranchId
     throw new AppError('Employee not found for this company', 404);
   }
 }
+
+function employeeBranchFilterSql(allowedBranchIds, paramIndex, columnName = 'e.branch_id') {
+  if (allowedBranchIds == null) {
+    return { clause: '', params: [], nextIndex: paramIndex };
+  }
+  if (allowedBranchIds.length === 0) {
+    return { clause: ' AND FALSE', params: [], nextIndex: paramIndex };
+  }
+  return {
+    clause: ` AND ${columnName} = ANY($${paramIndex}::bigint[])`,
+    params: [allowedBranchIds],
+    nextIndex: paramIndex + 1,
+  };
+}
 const TZ_OFFSETS = { 'Asia/Kolkata': '+05:30', 'Asia/Calcutta': '+05:30', UTC: 'Z', 'Etc/UTC': 'Z' };
 
 /**
@@ -1983,7 +1997,6 @@ async function listWeeklyPayrollRecords(
     page = 1,
     limit = 20,
     employee_id: employeeId,
-    branch_id: branchId,
     allowedBranchIds = null,
   } = {}
 ) {
@@ -2010,17 +2023,13 @@ async function listWeeklyPayrollRecords(
     params.push(Number(employeeId));
     paramIndex += 1;
   }
-  if (branchId != null && branchId !== '') {
-    conditions.push(`e.branch_id = $${paramIndex}`);
-    params.push(Number(branchId));
-    paramIndex += 1;
-  }
 
-  if (allowedBranchIds != null) {
-    conditions.push(`e.branch_id = ANY($${paramIndex}::bigint[])`);
-    params.push(allowedBranchIds);
-    paramIndex += 1;
+  const bf = employeeBranchFilterSql(allowedBranchIds, paramIndex, 'e.branch_id');
+  if (bf.clause) {
+    conditions.push(bf.clause.replace(/^ AND /, ''));
   }
+  params.push(...bf.params);
+  paramIndex = bf.nextIndex;
 
   const whereClause = conditions.join(' AND ');
 
@@ -2052,6 +2061,8 @@ async function listWeeklyPayrollRecords(
        w.generated_at,
        e.name AS employee_name,
        e.employee_code AS employee_code,
+       e.branch_id AS branch_id,
+       b.name AS branch_name,
        (SELECT COALESCE(SUM(r.repayment_amount), 0)
         FROM employee_advance_repayments r
         WHERE r.company_id = w.company_id
@@ -2103,6 +2114,7 @@ async function listWeeklyPayrollRecords(
        END AS payment_status
      FROM weekly_payroll_records w
      INNER JOIN employees e ON e.id = w.employee_id AND e.company_id = w.company_id
+     LEFT JOIN branches b ON b.id = e.branch_id AND b.company_id = e.company_id
      WHERE ${whereClause}
      ORDER BY w.week_start_date DESC, e.name ASC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
@@ -3121,7 +3133,6 @@ async function listPayrollRecords(
     page = 1,
     limit = 20,
     employee_id: employeeId,
-    branch_id: branchId,
     allowedBranchIds = null,
   } = {}
 ) {
@@ -3157,16 +3168,13 @@ async function listPayrollRecords(
     params.push(Number(employeeId));
     paramIndex += 1;
   }
-  if (branchId != null && branchId !== '') {
-    conditions.push(`e.branch_id = $${paramIndex}`);
-    params.push(Number(branchId));
-    paramIndex += 1;
+
+  const bf = employeeBranchFilterSql(allowedBranchIds, paramIndex, 'e.branch_id');
+  if (bf.clause) {
+    conditions.push(bf.clause.replace(/^ AND /, ''));
   }
-  if (allowedBranchIds != null) {
-    conditions.push(`e.branch_id = ANY($${paramIndex}::bigint[])`);
-    params.push(allowedBranchIds);
-    paramIndex += 1;
-  }
+  params.push(...bf.params);
+  paramIndex = bf.nextIndex;
 
   const whereClause = conditions.join(' AND ');
 
@@ -3201,6 +3209,8 @@ async function listPayrollRecords(
         p.generated_at,
         e.name AS employee_name,
         e.employee_code AS employee_code,
+        e.branch_id AS branch_id,
+        b.name AS branch_name,
         (SELECT COALESCE(SUM(r.repayment_amount), 0)
          FROM employee_advance_repayments r
          WHERE r.company_id = p.company_id
@@ -3252,6 +3262,7 @@ async function listPayrollRecords(
         END AS payment_status
      FROM payroll_records p
      INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+     LEFT JOIN branches b ON b.id = e.branch_id AND b.company_id = e.company_id
      WHERE ${whereClause}
      ORDER BY p.year DESC, p.month DESC, e.name ASC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,

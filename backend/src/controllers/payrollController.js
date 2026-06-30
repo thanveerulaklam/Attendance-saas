@@ -24,12 +24,12 @@ const { resolveBranchScope } = require('../utils/branchScope');
 
 /**
  * GET /api/payroll
- * Query: year?, month?, page?, limit?, employee_id?
+ * Query: year?, month?, page?, limit?, employee_id?, branch_id?
  */
 async function list(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { year, month, page, limit, employee_id: employeeId, branch_id: branchId } = req.query || {};
+    const { year, month, page, limit, employee_id: employeeId, branch_id: branchIdRaw } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -38,14 +38,19 @@ async function list(req, res, next) {
       });
     }
 
+    const allowedBranchIds = await resolveBranchScope({
+      companyId,
+      allowedBranchIds: req.allowedBranchIds,
+      requestedBranchId: branchIdRaw,
+    });
+
     const result = await listPayrollRecords(companyId, {
       year,
       month,
       page,
       limit,
       employee_id: employeeId,
-      branch_id: branchId,
-      allowedBranchIds: req.allowedBranchIds,
+      allowedBranchIds,
     });
 
     return res.json({
@@ -226,12 +231,12 @@ async function breakdown(req, res, next) {
 
 /**
  * GET /api/payroll/weekly
- * Query: week_start_date?, page?, limit?, employee_id?
+ * Query: week_start_date?, page?, limit?, employee_id?, branch_id?
  */
 async function listWeekly(req, res, next) {
   try {
     const companyId = req.companyId;
-    const { week_start_date: weekStartDate, page, limit, employee_id: employeeId, branch_id: branchId } = req.query || {};
+    const { week_start_date: weekStartDate, page, limit, employee_id: employeeId, branch_id: branchIdRaw } = req.query || {};
 
     if (!companyId) {
       return res.status(400).json({
@@ -240,13 +245,18 @@ async function listWeekly(req, res, next) {
       });
     }
 
+    const allowedBranchIds = await resolveBranchScope({
+      companyId,
+      allowedBranchIds: req.allowedBranchIds,
+      requestedBranchId: branchIdRaw,
+    });
+
     const result = await listWeeklyPayrollRecords(companyId, {
       week_start_date: weekStartDate,
       page,
       limit,
       employee_id: employeeId,
-      branch_id: branchId,
-      allowedBranchIds: req.allowedBranchIds,
+      allowedBranchIds,
     });
 
     return res.json({
