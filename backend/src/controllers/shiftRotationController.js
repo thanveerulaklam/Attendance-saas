@@ -9,6 +9,7 @@ const {
   listRotationGroups,
   createRotationGroup,
   updateRotationGroupMembers,
+  importRotationGroupMembersFromAssignments,
   deleteRotationGroup,
   buildRotationPreview,
   rotateGroupNow,
@@ -146,6 +147,23 @@ async function putGroupMembers(req, res, next) {
   }
 }
 
+async function postImportMembers(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const groupId = Number(req.params.id);
+    if (!companyId || !Number.isInteger(groupId)) {
+      return res.status(400).json({ success: false, message: 'Invalid request' });
+    }
+    const body = req.body || {};
+    const result = await importRotationGroupMembersFromAssignments(companyId, groupId, {
+      asOfDate: body.as_of || body.asOf,
+    });
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deleteGroup(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -186,6 +204,7 @@ module.exports = {
   getGroups,
   postGroup,
   putGroupMembers,
+  postImportMembers,
   deleteGroup,
   postRotateNow,
 };

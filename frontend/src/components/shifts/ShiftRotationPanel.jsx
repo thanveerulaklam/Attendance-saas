@@ -21,7 +21,9 @@ export default function ShiftRotationPanel({ shifts }) {
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
   const [rotatingId, setRotatingId] = useState(null);
+  const [importingId, setImportingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [success, setSuccess] = useState('');
   const [form, setForm] = useState({
     name: '',
     shift_a_id: '',
@@ -35,6 +37,7 @@ export default function ShiftRotationPanel({ shifts }) {
     try {
       setLoading(true);
       setError(null);
+      setSuccess('');
       const [groupRes, empRes] = await Promise.all([
         authFetch('/api/shift-rotation/rotation-groups'),
         authFetch('/api/employees?limit=500'),
@@ -112,6 +115,44 @@ export default function ShiftRotationPanel({ shifts }) {
       setError(err.message || 'Rotation failed');
     } finally {
       setRotatingId(null);
+    }
+  };
+
+  const handleImport = async (group) => {
+    const asOf = new Date().toISOString().slice(0, 10);
+    const shiftList = [group.shift_a_name, group.shift_b_name, group.shift_c_name]
+      .filter(Boolean)
+      .join(' or ');
+    const hasMembers = (group.members || []).length > 0;
+    const message = hasMembers
+      ? `Replace members in "${group.name}" with everyone currently assigned to ${shiftList} as of ${asOf}?`
+      : `Import everyone currently assigned to ${shiftList} as of ${asOf} into "${group.name}"?`;
+    if (!window.confirm(message)) return;
+
+    try {
+      setImportingId(group.id);
+      setError(null);
+      setSuccess('');
+      const res = await authFetch(`/api/shift-rotation/rotation-groups/${group.id}/import-members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ as_of: asOf }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Import failed');
+      const result = json.data || {};
+      const parts = [
+        `${result.imported ?? 0} employee(s) imported`,
+        group.shift_a_name ? `${result.by_slot?.A ?? 0} on ${group.shift_a_name}` : null,
+        group.shift_b_name ? `${result.by_slot?.B ?? 0} on ${group.shift_b_name}` : null,
+        group.shift_c_name ? `${result.by_slot?.C ?? 0} on ${group.shift_c_name}` : null,
+      ].filter(Boolean);
+      setSuccess(parts.join(' · '));
+      await load();
+    } catch (err) {
+      setError(err.message || 'Import failed');
+    } finally {
+      setImportingId(null);
     }
   };
 
@@ -197,15 +238,21 @@ export default function ShiftRotationPanel({ shifts }) {
       <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-700">
         <p className="font-medium text-slate-900">What to do here (optional)</p>
         <p className="mt-1">
-          Pick the shifts that swap (e.g. Day and Night), add employees to their current shift in
-          the cycle, and set how many weeks between swaps. Use <strong>Rotate now</strong> for an
-          immediate swap, or wait for the next rotation date.
+          Pick the shifts that swap (e.g. Day and Night), then use{' '}
+          <strong>Import from assignments</strong> to pull in everyone already on those shifts from
+          the Assignments tab. Set how many weeks between swaps, then use <strong>Rotate now</strong>{' '}
+          for an immediate swap or wait for the next rotation date.
         </p>
       </div>
 
       {error && (
         <div className="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
           {error}
+        </div>
+      )}
+      {success && (
+        <div className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+          {success}
         </div>
       )}
 
@@ -370,12 +417,27 @@ export default function ShiftRotationPanel({ shifts }) {
             )}
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-medium text-slate-700">
-                <span>Members</span>
-                <span className="font-normal text-slate-500">Current shift</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-[11px] font-medium text-slate-700">
+                  <span>Members</span>
+                  <span className="font-normal text-slate-500">Current shift</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleImport(group)}
+                  disabled={
+                    importingId === group.id || rotatingId === group.id || deletingId === group.id
+                  }
+                  className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                >
+                  {importingId === group.id ? 'Importing…' : 'Import from assignments'}
+                </button>
               </div>
               {(group.members || []).length === 0 ? (
-                <p className="text-[11px] text-slate-500">No members yet.</p>
+                <p className="text-[11px] text-slate-500">
+                  No members yet. Use <strong>Import from assignments</strong> after assigning staff
+                  on the Assignments tab, or add employees manually below.
+                </p>
               ) : (
                 <ul className="divide-y divide-slate-100 rounded-lg border border-slate-100">
                   {group.members.map((m) => (

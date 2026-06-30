@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { addDaysIst, todayIstYmd } = require('../utils/istDate');
 const { assertShiftRotationEnabled } = require('./shiftRotationPolicyService');
-const { assignShiftBulk } = require('./shiftAssignmentService');
+const { assignShiftBulk, listEffectiveShiftAssignments } = require('./shiftAssignmentService');
 
 function addWeeksIso(dateStr, weeks) {
   return addDaysIst(dateStr, weeks * 7);
@@ -22,6 +22,14 @@ function rotateSlot(slot, hasThreeShifts) {
     return 'A';
   }
   return slot === 'A' ? 'B' : 'A';
+}
+
+function shiftIdToSlot(group, shiftId) {
+  const sid = Number(shiftId);
+  if (sid === Number(group.shift_a_id)) return 'A';
+  if (sid === Number(group.shift_b_id)) return 'B';
+  if (group.shift_c_id != null && sid === Number(group.shift_c_id)) return 'C';
+  return null;
 }
 
 async function listRotationGroups(companyId) {
@@ -136,6 +144,43 @@ async function updateRotationGroupMembers(companyId, groupId, members) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * Sync rotation group members from effective shift assignments on a date.
+ * Employees on shift A/B/C in the group are added with matching slots; others are removed.
+ */
+async function importRotationGroupMembersFromAssignments(companyId, groupId, { asOfDate } = {}) {
+  await assertShiftRotationEnabled(companyId);
+  const gid = Number(groupId);
+  const groupR = await pool.query(
+    `SELECT * FROM shift_rotation_groups WHERE company_id = $1 AND id = $2`,
+    [companyId, gid]
+  );
+  if (groupR.rowCount === 0) throw new AppError('Rotation group not found', 404);
+  const group = groupR.rows[0];
+
+  const asOf = String(asOfDate || todayIstYmd()).slice(0, 10);
+  const { data } = await listEffectiveShiftAssignments(companyId, asOf);
+
+  const members = [];
+  for (const row of data) {
+    const slot = shiftIdToSlot(group, row.shift_id);
+    if (!slot) continue;
+    members.push({ employee_id: row.employee_id, slot });
+  }
+
+  const updated = await updateRotationGroupMembers(companyId, gid, members);
+  return {
+    as_of: asOf,
+    imported: members.length,
+    by_slot: {
+      A: members.filter((m) => m.slot === 'A').length,
+      B: members.filter((m) => m.slot === 'B').length,
+      C: members.filter((m) => m.slot === 'C').length,
+    },
+    group: updated,
+  };
 }
 
 async function deleteRotationGroup(companyId, groupId) {
@@ -262,6 +307,7 @@ module.exports = {
   listRotationGroups,
   createRotationGroup,
   updateRotationGroupMembers,
+  importRotationGroupMembersFromAssignments,
   deleteRotationGroup,
   buildRotationPreview,
   rotateGroupNow,
