@@ -239,10 +239,25 @@ async function getShiftConfigMap(companyId, shiftIds) {
     [uniqueIds]
   );
   for (const row of result.rows) {
-    map.set(row.id, rowToShiftConfig(row));
+    map.set(Number(row.id), rowToShiftConfig(row));
   }
   for (const id of uniqueIds) {
-    if (!map.has(id)) map.set(id, defaultConfig);
+    const nid = Number(id);
+    if (!map.has(nid)) map.set(nid, defaultConfig);
+  }
+  return map;
+}
+
+async function getShiftNameMap(companyId, shiftIds) {
+  const map = new Map();
+  const uniqueIds = [...new Set((shiftIds || []).filter(Boolean).map(Number))];
+  if (uniqueIds.length === 0) return map;
+  const result = await pool.query(
+    `SELECT id, shift_name FROM shifts WHERE company_id = $1 AND id = ANY($2::bigint[])`,
+    [companyId, uniqueIds]
+  );
+  for (const row of result.rows) {
+    map.set(Number(row.id), row.shift_name);
   }
   return map;
 }
@@ -922,6 +937,7 @@ async function getDailyAttendance(
 
     const allShiftIds = employees.map((e) => effectiveShiftIds.get(Number(e.id)) ?? e.shift_id);
     const shiftConfigMap = await getShiftConfigMap(companyId, allShiftIds);
+    const shiftNameById = await getShiftNameMap(companyId, allShiftIds);
 
     const ids = employees.map((e) => e.id);
 
@@ -975,8 +991,9 @@ async function getDailyAttendance(
 
     return employees.map((emp) => {
       const effectiveShiftId = effectiveShiftIds.get(Number(emp.id)) ?? emp.shift_id;
+      const shiftIdKey = effectiveShiftId != null ? Number(effectiveShiftId) : null;
       const shiftConfig =
-        shiftConfigMap.get(effectiveShiftId) || shiftConfigMap.get(null);
+        shiftConfigMap.get(shiftIdKey) || shiftConfigMap.get(null);
       let rawDayLogs = logsByEmployee.get(emp.id) || [];
       if (
         shiftConfig.isOvernightClock &&
@@ -1035,6 +1052,8 @@ async function getDailyAttendance(
         branch_name: emp.branch_name || null,
         present: presentForDaily,
         shift_pending: shiftPending,
+        shift_id: shiftIdKey,
+        shift_name: shiftIdKey != null ? shiftNameById.get(shiftIdKey) || null : null,
         late: status.late,
         overtime_hours: Math.round(status.overtimeHours * 100) / 100,
         full_day: status.fullDay,
@@ -1179,7 +1198,7 @@ async function getMonthlyAttendance(
     const empShiftById = new Map(
       employees.map((e) => [
         e.id,
-        shiftConfigMap.get(e.shift_id) || shiftConfigMap.get(null),
+        shiftConfigMap.get(Number(e.shift_id)) || shiftConfigMap.get(null),
       ])
     );
 
@@ -1220,7 +1239,7 @@ async function getMonthlyAttendance(
     const employeesWithDays = [];
     for (const emp of employees) {
       const shiftConfig =
-        shiftConfigMap.get(emp.shift_id) || shiftConfigMap.get(null);
+        shiftConfigMap.get(Number(emp.shift_id)) || shiftConfigMap.get(null);
       const byDay = logsByEmployeeAndDay.get(emp.id) || new Map();
       const empAllLogs = logsByEmployeeAll.get(emp.id) || [];
       const flexibleDailyHours = flexibleHoursMode

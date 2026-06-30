@@ -816,7 +816,14 @@ export default function AttendancePage() {
                       row.present || totalHoursNum > 0 ? formatWorkedHours(totalHoursNum) : '—';
                     return (
                       <tr key={row.employee_id} className="border-t border-slate-100 hover:bg-slate-50/50">
-                        <td className="py-1.5 px-2 font-medium text-slate-800">{row.name}</td>
+                        <td className="py-1.5 px-2 font-medium text-slate-800">
+                          {row.name}
+                          {row.shift_name ? (
+                            <span className="block text-[10px] font-normal text-slate-400">
+                              {row.shift_name}
+                            </span>
+                          ) : null}
+                        </td>
                         <td className="py-1.5 px-2 text-slate-600">{row.employee_code || '—'}</td>
                         <td className="py-1.5 px-2 text-slate-600">{timingsContent}</td>
                         <td className={`py-1.5 px-2 font-medium ${statusCls}`}>
