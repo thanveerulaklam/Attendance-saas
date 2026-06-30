@@ -1063,6 +1063,181 @@ async function markRepaymentPaidManually(companyId, repaymentId, data = {}) {
   return out;
 }
 
+async function updateAdvanceLoan(companyId, loanId, data) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const loanResult = await client.query(
+      `SELECT *
+       FROM employee_advance_loans
+       WHERE company_id = $1 AND id = $2
+       FOR UPDATE`,
+      [companyId, Number(loanId)]
+    );
+    if (loanResult.rowCount === 0) throw new AppError('Loan not found', 404);
+    const loan = loanResult.rows[0];
+
+    if (!['active', 'on_hold'].includes(loan.status)) {
+      throw new AppError('Only active or on-hold loans can be edited', 400);
+    }
+
+    const repaymentsResult = await client.query(
+      `SELECT id, status, repayment_amount
+       FROM employee_advance_repayments
+       WHERE company_id = $1 AND loan_id = $2
+       ORDER BY year ASC, month ASC`,
+      [companyId, Number(loanId)]
+    );
+    const repayments = repaymentsResult.rows;
+    const hasDeducted = repayments.some((row) => row.status === 'deducted');
+    const totalRepaid = toMoney(loan.total_repaid);
+
+    const reason =
+      data.reason !== undefined
+        ? (data.reason ? String(data.reason).trim() : null)
+        : loan.reason;
+    const notes =
+      data.notes !== undefined
+        ? (data.notes ? String(data.notes).trim() : null)
+        : loan.notes;
+
+    const loanAmount =
+      data.loan_amount != null ? toMoney(data.loan_amount) : toMoney(loan.loan_amount);
+    if (loanAmount <= 0) throw new AppError('Invalid loan amount', 400);
+    if (loanAmount < totalRepaid) {
+      throw new AppError(`Loan amount cannot be less than total repaid (${totalRepaid})`, 400);
+    }
+
+    const monthlyInstallment =
+      data.monthly_installment != null
+        ? toMoney(data.monthly_installment)
+        : toMoney(loan.monthly_installment);
+    if (monthlyInstallment <= 0) throw new AppError('Invalid monthly installment', 400);
+
+    const totalInstallments =
+      data.total_installments != null
+        ? parseInt(data.total_installments, 10)
+        : Number(loan.total_installments);
+    if (Number.isNaN(totalInstallments) || totalInstallments < 1) {
+      throw new AppError('Invalid number of installments', 400);
+    }
+
+    const existingLoanDate = parseDateOnly(loan.loan_date);
+    const loanDate = data.loan_date != null ? parseDateOnly(data.loan_date) : existingLoanDate;
+
+    if (hasDeducted) {
+      if (data.loan_date != null && loanDate !== existingLoanDate) {
+        throw new AppError('Loan date cannot be changed after repayments have been deducted', 400);
+      }
+      if (data.total_installments != null && totalInstallments !== Number(loan.total_installments)) {
+        throw new AppError('Installments cannot be changed after repayments have been deducted', 400);
+      }
+    }
+
+    const outstandingBalance = toMoney(loanAmount - totalRepaid);
+
+    if (!hasDeducted) {
+      await client.query(
+        `DELETE FROM employee_advance_repayments
+         WHERE company_id = $1 AND loan_id = $2`,
+        [companyId, Number(loanId)]
+      );
+
+      const updateResult = await client.query(
+        `UPDATE employee_advance_loans
+         SET loan_amount = $3,
+             loan_date = $4,
+             reason = $5,
+             notes = $6,
+             total_installments = $7,
+             monthly_installment = $8,
+             outstanding_balance = $9,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2
+         RETURNING *`,
+        [
+          companyId,
+          Number(loanId),
+          loanAmount,
+          loanDate,
+          reason,
+          notes,
+          totalInstallments,
+          monthlyInstallment,
+          outstandingBalance,
+        ]
+      );
+      const updatedLoan = updateResult.rows[0];
+      await createRepaymentSchedule(
+        client,
+        updatedLoan,
+        loanDate,
+        totalInstallments,
+        monthlyInstallment
+      );
+      await client.query('COMMIT');
+      return getLoanById(companyId, loanId);
+    }
+
+    await client.query(
+      `UPDATE employee_advance_loans
+       SET loan_amount = $3,
+           reason = $4,
+           notes = $5,
+           monthly_installment = $6,
+           outstanding_balance = $7,
+           updated_at = NOW()
+       WHERE company_id = $1 AND id = $2`,
+      [
+        companyId,
+        Number(loanId),
+        loanAmount,
+        reason,
+        notes,
+        monthlyInstallment,
+        outstandingBalance,
+      ]
+    );
+
+    let remainingOutstanding = outstandingBalance;
+    for (const row of repayments.filter((r) => r.status === 'pending')) {
+      const amount = toMoney(Math.min(monthlyInstallment, remainingOutstanding));
+      if (amount <= 0) {
+        await client.query(
+          `UPDATE employee_advance_repayments
+           SET status = 'skipped',
+               notes = CASE
+                 WHEN notes IS NULL OR notes = '' THEN 'Skipped after loan edit'
+                 ELSE notes || E'\nSkipped after loan edit'
+               END,
+               updated_at = NOW()
+           WHERE company_id = $1 AND id = $2`,
+          [companyId, row.id]
+        );
+        continue;
+      }
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET repayment_amount = $3,
+             suggested_amount = $3,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, row.id, amount]
+      );
+      remainingOutstanding = toMoney(remainingOutstanding - amount);
+    }
+
+    await client.query('COMMIT');
+    return getLoanById(companyId, loanId);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 async function deleteLoan(companyId, loanId) {
   const client = await pool.connect();
   try {
@@ -1124,6 +1299,7 @@ module.exports = {
   getEmployeeLoanSummary,
   addLoanToEmployee,
   waiveLoan,
+  updateAdvanceLoan,
   deleteLoan,
   addCalendarMonths,
   ensureDueRepaymentsForPayrollMonth,

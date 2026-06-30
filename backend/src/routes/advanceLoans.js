@@ -4,6 +4,7 @@ const {
   createLoan,
   getEmployeeLoans,
   getMonthly,
+  updateLoan,
   waive,
   remove,
   getOne,
@@ -25,6 +26,7 @@ router.put('/repayments/:repaymentId', withAuth, updateRepayment);
 router.post('/repayments/:repaymentId/adjust', withAuth, adjustRepayment);
 router.post('/repayments/:repaymentId/skip', withAuth, skip);
 router.post('/repayments/:repaymentId/mark-paid', withAuth, markPaid);
+router.put('/:loanId', withAuth, updateLoan);
 router.put('/:loanId/waive', withAuth, waive);
 router.delete('/:loanId', withAuth, remove);
 router.get('/:loanId', withAuth, getOne);

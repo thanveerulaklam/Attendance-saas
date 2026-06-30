@@ -31,6 +31,15 @@ function statusBadge(status) {
   return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${map[status] || map.active}`}>{status}</span>;
 }
 
+function loanDateInputValue(dateStr) {
+  if (!dateStr) return '';
+  const raw = String(dateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toISOString().slice(0, 10);
+}
+
 export default function AdvancesPage() {
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -47,6 +56,10 @@ export default function AdvancesPage() {
   const [toast, setToast] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [editOpen, setEditOpen] = useState(false);
+  const [editLoan, setEditLoan] = useState(null);
+  const [editError, setEditError] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideRepayment, setOverrideRepayment] = useState(null);
   const [skipPending, setSkipPending] = useState(null);
@@ -67,6 +80,14 @@ export default function AdvancesPage() {
   const [overrideForm, setOverrideForm] = useState({
     repayment_amount: '',
     override_reason: '',
+  });
+  const [editForm, setEditForm] = useState({
+    loan_amount: '',
+    loan_date: '',
+    reason: '',
+    total_installments: 1,
+    monthly_installment: '',
+    notes: '',
   });
 
   const activeLoans = useMemo(() => loans.filter((l) => l.status === 'active' || l.status === 'on_hold'), [loans]);
@@ -181,6 +202,84 @@ export default function AdvancesPage() {
     } catch (err) {
       setCreateError(err.message || 'Unable to create loan');
       setToast({ type: 'error', message: err.message || 'Unable to create loan' });
+    }
+  }
+
+  function openEditModal(loan) {
+    setEditLoan(loan);
+    setEditError('');
+    setEditForm({
+      loan_amount: String(loan.loan_amount ?? ''),
+      loan_date: loanDateInputValue(loan.loan_date),
+      reason: loan.reason || '',
+      total_installments: Number(loan.total_installments || 1),
+      monthly_installment: String(loan.monthly_installment ?? ''),
+      notes: loan.notes || '',
+    });
+    setEditOpen(true);
+  }
+
+  function closeEditModal() {
+    setEditOpen(false);
+    setEditLoan(null);
+    setEditError('');
+    setEditSaving(false);
+  }
+
+  async function handleEditLoan() {
+    if (!editLoan || editSaving) return;
+    try {
+      setEditError('');
+      const loanDate = editForm.loan_date || loanDateInputValue(editLoan.loan_date);
+      const installments = parseInt(editForm.total_installments, 10);
+      const monthlyAmount = parseFloat(editForm.monthly_installment);
+      const loanAmount = parseFloat(editForm.loan_amount);
+
+      if (!loanDate) {
+        setEditError('Please select a valid loan date');
+        return;
+      }
+      if (Number.isNaN(installments) || installments < 1) {
+        setEditError('Please enter number of installments');
+        return;
+      }
+      if (Number.isNaN(monthlyAmount) || monthlyAmount <= 0) {
+        setEditError('Please enter monthly installment amount');
+        return;
+      }
+      if (Number.isNaN(loanAmount) || loanAmount <= 0) {
+        setEditError('Please enter a valid loan amount');
+        return;
+      }
+
+      setEditSaving(true);
+      const res = await authFetch(`/api/advance-loans/${editLoan.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          loan_amount: loanAmount,
+          loan_date: loanDate,
+          reason: editForm.reason || null,
+          total_installments: installments,
+          monthly_installment: monthlyAmount,
+          notes: editForm.notes || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to update loan');
+
+      setToast({ type: 'success', message: 'Advance loan updated successfully' });
+      closeEditModal();
+      if (expandedLoanId === editLoan.id) {
+        setExpandedLoanId(null);
+        setExpandedLoan(null);
+      }
+      await loadAll();
+    } catch (err) {
+      setEditError(err.message || 'Unable to update loan');
+      setToast({ type: 'error', message: err.message || 'Unable to update loan' });
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -387,6 +486,7 @@ export default function AdvancesPage() {
                       <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
                       <td className="py-2 pr-3">
                         <button type="button" className="mr-2 text-blue-600" onClick={() => openLoanDetails(loan.id)}>Details</button>
+                        <button type="button" className="mr-2 text-blue-600" onClick={() => openEditModal(loan)}>Edit</button>
                         <button type="button" className="mr-2 text-rose-600" onClick={() => handleWaive(loan.id)}>Waive</button>
                         <button type="button" className="text-rose-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deletePendingLoanId === loan.id} onClick={() => handleDeleteLoan(loan.id)}>
                           {deletePendingLoanId === loan.id ? 'Deleting...' : 'Delete'}
@@ -639,6 +739,90 @@ export default function AdvancesPage() {
               </button>
               <button type="button" onClick={() => handleCreateLoan(Boolean(activeLoanWarning))} className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white">
                 Record Advance Loan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editOpen && editLoan && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-3">
+          <div className="w-full max-w-xl rounded-xl bg-white p-4">
+            <h2 className="text-sm font-semibold text-slate-900">Edit Advance Loan</h2>
+            <p className="mt-1 text-xs text-slate-600">
+              {editLoan.employee_name} ({editLoan.employee_code})
+            </p>
+            {editError && (
+              <div className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                {editError}
+              </div>
+            )}
+            {Number(editLoan.total_repaid || 0) > 0 && (
+              <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                ₹{formatMoney(editLoan.total_repaid)} already repaid. Loan date and installments cannot be changed; you can update amount, EMI, reason, and notes.
+              </div>
+            )}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <input
+                type="number"
+                min="1"
+                placeholder="Loan amount"
+                value={editForm.loan_amount}
+                onChange={(e) => setEditForm((f) => ({ ...f, loan_amount: e.target.value }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+              />
+              <input
+                type="date"
+                value={editForm.loan_date}
+                disabled={Number(editLoan.total_repaid || 0) > 0}
+                onChange={(e) => setEditForm((f) => ({ ...f, loan_date: e.target.value }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs disabled:bg-slate-50 disabled:text-slate-500"
+              />
+              <input
+                type="text"
+                placeholder="Reason (optional)"
+                value={editForm.reason}
+                onChange={(e) => setEditForm((f) => ({ ...f, reason: e.target.value }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+              />
+              <input
+                type="number"
+                min="1"
+                placeholder="Installments"
+                value={editForm.total_installments}
+                disabled={Number(editLoan.total_repaid || 0) > 0}
+                onChange={(e) => setEditForm((f) => ({ ...f, total_installments: e.target.value }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs disabled:bg-slate-50 disabled:text-slate-500"
+              />
+              <input
+                type="number"
+                min="1"
+                placeholder="Monthly installment"
+                value={editForm.monthly_installment}
+                onChange={(e) => setEditForm((f) => ({ ...f, monthly_installment: e.target.value }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+              />
+              <textarea
+                placeholder="Notes (optional)"
+                value={editForm.notes}
+                onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs sm:col-span-2"
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-slate-600">
+              Total repayment plan: ₹{formatMoney((Number(editForm.total_installments || 0) * Number(editForm.monthly_installment || 0)) || 0)}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={closeEditModal} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs">
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={editSaving}
+                onClick={() => void handleEditLoan()}
+                className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+              >
+                {editSaving ? 'Saving...' : 'Save changes'}
               </button>
             </div>
           </div>

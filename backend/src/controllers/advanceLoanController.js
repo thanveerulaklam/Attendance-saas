@@ -51,6 +51,23 @@ async function getMonthly(req, res, next) {
   }
 }
 
+async function updateLoan(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const loanId = Number(req.params.loanId);
+    const data = await service.updateAdvanceLoan(companyId, loanId, req.body || {});
+
+    auditService.log(companyId, req.user?.user_id, 'advance_loan.update', 'employee_advance_loan', loanId, {
+      loan_amount: data.loan_amount,
+      monthly_installment: data.monthly_installment,
+    }).catch(() => {});
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function waive(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -135,6 +152,7 @@ module.exports = {
   createLoan,
   getEmployeeLoans,
   getMonthly,
+  updateLoan,
   waive,
   remove,
   getOne,
