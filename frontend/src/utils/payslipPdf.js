@@ -66,7 +66,7 @@ function rowsWithAmount(labelValuePairs) {
     .map(([label, amount]) => [label, money(amount)]);
 }
 
-function buildAdvanceDeductionRows(breakdown, payrollRow) {
+function resolveAdvanceTotals(breakdown, payrollRow) {
   const b = breakdown?.breakdown || {};
   const repayments = Array.isArray(breakdown?.advance_repayments) ? breakdown.advance_repayments : [];
   const diaryAmount = Number(payrollRow?.manual_advance_amount || 0);
@@ -74,11 +74,29 @@ function buildAdvanceDeductionRows(breakdown, payrollRow) {
     (sum, row) => sum + Number(row?.this_month_deduction || 0),
     0
   );
+  const loanFromRow =
+    Number(payrollRow?.deducted_loan_repayment || 0) > 0
+      ? Number(payrollRow.deducted_loan_repayment)
+      : 0;
   const loanAmount =
     loanAmountFromRepayments > 0
       ? loanAmountFromRepayments
-      : Math.max(0, Number(b.salaryAdvance || 0) - diaryAmount);
+      : loanFromRow > 0
+        ? loanFromRow
+        : Math.max(0, Number(b.salaryAdvance || 0) - diaryAmount);
+  const totalAdvance = diaryAmount + loanAmount;
+  const storedAdvance = Number(b.salaryAdvance || 0);
+  return {
+    diaryAmount,
+    loanAmount,
+    totalAdvance: totalAdvance > 0 ? totalAdvance : storedAdvance,
+    pendingLoanBalance: Number(b.pendingAdvanceBalance || 0),
+    repayments,
+  };
+}
 
+function buildAdvanceDeductionRows(breakdown, payrollRow) {
+  const { diaryAmount, loanAmount } = resolveAdvanceTotals(breakdown, payrollRow);
   const rows = [];
   if (diaryAmount > 0) {
     rows.push(['Diary advance', money(diaryAmount)]);
@@ -86,10 +104,28 @@ function buildAdvanceDeductionRows(breakdown, payrollRow) {
   if (loanAmount > 0) {
     rows.push(['Loan repayment', money(loanAmount)]);
   }
+  return rows;
+}
 
-  const pendingLoanBalance = Number(b.pendingAdvanceBalance || 0);
+function buildAdvanceInfoRows(breakdown, payrollRow) {
+  const { pendingLoanBalance, repayments } = resolveAdvanceTotals(breakdown, payrollRow);
+  const rows = [];
+
+  for (const [index, repayment] of repayments.entries()) {
+    const outstandingAfter = Number(repayment?.outstanding_balance_after || 0);
+    if (outstandingAfter > 0) {
+      rows.push([
+        `Loan #${index + 1} balance after`,
+        money(outstandingAfter),
+      ]);
+    }
+  }
+
   if (pendingLoanBalance > 0) {
-    rows.push(['Loan balance pending', money(pendingLoanBalance)]);
+    const hasPerLoanRows = rows.length > 0;
+    if (!hasPerLoanRows) {
+      rows.push(['Outstanding loan balance', money(pendingLoanBalance)]);
+    }
   }
 
   return rows;
@@ -303,7 +339,8 @@ function renderCompactPayslip(
   if (permissionOffset > 0) {
     deductionRows.push(['Perm. offset', `(Rs ${formatMoney(permissionOffset)})`]);
   }
-  deductionRows.push(['Total ded.', money(Number(b.totalDeductions || 0) + Number(b.salaryAdvance || 0))]);
+  const { totalAdvance } = resolveAdvanceTotals(breakdown, payrollRow);
+  deductionRows.push(['Total ded.', money(Number(b.totalDeductions || 0) + totalAdvance)]);
 
   const midX = slotX + pageWidth / 2;
   const halfWidth = pageWidth / 2 - layout.marginX - 2;
@@ -334,6 +371,25 @@ function renderCompactPayslip(
 
   y = Math.max(earningsEndY, deductionsEndY) + layout.sectionGap;
 
+  const advanceInfoRows = buildAdvanceInfoRows(breakdown, payrollRow);
+  if (advanceInfoRows.length > 0) {
+    y =
+      drawPayslipTable(doc, {
+        fixedPage,
+        slot,
+        marginLeft,
+        marginRight,
+        layout,
+        startY: y,
+        head: [['Advances & loans (info)', '']],
+        body: advanceInfoRows,
+        columnStylesOverride: {
+          0: { cellWidth: layout === LAYOUTS.a5 ? 120 : 90 },
+          1: { halign: 'right', cellWidth: layout === LAYOUTS.a5 ? 72 : 50 },
+        },
+      }) + layout.sectionGap;
+  }
+
   if (fixedPage) doc.setPage(fixedPage);
   doc.setDrawColor(226, 232, 240);
   doc.line(marginLeft, y, marginRight, y);
@@ -341,7 +397,13 @@ function renderCompactPayslip(
   doc.setFontSize(layout.netFont);
   doc.setFont(undefined, 'bold');
   doc.setTextColor(5, 150, 105);
-  doc.text(`NET SALARY: ${money(b.netSalary)}`, marginRight, y, { align: 'right' });
+  const resolvedNet =
+    Number(b.grossSalary || 0) -
+    Number(b.totalDeductions || 0) -
+    totalAdvance +
+    Number(b.noLeaveIncentive || 0);
+  const netDisplay = Number.isFinite(resolvedNet) ? resolvedNet : Number(b.netSalary || 0);
+  doc.text(`NET SALARY: ${money(netDisplay)}`, marginRight, y, { align: 'right' });
 
   if (layout.showFooter) {
     const footerY = doc.internal.pageSize.getHeight() - 16;

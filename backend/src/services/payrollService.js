@@ -1837,10 +1837,11 @@ async function generateWeeklyPayroll(
 
     const repaymentRows = repaymentRowsResult.rows || [];
     const pendingRepaymentRows = repaymentRows.filter((row) => row.status === 'pending');
-    const monthRepaymentAdvance = repaymentRows.reduce(
-      (sum, row) => sum + Number(row.repayment_amount || 0),
-      0
-    );
+    const monthRepaymentAdvance = applyAdvanceRepayments
+      ? pendingRepaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0)
+      : repaymentRows
+          .filter((row) => row.status === 'deducted')
+          .reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
 
     const salaryAdvance = salaryAdvanceBase + monthRepaymentAdvance;
 
@@ -2615,7 +2616,11 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       : { rows: [] };
     const repaymentRows = repaymentRowsResult.rows;
     const pendingRepaymentRows = repaymentRows.filter((row) => row.status === 'pending');
-    const monthRepaymentAdvance = repaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
+    const monthRepaymentAdvance = applyAdvanceRepayments
+      ? pendingRepaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0)
+      : repaymentRows
+          .filter((row) => row.status === 'deducted')
+          .reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
     const salaryAdvance = oldSalaryAdvance + monthRepaymentAdvance;
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
     const hasManualNoLeaveIncentive =
@@ -2970,6 +2975,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const advanceRepaymentsResult = await pool.query(
     `SELECT
        r.loan_id,
+       r.status,
        r.repayment_amount AS this_month_deduction,
        l.loan_amount AS original_loan_amount,
        l.loan_date,
@@ -2985,7 +2991,9 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
      ORDER BY r.loan_id ASC`,
     [companyId, employeeId, year, month]
   );
-  const advanceRepayments = advanceRepaymentsResult.rows.map((row) => ({
+  const advanceRepayments = advanceRepaymentsResult.rows
+    .filter((row) => row.status === 'deducted')
+    .map((row) => ({
     loan_id: row.loan_id,
     original_loan_amount: Number(row.original_loan_amount || 0),
     loan_date: row.loan_date,
@@ -2993,12 +3001,20 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     total_repaid_so_far: Number(row.total_repaid_so_far || 0),
     outstanding_balance_after: Number(row.outstanding_balance_after || 0),
   }));
-  const newSalaryAdvance = advanceRepayments.reduce((sum, row) => sum + Number(row.this_month_deduction || 0), 0);
-  const computedSalaryAdvance = oldSalaryAdvance + newSalaryAdvance;
-  const salaryAdvance =
-    payrollRecordSnap != null
-      ? Number(payrollRecordSnap.salary_advance || 0)
-      : computedSalaryAdvance;
+  const deductedRepaymentTotal = advanceRepayments.reduce(
+    (sum, row) => sum + Number(row.this_month_deduction || 0),
+    0
+  );
+  const syncedSalaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+    pool,
+    companyId,
+    employeeId,
+    year,
+    month
+  );
+  const computedSalaryAdvance = oldSalaryAdvance + deductedRepaymentTotal;
+  let salaryAdvance =
+    payrollRecordSnap != null ? syncedSalaryAdvance : computedSalaryAdvance;
   const noLeaveIncentive =
     payrollRecordSnap != null
       ? Number(payrollRecordSnap.no_leave_incentive || 0)
@@ -3047,9 +3063,40 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     }
   }
 
+  if (payrollRecordSnap != null) {
+    const storedAdvance = Number(payrollRecordSnap.salary_advance || 0);
+    const healedNet = computeNetSalaryFromPayrollRow(
+      {
+        gross_salary: grossSalary,
+        deductions: totalDeductions,
+        no_leave_incentive: noLeaveIncentive,
+      },
+      salaryAdvance
+    );
+    if (
+      Math.abs(storedAdvance - salaryAdvance) > 0.01 ||
+      Math.abs(Number(payrollRecordSnap.net_salary || 0) - healedNet) > 0.01
+    ) {
+      await pool.query(
+        `UPDATE payroll_records
+         SET salary_advance = $3,
+             net_salary = $4
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, payrollRecordSnap.id, salaryAdvance, healedNet]
+      );
+    }
+  }
+
   const netSalary =
     payrollRecordSnap != null
-      ? Number(payrollRecordSnap.net_salary ?? grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive)
+      ? computeNetSalaryFromPayrollRow(
+          {
+            gross_salary: grossSalary,
+            deductions: totalDeductions,
+            no_leave_incentive: noLeaveIncentive,
+          },
+          salaryAdvance
+        )
       : grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
 
   /** Attendance numbers shown on payslip: match payroll run when snapshot exists. */
@@ -3416,6 +3463,24 @@ function computeNetSalaryFromPayrollRow(payroll, salaryAdvance) {
   );
 }
 
+async function computePayrollSalaryAdvanceFromComponents(
+  client,
+  companyId,
+  employeeId,
+  year,
+  month
+) {
+  const manualAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
+  const deductedLoanTotal = await getDeductedLoanRepaymentTotal(
+    client,
+    companyId,
+    employeeId,
+    year,
+    month
+  );
+  return Number(manualAdvance || 0) + Number(deductedLoanTotal || 0);
+}
+
 async function getDeductedLoanRepaymentTotal(client, companyId, employeeId, year, month) {
   const result = await client.query(
     `SELECT COALESCE(SUM(r.repayment_amount), 0) AS total
@@ -3532,7 +3597,6 @@ async function setMonthlyPayrollAdvanceDeduction(companyId, payrollId, deduct, o
     const year = Number(payroll.year);
     const month = Number(payroll.month);
     const employeeId = Number(payroll.employee_id);
-    const legacyAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
 
     if (deduct) {
       await ensureDueRepaymentsForPayrollMonth(companyId, year, month, { client });
@@ -3544,7 +3608,6 @@ async function setMonthlyPayrollAdvanceDeduction(companyId, payrollId, deduct, o
         month,
         'pending'
       );
-      let repaymentTotal = 0;
       for (const row of pendingRows) {
         await markRepaymentDeducted(
           companyId,
@@ -3554,9 +3617,14 @@ async function setMonthlyPayrollAdvanceDeduction(companyId, payrollId, deduct, o
           Number(row.repayment_amount || 0),
           { client, repaymentId: row.id }
         );
-        repaymentTotal += Number(row.repayment_amount || 0);
       }
-      const salaryAdvance = legacyAdvance + repaymentTotal;
+      const salaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+        client,
+        companyId,
+        employeeId,
+        year,
+        month
+      );
       const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
       const updateResult = await client.query(
         `UPDATE payroll_records
@@ -3581,7 +3649,13 @@ async function setMonthlyPayrollAdvanceDeduction(companyId, payrollId, deduct, o
     for (const row of deductedRows) {
       await revertRepaymentDeducted(companyId, row.id, { client });
     }
-    const salaryAdvance = legacyAdvance;
+    const salaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month
+    );
     const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
     const updateResult = await client.query(
       `UPDATE payroll_records
@@ -3630,7 +3704,6 @@ async function setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deduct, op
     const weekEnd = String(payroll.week_end_date).slice(0, 10);
     const { y: year, m: month } = parseYmd(weekEnd);
     const employeeId = Number(payroll.employee_id);
-    const legacyAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
 
     if (deduct) {
       await ensureDueRepaymentsForPayrollMonth(companyId, year, month, { client });
@@ -3642,7 +3715,6 @@ async function setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deduct, op
         month,
         'pending'
       );
-      let repaymentTotal = 0;
       for (const row of pendingRows) {
         await markRepaymentDeducted(
           companyId,
@@ -3652,9 +3724,14 @@ async function setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deduct, op
           Number(row.repayment_amount || 0),
           { client, repaymentId: row.id }
         );
-        repaymentTotal += Number(row.repayment_amount || 0);
       }
-      const salaryAdvance = legacyAdvance + repaymentTotal;
+      const salaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+        client,
+        companyId,
+        employeeId,
+        year,
+        month
+      );
       const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
       const updateResult = await client.query(
         `UPDATE weekly_payroll_records
@@ -3679,7 +3756,13 @@ async function setWeeklyPayrollAdvanceDeduction(companyId, payrollId, deduct, op
     for (const row of deductedRows) {
       await revertRepaymentDeducted(companyId, row.id, { client });
     }
-    const salaryAdvance = Math.max(0, legacyAdvance);
+    const salaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+      client,
+      companyId,
+      employeeId,
+      year,
+      month
+    );
     const netSalary = computeNetSalaryFromPayrollRow(payroll, salaryAdvance);
     const updateResult = await client.query(
       `UPDATE weekly_payroll_records
@@ -3851,7 +3934,6 @@ async function recalculateMonthlyPayrollFromAttendance(companyId, payrollId, opt
     throw new AppError('Payroll record not found', 404);
   }
   const existing = existingResult.rows[0];
-  const preservedAdvance = Number(existing.salary_advance || 0);
   const preservedIncentive = Number(existing.no_leave_incentive || 0);
 
   const generated = await generateMonthlyPayroll(
@@ -3869,23 +3951,38 @@ async function recalculateMonthlyPayrollFromAttendance(companyId, payrollId, opt
   );
 
   const payroll = generated.payroll;
-  const newNet =
-    Number(payroll.gross_salary || 0) -
-    Number(payroll.deductions || 0) -
-    preservedAdvance +
-    preservedIncentive;
+  const client = await pool.connect();
+  try {
+    const salaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+      client,
+      companyId,
+      existing.employee_id,
+      existing.year,
+      existing.month
+    );
+    const newNet = computeNetSalaryFromPayrollRow(
+      {
+        gross_salary: payroll.gross_salary,
+        deductions: payroll.deductions,
+        no_leave_incentive: preservedIncentive,
+      },
+      salaryAdvance
+    );
 
-  const updateResult = await pool.query(
-    `UPDATE payroll_records
-     SET salary_advance = $3,
-         no_leave_incentive = $4,
-         net_salary = $5
-     WHERE company_id = $1 AND id = $2
-     RETURNING *`,
-    [companyId, Number(payrollId), preservedAdvance, preservedIncentive, newNet]
-  );
+    const updateResult = await client.query(
+      `UPDATE payroll_records
+       SET salary_advance = $3,
+           no_leave_incentive = $4,
+           net_salary = $5
+       WHERE company_id = $1 AND id = $2
+       RETURNING *`,
+      [companyId, Number(payrollId), salaryAdvance, preservedIncentive, newNet]
+    );
 
-  return { summary: generated.summary, payroll: updateResult.rows[0] };
+    return { summary: generated.summary, payroll: updateResult.rows[0] };
+  } finally {
+    client.release();
+  }
 }
 
 async function recalculateWeeklyPayrollFromAttendance(companyId, payrollId, options = {}) {
@@ -3898,8 +3995,9 @@ async function recalculateWeeklyPayrollFromAttendance(companyId, payrollId, opti
     throw new AppError('Payroll record not found', 404);
   }
   const existing = existingResult.rows[0];
-  const preservedAdvance = Number(existing.salary_advance || 0);
   const preservedIncentive = Number(existing.no_leave_incentive || 0);
+  const weekEnd = String(existing.week_end_date).slice(0, 10);
+  const { y: year, m: month } = parseYmd(weekEnd);
 
   const generated = await generateWeeklyPayroll(
     companyId,
@@ -3907,29 +4005,44 @@ async function recalculateWeeklyPayrollFromAttendance(companyId, payrollId, opti
     existing.week_start_date,
     {
       apply_advance_repayments: false,
-      apply_salary_advances: preservedAdvance > 0,
+      apply_salary_advances: true,
       allowedBranchIds,
     }
   );
 
   const payroll = generated.payroll;
-  const newNet =
-    Number(payroll.gross_salary || 0) -
-    Number(payroll.deductions || 0) -
-    preservedAdvance +
-    preservedIncentive;
+  const client = await pool.connect();
+  try {
+    const salaryAdvance = await computePayrollSalaryAdvanceFromComponents(
+      client,
+      companyId,
+      existing.employee_id,
+      year,
+      month
+    );
+    const newNet = computeNetSalaryFromPayrollRow(
+      {
+        gross_salary: payroll.gross_salary,
+        deductions: payroll.deductions,
+        no_leave_incentive: preservedIncentive,
+      },
+      salaryAdvance
+    );
 
-  const updateResult = await pool.query(
-    `UPDATE weekly_payroll_records
-     SET salary_advance = $3,
-         no_leave_incentive = $4,
-         net_salary = $5
-     WHERE company_id = $1 AND id = $2
-     RETURNING *`,
-    [companyId, Number(payrollId), preservedAdvance, preservedIncentive, newNet]
-  );
+    const updateResult = await client.query(
+      `UPDATE weekly_payroll_records
+       SET salary_advance = $3,
+           no_leave_incentive = $4,
+           net_salary = $5
+       WHERE company_id = $1 AND id = $2
+       RETURNING *`,
+      [companyId, Number(payrollId), salaryAdvance, preservedIncentive, newNet]
+    );
 
-  return { summary: generated.summary, payroll: updateResult.rows[0] };
+    return { summary: generated.summary, payroll: updateResult.rows[0] };
+  } finally {
+    client.release();
+  }
 }
 
 module.exports = {
