@@ -12,7 +12,7 @@ async function getDashboardSummary(companyId, allowedBranchIds = null) {
   const todayPresent = (dailyResult || []).filter((r) => r.present).length;
   const todayTotal = (dailyResult || []).length;
   const todayAbsent = (dailyResult || [])
-    .filter((r) => !r.present)
+    .filter((r) => !r.present && !r.shift_pending)
     .map((r) => r.name)
     .sort();
 
@@ -50,7 +50,7 @@ async function getDashboardSummary(companyId, allowedBranchIds = null) {
     const bucket = branchBuckets.get(branchId);
     bucket.total += 1;
     if (row.present) bucket.present += 1;
-    else bucket.absent += 1;
+    else if (!row.shift_pending) bucket.absent += 1;
     if (row.late) bucket.late += 1;
   }
   const branchSummary = Array.from(branchBuckets.values())

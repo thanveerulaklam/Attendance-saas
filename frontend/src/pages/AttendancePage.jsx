@@ -326,16 +326,27 @@ export default function AttendancePage() {
 
   const todaySummary = useMemo(() => {
     if (!dailyData || dailyData.length === 0) {
-      return { present: 0, absent: 0, late: 0, fullDay: 0, leftDuringLunch: 0, onBreak: 0, total: 0 };
+      return {
+        present: 0,
+        absent: 0,
+        shiftPending: 0,
+        late: 0,
+        fullDay: 0,
+        leftDuringLunch: 0,
+        onBreak: 0,
+        total: 0,
+      };
     }
     const present = dailyData.filter((r) => r.present).length;
+    const shiftPending = dailyData.filter((r) => r.shift_pending).length;
     const late = dailyData.filter((r) => r.late).length;
     const fullDay = dailyData.filter((r) => r.full_day).length;
     const leftDuringLunch = dailyData.filter((r) => isLeftAtLunchStatus(r)).length;
     const onBreak = dailyData.filter((r) => isOnBreakStatus(r, isTodaySelected)).length;
     return {
       present,
-      absent: dailyData.length - present,
+      shiftPending,
+      absent: dailyData.filter((r) => !r.present && !r.shift_pending).length,
       late,
       fullDay,
       leftDuringLunch,
@@ -591,7 +602,13 @@ export default function AttendancePage() {
         {dailyLoading ? (
           <div className="mt-3 h-16 rounded-lg bg-slate-50 animate-pulse" />
         ) : (
-          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <div
+            className={`mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 ${
+              isTodaySelected && todaySummary.shiftPending > 0
+                ? 'lg:grid-cols-6'
+                : 'lg:grid-cols-5'
+            }`}
+          >
             <button
               type="button"
               onClick={() => todaySummary.present > 0 && setPresentModalOpen(true)}
@@ -618,6 +635,12 @@ export default function AttendancePage() {
               <p className="text-[10px] font-medium text-slate-600">Absent</p>
               <p className="text-lg font-semibold text-slate-800">{todaySummary.absent}</p>
             </button>
+            {isTodaySelected && todaySummary.shiftPending > 0 && (
+              <div className="rounded-lg border border-violet-100 bg-violet-50 px-3 py-2 text-left">
+                <p className="text-[10px] font-medium text-violet-700">Shift not started</p>
+                <p className="text-lg font-semibold text-violet-800">{todaySummary.shiftPending}</p>
+              </div>
+            )}
             <button
               type="button"
               onClick={() => todaySummary.late > 0 && setLateModalOpen(true)}
@@ -725,7 +748,8 @@ export default function AttendancePage() {
                     const isHoursBased = row.attendance_mode === 'hours_based';
                     const onBreakNow = isOnBreakStatus(row, isTodaySelected);
                     let dayStatus = 'Absent';
-                    if (row.present) {
+                    if (row.shift_pending) dayStatus = 'Shift not started';
+                    else if (row.present) {
                       if (row.full_day) dayStatus = 'Full day';
                       else if (onBreakNow) dayStatus = 'On break';
                       else if (isLeftAtLunchStatus(row)) dayStatus = 'Left at lunch';
@@ -735,7 +759,9 @@ export default function AttendancePage() {
                       dayStatus += ' (late)';
                     }
                     const statusCls =
-                      dayStatus.startsWith('Full day')
+                      dayStatus === 'Shift not started'
+                        ? 'text-violet-600'
+                        : dayStatus.startsWith('Full day')
                         ? 'text-blue-600'
                         : dayStatus.startsWith('On break')
                           ? 'text-violet-600'
@@ -1058,7 +1084,7 @@ export default function AttendancePage() {
             <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
               <ul className="space-y-2">
                 {(dailyData || [])
-                  .filter((r) => !r.present)
+                  .filter((r) => !r.present && !r.shift_pending)
                   .map((row) => (
                     <li
                       key={row.employee_id}

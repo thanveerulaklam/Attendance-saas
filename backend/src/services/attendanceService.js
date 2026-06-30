@@ -146,6 +146,23 @@ function getFullDayMinimumWorkMs(shiftConfig) {
 }
 
 /**
+ * True when viewing today and the employee's shift for this calendar date has not started yet.
+ * Night-shift staff should not count as absent before their evening start time.
+ */
+function isShiftNotStartedYet(shiftConfig, calendarDateStr, nowMs = Date.now()) {
+  if (!shiftConfig || shiftConfig.startHour == null) return false;
+  const [y, mo, dd] = calendarDateStr.split('-').map(Number);
+  const shiftStartMs = getShiftStartMsForDate(
+    y,
+    mo,
+    dd,
+    shiftConfig.startHour,
+    shiftConfig.startMinute
+  );
+  return nowMs < shiftStartMs;
+}
+
+/**
  * For overnight shifts (hours_based or legacy shift_based), attribute a punch to shift start date (IST):
  * e.g. 06:00 on day 2 belongs to the shift that started 22:00 on day 1.
  */
@@ -1006,6 +1023,10 @@ async function getDailyAttendance(
       );
       const total_hours_from_shift_start =
         Math.round((workedMsFromPunches / (60 * 60 * 1000)) * 100) / 100;
+      const shiftPending =
+        isCurrentDate &&
+        !presentForDaily &&
+        isShiftNotStartedYet(shiftConfig, dateStr, nowMs);
       return {
         employee_id: emp.id,
         name: emp.name,
@@ -1013,6 +1034,7 @@ async function getDailyAttendance(
         branch_id: emp.branch_id ? Number(emp.branch_id) : null,
         branch_name: emp.branch_name || null,
         present: presentForDaily,
+        shift_pending: shiftPending,
         late: status.late,
         overtime_hours: Math.round(status.overtimeHours * 100) / 100,
         full_day: status.fullDay,
@@ -1643,4 +1665,5 @@ module.exports = {
   computeFlexibleHoursBasedDayStatus,
   getHoursBasedDailyPresence,
   attributedShiftStartDateStr,
+  isShiftNotStartedYet,
 };

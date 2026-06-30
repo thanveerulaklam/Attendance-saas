@@ -6,6 +6,7 @@ const {
   computeHoursInsideForHoursBasedPayroll,
   getHoursBasedDailyPresence,
   attributedShiftStartDateStr,
+  isShiftNotStartedYet,
 } = require('../src/services/attendanceService');
 
 test('hours-based: unpaired IN on past date counts no inside time', () => {
@@ -114,3 +115,25 @@ test('hours-based overnight: completed cross-midnight pair counts inside hours',
   assert.ok(h >= 7.99 && h <= 8.01);
 });
 
+test('isShiftNotStartedYet: night shift before evening start is pending not absent', () => {
+  const shiftConfig = {
+    startHour: 21,
+    startMinute: 0,
+    shiftMs: 12 * 60 * 60 * 1000,
+  };
+  const morning = new Date('2026-06-30T11:38:00+05:30').getTime();
+  assert.equal(isShiftNotStartedYet(shiftConfig, '2026-06-30', morning), true);
+
+  const evening = new Date('2026-06-30T22:00:00+05:30').getTime();
+  assert.equal(isShiftNotStartedYet(shiftConfig, '2026-06-30', evening), false);
+});
+
+test('isShiftNotStartedYet: day shift after start time is not pending', () => {
+  const shiftConfig = {
+    startHour: 9,
+    startMinute: 0,
+    shiftMs: 9 * 60 * 60 * 1000,
+  };
+  const lateMorning = new Date('2026-06-30T11:38:00+05:30').getTime();
+  assert.equal(isShiftNotStartedYet(shiftConfig, '2026-06-30', lateMorning), false);
+});
