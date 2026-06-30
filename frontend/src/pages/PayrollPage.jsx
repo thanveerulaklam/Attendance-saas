@@ -636,7 +636,8 @@ export default function PayrollPage() {
   });
 
   const subscription = getSubscriptionStatus(company);
-  const subscriptionAllowed = subscription.allowed;
+  // Company loads async; don't block generate until we know subscription is expired.
+  const subscriptionAllowed = company == null ? true : subscription.allowed;
   const monthlyOnlyPayroll = company?.shifts_compact_ui === true;
   const companyCurrency = company?.currency || 'INR';
   const moneySym = currencySymbol(companyCurrency);
@@ -719,31 +720,45 @@ export default function PayrollPage() {
 
   useEffect(() => {
     let isMounted = true;
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!isMounted || !json?.data) return;
+        setCompany(json.data);
+        const fromCompany = normalizeBranchesPayload(json.data);
+        if (fromCompany.length > 0) {
+          setBranches((prev) => mergeBranchLists(prev, fromCompany));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
 
     async function loadFilterOptions() {
       try {
-        const [companyRes, branchRes, employeeRes] = await Promise.all([
-          authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
+        const [branchRes, employeeRes] = await Promise.all([
           authFetch('/api/company/branches', { headers: { 'Content-Type': 'application/json' } }),
           authFetch('/api/employees?limit=500', { headers: { 'Content-Type': 'application/json' } }),
         ]);
 
-        const companyJson = companyRes.ok ? await companyRes.json() : null;
         const branchJson = branchRes.ok ? await branchRes.json() : null;
         const employeeJson = employeeRes.ok ? await employeeRes.json() : null;
 
         if (!isMounted) return;
 
-        if (companyJson?.data) setCompany(companyJson.data);
-
-        const fromCompany = normalizeBranchesPayload(companyJson?.data);
         const fromBranchesApi = normalizeBranchesPayload(branchJson?.data);
         const employeeList = employeeJson?.data?.data || [];
         setEmployees(employeeList);
-        setBranches(mergeBranchLists(fromCompany, fromBranchesApi, branchesFromEmployees(employeeList)));
+        setBranches((prev) =>
+          mergeBranchLists(prev, fromBranchesApi, branchesFromEmployees(employeeList))
+        );
       } catch {
         if (!isMounted) return;
-        setBranches([]);
       }
     }
 
@@ -1883,8 +1898,18 @@ export default function PayrollPage() {
   const openGenerateModal = () => {
     const presetBranch = branchFilter || '';
     const presetEmployee = employeeId || '';
-    setGenerateForm((f) => ({ ...f, branch_id: presetBranch, employee_id: presetEmployee }));
-    setWeeklyGenerateForm((f) => ({ ...f, branch_id: presetBranch, employee_id: presetEmployee }));
+    setGenerateForm((f) => ({
+      ...f,
+      year,
+      month: month || f.month,
+      branch_id: presetBranch,
+      employee_id: presetEmployee,
+    }));
+    setWeeklyGenerateForm((f) => ({
+      ...f,
+      branch_id: presetBranch,
+      employee_id: presetEmployee,
+    }));
     setModalOpen(true);
   };
 
