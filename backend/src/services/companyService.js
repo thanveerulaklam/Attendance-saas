@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { normalizeWhatsAppNumber } = require('../utils/whatsappPhone');
 const { normalizeWhatsappSendTime } = require('../utils/whatsappSendTime');
+const { resolveLocaleFromCountryCode } = require('../config/region');
 const {
   clearShiftRotationFlagCache,
   backfillInitialAssignments,
@@ -41,6 +42,21 @@ function branchesAllowedTotal(company) {
   return 1 + Math.max(0, Number(company.branch_limit_override || 0));
 }
 
+/** Align timezone/currency with country_code when legacy rows still use India defaults. */
+function normalizeCompanyLocale(row) {
+  if (!row) return row;
+  const code = String(row.country_code || 'IN').toUpperCase();
+  const locale = resolveLocaleFromCountryCode(code);
+  const normalized = { ...row };
+  if (locale.timezone && normalized.timezone !== locale.timezone) {
+    normalized.timezone = locale.timezone;
+  }
+  if (code === 'AE' && (normalized.currency == null || normalized.currency === 'INR')) {
+    normalized.currency = locale.currency || 'AED';
+  }
+  return normalized;
+}
+
 const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at,
   subscription_start_date, subscription_end_date, is_active, plan_code, billing_cycle,
   next_billing_date, last_payment_date, payment_status, billing_notes,
@@ -78,7 +94,7 @@ async function getCompanyById(companyId) {
     [companyId]
   );
 
-  return result.rows[0] || null;
+  return normalizeCompanyLocale(result.rows[0] || null);
 }
 
 /** Grace period in days after subscription_end_date before blocking. */
@@ -372,10 +388,10 @@ async function updateBillingMetadata(companyId, data) {
 
 async function getCompanyTimezone(companyId) {
   const result = await pool.query(
-    `SELECT timezone FROM companies WHERE id = $1`,
+    `SELECT timezone, country_code, currency FROM companies WHERE id = $1`,
     [companyId]
   );
-  return result.rows[0]?.timezone || 'Asia/Kolkata';
+  return normalizeCompanyLocale(result.rows[0] || null)?.timezone || 'Asia/Kolkata';
 }
 
 async function getCompanyCountryCode(companyId) {

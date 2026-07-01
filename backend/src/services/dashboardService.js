@@ -1,11 +1,13 @@
 const { getDailyAttendance } = require('./attendanceService');
-const { todayIstYmd, addDaysIst } = require('../utils/istDate');
+const { getCompanyTimezone } = require('./companyService');
+const { todayYmd, addDaysYmd } = require('../utils/companyDate');
 
 /**
  * Get dashboard summary for a company: KPIs + 7-day attendance trend + today's absent.
  */
 async function getDashboardSummary(companyId, allowedBranchIds = null) {
-  const todayStr = todayIstYmd();
+  const tz = await getCompanyTimezone(companyId);
+  const todayStr = todayYmd(tz);
 
   const dailyResult = await getDailyAttendance(companyId, todayStr, null, null, allowedBranchIds);
   const totalEmployees = (dailyResult || []).length;
@@ -62,10 +64,10 @@ async function getDashboardSummary(companyId, allowedBranchIds = null) {
 
   const trendDays = [];
   for (let i = 6; i >= 0; i -= 1) {
-    const dateStr = addDaysIst(todayStr, -i);
-    const label = new Date(`${dateStr}T12:00:00+05:30`).toLocaleDateString('en-US', {
+    const dateStr = addDaysYmd(todayStr, -i, tz);
+    const label = new Date(`${dateStr}T12:00:00Z`).toLocaleDateString('en-US', {
       weekday: 'short',
-      timeZone: 'Asia/Kolkata',
+      timeZone: tz,
     });
     trendDays.push({ date: dateStr, label });
   }

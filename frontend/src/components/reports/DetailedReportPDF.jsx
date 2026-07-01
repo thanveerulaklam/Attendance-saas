@@ -1,6 +1,6 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
 import { authFetch } from '../../utils/api';
-import { formatLocalTime, todayYmdInTimezone } from '../../utils/companyLocalDisplay';
+import { resolveCompanyTimezone, formatLocalTime, todayYmdInTimezone } from '../../utils/companyLocalDisplay';
 import { IST } from '../../utils/istDisplay';
 import { formatWorkedHours } from '../../utils/durationFormat';
 
@@ -38,7 +38,7 @@ function formatPunchTimings(punches, timezone = IST) {
   return list
     .map((p) => {
       const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, timezone) : '';
-      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'Check-out' : 'Check-in';
       if (!timeLabel) return '';
       return `${timeLabel} (${typeLabel})`;
     })
@@ -111,7 +111,7 @@ export async function generateDetailedAttendancePdf({
   const shiftsJson = shiftsRes.ok ? await shiftsRes.json() : { data: [] };
 
   const company = companyJson.data || {};
-  const companyTz = company.timezone || IST;
+  const companyTz = resolveCompanyTimezone(company);
   const monthly = monthlyJson.data;
   if (!monthly || !Array.isArray(monthly.employees) || monthly.employees.length === 0) {
     throw new Error('No attendance data available for selected period');

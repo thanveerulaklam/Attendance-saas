@@ -4,6 +4,8 @@ Use this when the device has **Cloud Server Setting** with **Server Mode: ADMS**
 
 PunchPay identifies the device by **serial number (SN)** saved in the app. You do not need to type a long API key on the device keypad for this mode.
 
+**Matrix COSEC devices** do not use ADMS — see [MATRIX_COSEC_SETUP.md](MATRIX_COSEC_SETUP.md).
+
 ---
 
 ## What to configure

@@ -1,5 +1,5 @@
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../../utils/pdfGenerator';
-import { formatLocalTime } from '../../utils/companyLocalDisplay';
+import { formatLocalTime, resolveCompanyTimezone } from '../../utils/companyLocalDisplay';
 import { IST } from '../../utils/istDisplay';
 import { formatWorkedHours } from '../../utils/durationFormat';
 
@@ -18,8 +18,8 @@ function makeTimeHelpers(timezone = IST) {
     if (list.length === 0) return '';
     return list
       .map((p) => {
-        const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, tz) : '';
-        const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+      const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, tz) : '';
+      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'Check-out' : 'Check-in';
         return timeLabel ? `${timeLabel} (${typeLabel})` : '';
       })
       .filter(Boolean)
@@ -113,7 +113,9 @@ export function buildDayWiseReportDoc({
   allEmployees,
   timezone,
 }) {
-  const { getFirstInTime, formatPunchTimings } = makeTimeHelpers(timezone || company?.timezone);
+  const { getFirstInTime, formatPunchTimings } = makeTimeHelpers(
+    timezone || resolveCompanyTimezone(company)
+  );
   const scopeParts = [dateLabel, branchLabel, departmentLabel].filter(Boolean);
   const doc = createPdf({ orientation: 'portrait' });
   let y = addReportHeader(doc, {

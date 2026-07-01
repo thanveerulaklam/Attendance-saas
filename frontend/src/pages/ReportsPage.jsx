@@ -14,6 +14,7 @@ import {
   formatYmdLong,
   todayYmdInTimezone,
   yesterdayYmdFrom,
+  resolveCompanyTimezone,
 } from '../utils/companyLocalDisplay';
 import { IST } from '../utils/istDisplay';
 import { formatWorkedHours } from '../utils/durationFormat';
@@ -73,7 +74,7 @@ function formatPunchTimings(punches, timezone = IST) {
   return list
     .map((p) => {
       const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, timezone) : '';
-      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
+      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'Check-out' : 'Check-in';
       return timeLabel ? `${timeLabel} (${typeLabel})` : '';
     })
     .filter(Boolean)
@@ -210,7 +211,7 @@ export default function ReportsPage() {
   const [reportBranchFilter, setReportBranchFilter] = useState('');
   const [company, setCompany] = useState(null);
 
-  const companyTz = company?.timezone || IST;
+  const companyTz = resolveCompanyTimezone(company);
   const companyCurrency = company?.currency || 'INR';
   const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
   const showIndiaStatutory = company?.region_features?.esi === true;

@@ -1,0 +1,81 @@
+================================================================================
+  MATRIX COSEC CONNECTOR - SETUP GUIDE (PunchPay)
+  For Matrix COSEC door devices (e.g. COSEC DOOR FOT IN)
+  Do NOT use the ZKTeco connector or ADMS guide for this device.
+================================================================================
+
+WHAT YOU NEED
+-------------
+- One Windows PC or Mac on the same network as the COSEC device
+- Files in this folder (from your provider)
+- Device API key from PunchPay app (Devices → Add device → Copy key)
+- COSEC device IP address and admin username/password
+
+
+STEP 1: Create a folder on the office PC
+----------------------------------------
+Windows example: C:\MatrixConnector
+Mac example:     ~/MatrixConnector
+
+Copy ALL files from the provider zip into that folder.
+
+
+STEP 2: Configure
+-----------------
+1. Find "config.example.cosec.json"
+2. Rename it to "config.cosec.json"
+3. Open with Notepad (Windows) or TextEdit (Mac)
+4. Change these values:
+
+   deviceIp          → COSEC device IP (e.g. 192.168.1.105)
+   cosecUsername     → Device admin login (often "admin")
+   cosecPassword     → Device admin password
+   deviceApiKey      → API key from PunchPay Devices page
+   backendUrl        → https://punchpay.in  (no slash at end)
+
+5. Save the file.
+
+
+STEP 3: Test before install (optional but recommended)
+------------------------------------------------------
+Open Command Prompt / Terminal in this folder.
+
+Windows (if you have the .exe):
+  connector-cosec.exe --probe
+
+If probe shows "device reachable" and sample events, run:
+  connector-cosec.exe --once
+
+Check PunchPay app for attendance rows.
+
+
+STEP 4: Install auto-start
+--------------------------
+Windows:
+  Right-click install-windows.bat → Run as administrator
+
+Mac:
+  chmod +x install-mac.sh
+  ./install-mac.sh
+
+
+STEP 5: Verify
+--------------
+- Do a test punch on the COSEC device
+- Within about 60 seconds, punch should appear in PunchPay
+- Employee codes in PunchPay must match COSEC User ID exactly
+
+
+LOGS
+----
+connector-cosec.log  — sync activity (share with support if issues)
+
+
+TROUBLESHOOTING
+---------------
+Cannot connect     → Check device IP, same Wi-Fi/LAN, port 80 open
+401 / login error  → Wrong cosecUsername or cosecPassword
+Punches not in app → Employee code must match COSEC user ID
+Push 401           → Wrong deviceApiKey — copy again from PunchPay
+
+================================================================================

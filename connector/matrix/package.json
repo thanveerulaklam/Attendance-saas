@@ -1,0 +1,22 @@
+{
+  "name": "matrix-cosec-connector",
+  "version": "1.0.0",
+  "description": "Matrix COSEC connector — syncs COSEC door devices to PunchPay",
+  "main": "cosec-connector.js",
+  "bin": "cosec-connector.js",
+  "scripts": {
+    "start": "node cosec-connector.js",
+    "probe": "node cosec-connector.js --probe",
+    "once": "node cosec-connector.js --once",
+    "build:win": "pkg cosec-connector.js --targets node18-win-x64 --output dist/connector-cosec.exe",
+    "build:mac": "pkg cosec-connector.js --targets node18-macos-x64 --output dist/connector-cosec-mac"
+  },
+  "pkg": {
+    "scripts": "cosec-connector.js",
+    "assets": [],
+    "outputPath": "dist"
+  },
+  "devDependencies": {
+    "pkg": "^5.8.1"
+  }
+}

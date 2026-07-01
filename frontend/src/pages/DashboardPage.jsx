@@ -9,27 +9,36 @@ import {
   YAxis,
 } from 'recharts';
 import { authFetch } from '../utils/api';
-import { formatIstTime } from '../utils/istDisplay';
+import { formatLocalTime, todayYmdInTimezone, resolveCompanyTimezone } from '../utils/companyLocalDisplay';
+import { IST } from '../utils/istDisplay';
 import OnboardingChecklist from '../components/onboarding/OnboardingChecklist';
 
 export default function DashboardPage() {
   const [summary, setSummary] = useState(null);
+  const [company, setCompany] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const companyTz = resolveCompanyTimezone(company);
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
     setError(null);
-    authFetch('/api/dashboard/summary', {
-      headers: { 'Content-Type': 'application/json' },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load dashboard');
-        return res.json();
-      })
-      .then((json) => {
-        if (isMounted) setSummary(json.data);
+    Promise.all([
+      authFetch('/api/dashboard/summary', {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      authFetch('/api/company', {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ])
+      .then(async ([summaryRes, companyRes]) => {
+        if (!summaryRes.ok) throw new Error('Failed to load dashboard');
+        const json = await summaryRes.json();
+        const companyJson = companyRes.ok ? await companyRes.json() : { data: null };
+        if (!isMounted) return;
+        setSummary(json.data);
+        setCompany(companyJson.data || null);
       })
       .catch((err) => {
         if (isMounted) setError(err.message || 'Unable to load dashboard');
@@ -103,7 +112,7 @@ export default function DashboardPage() {
           ) : (summary?.todayOnLunch?.length ?? 0) > 0 ? (
             <ul className="mt-2 space-y-2 max-h-40 overflow-y-auto">
               {summary.todayOnLunch.map((emp) => {
-                const outAt = emp.punched_out_at ? formatIstTime(emp.punched_out_at) : '';
+                const outAt = emp.punched_out_at ? formatLocalTime(emp.punched_out_at, companyTz) : '';
                 return (
                   <li
                     key={emp.name + (emp.employee_code || '')}

@@ -1,5 +1,17 @@
 /** Display helpers using company IANA timezone (from GET /api/company). */
 import { IST } from './istDisplay';
+import { countryProfile } from '../constants/countryProfiles';
+
+/** Prefer region profile when DB timezone does not match country (legacy rows). */
+export function resolveCompanyTimezone(company) {
+  if (!company) return IST;
+  const code = String(company.country_code || 'IN').toUpperCase();
+  const expected = countryProfile(code).timezone;
+  const stored = company.timezone;
+  if (code === 'AE') return 'Asia/Dubai';
+  if (stored && stored === expected) return stored;
+  return expected || stored || IST;
+}
 
 export function formatLocalTime(isoOrDate, timezone = IST) {
   if (isoOrDate == null || isoOrDate === '') return '';

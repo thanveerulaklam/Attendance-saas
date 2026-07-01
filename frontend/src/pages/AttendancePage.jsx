@@ -6,6 +6,7 @@ import {
   formatYmdDisplay,
   formatYmdLong,
   todayYmdInTimezone,
+  resolveCompanyTimezone,
 } from '../utils/companyLocalDisplay';
 import { formatWorkedHours } from '../utils/durationFormat';
 
@@ -69,7 +70,7 @@ export default function AttendancePage() {
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
   const [company, setCompany] = useState(null);
-  const companyTz = company?.timezone || IST;
+  const companyTz = resolveCompanyTimezone(company);
   const todayStr = useMemo(() => todayYmdInTimezone(companyTz), [companyTz]);
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -733,7 +734,11 @@ export default function AttendancePage() {
                           const deviceId = (p.device_id || '').toLowerCase();
                           const isAuto = deviceId === 'auto_out' && punchType === 'out';
                           const isManual = deviceId === 'manual';
-                          const suffix = isAuto ? ' OUT (Auto — shift end)' : ` ${punchType.toUpperCase()}`;
+                          const suffix = isAuto
+                            ? ' Check-out (Auto — shift end)'
+                            : punchType === 'out'
+                              ? ' Check-out'
+                              : ' Check-in';
                           return (
                             <span
                               key={p.id || `${row.employee_id}-${idx}-${p.punch_time}`}

@@ -243,6 +243,10 @@ For Hikvision mode:
 - Fill deviceIp, hikUsername, hikPassword, deviceApiKey, backendUrl.
 - Hik logs are written to connector-hik.log in the same folder.
 
+For Matrix COSEC mode:
+- Use the separate "matrix" folder from your provider (not connector.exe).
+- See matrix/SETUP_GUIDE.txt inside that folder.
+
 
 ================================================================================
 TO STOP OR REMOVE

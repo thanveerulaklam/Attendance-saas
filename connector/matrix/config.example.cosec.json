@@ -1,0 +1,16 @@
+{
+  "deviceIp": "192.168.1.100",
+  "cosecUsername": "admin",
+  "cosecPassword": "replace-me",
+  "deviceApiKey": "paste-from-punchpay-app",
+  "backendUrl": "https://punchpay.in",
+  "pollIntervalMs": 60000,
+  "maxResultsPerPoll": 100,
+  "apiPrefix": "/device.cgi",
+  "exitFunctionCodes": [],
+  "initialRollOverCount": 0,
+  "initialSeqNumber": 1,
+  "syncFromLatest": true,
+  "includeTimeStampingEvents": true,
+  "requestTimeoutMs": 30000
+}

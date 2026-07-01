@@ -4,6 +4,7 @@ Runs on the client's PC. Syncs biometric device to your cloud. **Install once �
 
 - `index.js` = ZKTeco connector (port 4370 protocol)
 - `hikvision-connector.js` = Hikvision ISAPI pull connector
+- **`matrix/`** = Matrix COSEC connector (standalone folder — copy to client PC)
 
 ---
 
@@ -19,6 +20,8 @@ npm run build:mac   # → dist/connector-mac (run on Mac)
 npm run build:hik:win   # → dist/connector-hik.exe
 npm run build:hik:mac   # → dist/connector-hik-mac
 ```
+
+Matrix COSEC: see **`matrix/`** folder (`cd matrix && npm run build:win`).
 
 Build on a **Windows PC** to create `.exe`; build on a **Mac** to create the Mac binary. (Or use CI to build both.)
 
@@ -92,3 +95,11 @@ npm run start:hik -- --once
 
 State file: `hikvision.state.json` (stores the last pulled event position).
 Log file: `connector-hik.log`.
+
+---
+
+## Matrix COSEC mode
+
+Use the standalone **`matrix/`** folder — copy the whole directory to the client PC.
+
+See [matrix/README.md](matrix/README.md) and [Docs/MATRIX_COSEC_SETUP.md](../Docs/MATRIX_COSEC_SETUP.md).

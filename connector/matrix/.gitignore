@@ -1,0 +1,8 @@
+node_modules/
+dist/*.exe
+dist/*-mac
+config.cosec.json
+cosec.state.json
+connector-cosec.log
+install-log.txt
+.pkg-cache/
