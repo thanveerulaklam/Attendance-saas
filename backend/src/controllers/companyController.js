@@ -37,7 +37,10 @@ async function getCurrentCompany(req, res, next) {
     const [effective_employee_limit, branchCountRes, branches] = await Promise.all([
       getEffectiveEmployeeLimit(companyId),
       pool.query(`SELECT COUNT(*)::int AS n FROM branches WHERE company_id = $1`, [companyId]),
-      branchService.listBranches(companyId, req.allowedBranchIds),
+      branchService.listBranches(companyId, req.allowedBranchIds).catch((err) => {
+        console.error('listBranches failed:', err.message);
+        return [];
+      }),
     ]);
 
     const branch_count = Number(branchCountRes.rows[0]?.n || 0);

@@ -57,19 +57,6 @@ function normalizeCompanyLocale(row) {
   return normalized;
 }
 
-const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at,
-  subscription_start_date, subscription_end_date, is_active, plan_code, billing_cycle,
-  next_billing_date, last_payment_date, payment_status, billing_notes,
-  employee_limit_override, branch_limit_override,
-  onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
-  onetime_payment_status, amc_payment_status, last_onetime_payment_date,
-  hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
-  enable_shift_rotation, flexible_hours_mode,
-  country_code, timezone, currency,
-  whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
-  whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
-  created_at`;
-
 async function isFlexibleHoursMode(companyId) {
   const result = await pool.query(
     `SELECT flexible_hours_mode FROM companies WHERE id = $1`,
@@ -115,9 +102,7 @@ async function getCompanyLocale(companyId) {
 
 async function getCompanyById(companyId) {
   const result = await pool.query(
-    `SELECT
-       c.${COMPANY_SELECT.replace(/,\s*/g, ', c.')}
-       ,
+    `SELECT c.*,
        (
          SELECT COUNT(*)::int
          FROM employees e
@@ -310,13 +295,34 @@ async function updateCompany(companyId, data) {
     paramIndex += 1;
   }
 
-  const result = await pool.query(
-    `UPDATE companies
-     SET ${fields.join(', ')}
-     WHERE id = $1
-     RETURNING ${COMPANY_SELECT}`,
-    values
-  );
+  const runUpdate = (fieldList, vals) =>
+    pool.query(
+      `UPDATE companies
+       SET ${fieldList.join(', ')}
+       WHERE id = $1
+       RETURNING *`,
+      vals
+    );
+
+  let result;
+  try {
+    result = await runUpdate(fields, values);
+  } catch (err) {
+    const wpsKeys = new Set(['mol_establishment_id', 'bank_routing_code']);
+    const hasWpsField = entries.some(([key]) => wpsKeys.has(key));
+    if (err.code !== '42703' || !hasWpsField) throw err;
+    const safeEntries = entries.filter(([key]) => !wpsKeys.has(key));
+    if (safeEntries.length === 0) throw err;
+    const safeFields = [];
+    const safeValues = [companyId];
+    let safeIndex = 2;
+    for (const [key, value] of safeEntries) {
+      safeFields.push(`${key} = $${safeIndex}`);
+      safeValues.push(value);
+      safeIndex += 1;
+    }
+    result = await runUpdate(safeFields, safeValues);
+  }
 
   clearShiftRotationFlagCache(companyId);
 
@@ -349,11 +355,13 @@ async function updateSubscription(companyId, data) {
     `UPDATE companies
      SET ${fields.join(', ')}
      WHERE id = $1
-     RETURNING ${COMPANY_SELECT}`,
+     RETURNING *`,
     values
   );
 
-  return result.rows[0] || null;
+  const row = result.rows[0] || null;
+  if (!row) return null;
+  return attachWpsCompanyFields(companyId, normalizeCompanyLocale(row));
 }
 
 async function updateBillingMetadata(companyId, data) {
@@ -416,30 +424,42 @@ async function updateBillingMetadata(companyId, data) {
     `UPDATE companies
      SET ${fields.join(', ')}
      WHERE id = $1
-     RETURNING ${COMPANY_SELECT}`,
+     RETURNING *`,
     values
   );
 
-  return result.rows[0] || null;
+  const row = result.rows[0] || null;
+  if (!row) return null;
+  return attachWpsCompanyFields(companyId, normalizeCompanyLocale(row));
 }
 
 async function getCompanyTimezone(companyId) {
-  const result = await pool.query(
-    `SELECT timezone, country_code, currency FROM companies WHERE id = $1`,
-    [companyId]
-  );
-  return normalizeCompanyLocale(result.rows[0] || null)?.timezone || 'Asia/Kolkata';
+  try {
+    const result = await pool.query(
+      `SELECT timezone, country_code, currency FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    return normalizeCompanyLocale(result.rows[0] || null)?.timezone || 'Asia/Kolkata';
+  } catch (err) {
+    if (err.code === '42703') return 'Asia/Kolkata';
+    throw err;
+  }
 }
 
 async function getCompanyCountryCode(companyId) {
-  const result = await pool.query(
-    `SELECT country_code FROM companies WHERE id = $1`,
-    [companyId]
-  );
-  if (result.rowCount === 0) {
-    throw new AppError('Company not found', 404);
+  try {
+    const result = await pool.query(
+      `SELECT country_code FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    if (result.rowCount === 0) {
+      throw new AppError('Company not found', 404);
+    }
+    return result.rows[0]?.country_code || 'IN';
+  } catch (err) {
+    if (err.code === '42703') return 'IN';
+    throw err;
   }
-  return result.rows[0]?.country_code || 'IN';
 }
 
 module.exports = {
