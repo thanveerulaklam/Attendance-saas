@@ -734,11 +734,7 @@ export default function AttendancePage() {
                           const deviceId = (p.device_id || '').toLowerCase();
                           const isAuto = deviceId === 'auto_out' && punchType === 'out';
                           const isManual = deviceId === 'manual';
-                          const suffix = isAuto
-                            ? ' Check-out (Auto — shift end)'
-                            : punchType === 'out'
-                              ? ' Check-out'
-                              : ' Check-in';
+                          const suffix = isAuto ? ' OUT (Auto — shift end)' : ` ${punchType.toUpperCase()}`;
                           return (
                             <span
                               key={p.id || `${row.employee_id}-${idx}-${p.punch_time}`}

@@ -38,7 +38,7 @@ function formatPunchTimings(punches, timezone = IST) {
   return list
     .map((p) => {
       const timeLabel = p?.punch_time ? formatLocalTime(p.punch_time, timezone) : '';
-      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'Check-out' : 'Check-in';
+      const typeLabel = String(p?.punch_type || '').toLowerCase() === 'out' ? 'OUT' : 'IN';
       if (!timeLabel) return '';
       return `${timeLabel} (${typeLabel})`;
     })
