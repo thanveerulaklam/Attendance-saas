@@ -3,6 +3,7 @@ const { pool } = require('../config/database');
 const { signToken } = require('../middleware/auth');
 const { AppError } = require('../utils/AppError');
 const { resolveLocaleFromCountryCode, validateCountryCode } = require('../config/region');
+const { getCompanyLocale } = require('./companyService');
 
 /**
  * Register a new company and its first admin user.
@@ -300,6 +301,7 @@ async function login(email, password) {
     }
     const valid = await bcrypt.compare(password, row.password);
     if (valid) {
+      const locale = await getCompanyLocale(row.company_id);
       const token = signToken({
         user_id: row.id,
         company_id: row.company_id,
@@ -316,6 +318,13 @@ async function login(email, password) {
           role: row.role,
           employee_id: row.employee_id || null,
           created_at: row.created_at,
+          company_locale: locale
+            ? {
+                country_code: locale.country_code,
+                timezone: locale.timezone,
+                currency: locale.currency,
+              }
+            : null,
         },
         token,
       };

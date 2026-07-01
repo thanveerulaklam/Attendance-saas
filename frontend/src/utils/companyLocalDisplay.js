@@ -3,11 +3,11 @@ import { IST } from './istDisplay';
 import { countryProfile } from '../constants/countryProfiles';
 
 /** Prefer region profile when DB timezone does not match country (legacy rows). */
-export function resolveCompanyTimezone(company) {
-  if (!company) return IST;
-  const code = String(company.country_code || 'IN').toUpperCase();
+export function resolveCompanyTimezone(companyOrLocale) {
+  if (!companyOrLocale) return IST;
+  const code = String(companyOrLocale.country_code || 'IN').toUpperCase();
   const expected = countryProfile(code).timezone;
-  const stored = company.timezone;
+  const stored = companyOrLocale.timezone;
   if (code === 'AE') return 'Asia/Dubai';
   if (stored && stored === expected) return stored;
   return expected || stored || IST;

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, useMemo, useCallback } from 'react';
 import { authFetch } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 import { IST } from '../utils/istDisplay';
 import {
   formatLocalTime,
@@ -59,6 +60,7 @@ function isOnBreakStatus(row, isTodaySelected) {
 }
 
 export default function AttendancePage() {
+  const { user } = useAuth();
   const [monthYear, setMonthYear] = useState(() => getMonthYear(0));
   const [employeeId, setEmployeeId] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('all');
@@ -70,7 +72,7 @@ export default function AttendancePage() {
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
   const [company, setCompany] = useState(null);
-  const companyTz = resolveCompanyTimezone(company);
+  const companyTz = resolveCompanyTimezone(company || user?.company_locale);
   const todayStr = useMemo(() => todayYmdInTimezone(companyTz), [companyTz]);
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [loading, setLoading] = useState(false);

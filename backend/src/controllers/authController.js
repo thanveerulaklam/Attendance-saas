@@ -1,5 +1,6 @@
 const authService = require('../services/authService');
 const auditService = require('../services/auditService');
+const { getCompanyLocale } = require('../services/companyService');
 
 /**
  * POST /api/auth/register
@@ -65,6 +66,15 @@ async function me(req, res, next) {
       payload.name = status.employee?.name;
       payload.employee = status.employee;
       payload.company = status.company;
+    } else if (req.companyId) {
+      const locale = await getCompanyLocale(req.companyId);
+      if (locale) {
+        payload.company_locale = {
+          country_code: locale.country_code,
+          timezone: locale.timezone,
+          currency: locale.currency,
+        };
+      }
     }
     res.status(200).json({
       success: true,

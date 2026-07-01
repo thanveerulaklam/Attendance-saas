@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { authFetch } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
 import {
   buildDayWiseWhatsAppMessage,
@@ -167,6 +168,7 @@ function parseCsvText(csvText) {
 }
 
 export default function ReportsPage() {
+  const { user } = useAuth();
   const [year, setYear] = useState(currentYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(null);
@@ -211,7 +213,7 @@ export default function ReportsPage() {
   const [reportBranchFilter, setReportBranchFilter] = useState('');
   const [company, setCompany] = useState(null);
 
-  const companyTz = resolveCompanyTimezone(company);
+  const companyTz = resolveCompanyTimezone(company || user?.company_locale);
   const companyCurrency = company?.currency || 'INR';
   const fmtSym = (n) => formatMoneyWithSymbol(n, companyCurrency);
   const showIndiaStatutory = company?.region_features?.esi === true;

@@ -93,6 +93,8 @@ async function updateCurrentCompany(req, res, next) {
       'whatsapp_send_time',
       'enable_shift_rotation',
       'flexible_hours_mode',
+      'mol_establishment_id',
+      'bank_routing_code',
     ];
     for (const key of keys) {
       if (Object.prototype.hasOwnProperty.call(body, key)) {

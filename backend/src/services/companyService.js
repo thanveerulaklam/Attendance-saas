@@ -66,7 +66,6 @@ const COMPANY_SELECT = `id, name, email, phone, address, onboarding_completed_at
   hours_based_shifts_only, paid_leave_forfeit_if_absence_gt, shifts_compact_ui,
   enable_shift_rotation, flexible_hours_mode,
   country_code, timezone, currency,
-  mol_establishment_id, bank_routing_code,
   whatsapp_auto_enabled, whatsapp_primary_number, whatsapp_secondary_number,
   whatsapp_send_time, whatsapp_last_sent_for_date, whatsapp_last_sent_at,
   created_at`;
@@ -77,6 +76,41 @@ async function isFlexibleHoursMode(companyId) {
     [companyId]
   );
   return result.rows[0]?.flexible_hours_mode === true;
+}
+
+/** UAE WPS columns (migration 074) — loaded separately so older DBs still work. */
+async function attachWpsCompanyFields(companyId, company) {
+  if (!company) return company;
+  try {
+    const wps = await pool.query(
+      `SELECT mol_establishment_id, bank_routing_code FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    if (wps.rows[0]) {
+      company.mol_establishment_id = wps.rows[0].mol_establishment_id;
+      company.bank_routing_code = wps.rows[0].bank_routing_code;
+    }
+  } catch (err) {
+    if (err.code !== '42703') throw err;
+    company.mol_establishment_id = null;
+    company.bank_routing_code = null;
+  }
+  return company;
+}
+
+async function getCompanyLocale(companyId) {
+  try {
+    const result = await pool.query(
+      `SELECT country_code, timezone, currency FROM companies WHERE id = $1`,
+      [companyId]
+    );
+    return normalizeCompanyLocale(result.rows[0] || null);
+  } catch (err) {
+    if (err.code === '42703') {
+      return { country_code: 'IN', timezone: 'Asia/Kolkata', currency: 'INR' };
+    }
+    throw err;
+  }
 }
 
 async function getCompanyById(companyId) {
@@ -94,7 +128,8 @@ async function getCompanyById(companyId) {
     [companyId]
   );
 
-  return normalizeCompanyLocale(result.rows[0] || null);
+  const company = normalizeCompanyLocale(result.rows[0] || null);
+  return attachWpsCompanyFields(companyId, company);
 }
 
 /** Grace period in days after subscription_end_date before blocking. */
@@ -285,7 +320,9 @@ async function updateCompany(companyId, data) {
 
   clearShiftRotationFlagCache(companyId);
 
-  return result.rows[0] || null;
+  const row = result.rows[0] || null;
+  if (!row) return null;
+  return attachWpsCompanyFields(companyId, normalizeCompanyLocale(row));
 }
 
 async function updateSubscription(companyId, data) {
@@ -407,6 +444,7 @@ async function getCompanyCountryCode(companyId) {
 
 module.exports = {
   getCompanyById,
+  getCompanyLocale,
   getCompanyTimezone,
   getCompanyCountryCode,
   getSubscriptionStatus,

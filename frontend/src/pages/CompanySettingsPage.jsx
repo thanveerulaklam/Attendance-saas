@@ -141,7 +141,8 @@ export default function CompanySettingsPage() {
           },
         });
         if (!res.ok) {
-          throw new Error('Unable to load company profile');
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.message || 'Unable to load company profile');
         }
         const json = await res.json();
         if (!isMounted) return;
