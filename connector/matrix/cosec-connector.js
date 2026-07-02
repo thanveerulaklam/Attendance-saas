@@ -442,6 +442,102 @@ async function runSyncTick(cfg, cursor) {
   };
 }
 
+/**
+ * Mirrors POST /api/device/push row validation in deviceController.pushLogs.
+ * Does not check API key or whether employee_code exists in PunchPay DB.
+ */
+function validatePushLogRow(log, index) {
+  const errors = [];
+  const rawCode = log.employee_code;
+  if (rawCode == null || String(rawCode).trim() === '') {
+    errors.push('employee_code is required');
+  }
+  if (log.punch_time == null || log.punch_time === '') {
+    errors.push('punch_time is required');
+  } else {
+    const punchTime = new Date(log.punch_time);
+    if (Number.isNaN(punchTime.getTime())) {
+      errors.push('punch_time is not a valid date');
+    }
+  }
+  const punchType = String(log.punch_type || '').trim().toLowerCase();
+  if (punchType !== 'in' && punchType !== 'out') {
+    errors.push('punch_type must be "in" or "out"');
+  }
+  return {
+    index,
+    ok: errors.length === 0,
+    errors,
+    normalized: errors.length === 0
+      ? {
+          employee_code: String(rawCode).trim(),
+          punch_time: new Date(log.punch_time).toISOString(),
+          punch_type: punchType,
+        }
+      : null,
+  };
+}
+
+function toPushPayload(logs) {
+  return logs.map(({ employee_code, punch_time, punch_type }) => ({
+    employee_code,
+    punch_time,
+    punch_type,
+  }));
+}
+
+function buildInitialCursor(cfg) {
+  return {
+    rollOverCount: Number(cfg.initialRollOverCount || 0),
+    seqNumber: Number(cfg.initialSeqNumber || 1),
+    seenKeys: [],
+    lastEventAt: null,
+    apiPrefix: cfg.apiPrefix || null,
+  };
+}
+
+async function resolveStartCursor(cfg) {
+  const cursor = buildInitialCursor(cfg);
+  if (cfg.syncFromLatest !== true) return cursor;
+
+  try {
+    const count = await fetchEventCount(cfg);
+    cursor.rollOverCount = count.rollOverCount;
+    cursor.seqNumber = Math.max(1, count.seqNumber);
+    cursor.apiPrefix = count.apiPrefix;
+  } catch (_) {
+    // dry-run/probe fall back to config defaults
+  }
+  return cursor;
+}
+
+function printValidationReport(mappedLogs) {
+  const payload = toPushPayload(mappedLogs);
+  const results = payload.map((row, i) => validatePushLogRow(row, i));
+  const valid = results.filter((r) => r.ok);
+  const invalid = results.filter((r) => !r.ok);
+
+  log('--- PunchPay format check (offline, no cloud push) ---');
+  log(`Rows mapped from device: ${mappedLogs.length}`);
+  log(`Rows passing app format rules: ${valid.length}`);
+  log(`Rows failing format rules: ${invalid.length}`);
+
+  for (const row of invalid.slice(0, 10)) {
+    log(`  Row ${row.index}: ${row.errors.join('; ')}`);
+  }
+  if (invalid.length > 10) {
+    log(`  ... and ${invalid.length - 10} more invalid row(s)`);
+  }
+
+  if (valid.length > 0) {
+    log('Sample valid payload (exact shape sent to POST /api/device/push):');
+    log(JSON.stringify({ logs: valid.slice(0, 3).map((r) => r.normalized) }, null, 2));
+  }
+
+  log('Not checked offline: device API key, employee exists in PunchPay (unknown codes are skipped on push).');
+  return { payload, valid, invalid, ok: mappedLogs.length > 0 && invalid.length === 0 };
+}
+
 async function runProbe(cfg) {
   log(`Probing COSEC device at ${cfg.deviceIp}...`);
 
@@ -452,62 +548,112 @@ async function runProbe(cfg) {
     log(`geteventcount failed (continuing): ${formatErr(err)}`);
   }
 
-  const cursor = {
-    rollOverCount: Number(cfg.initialRollOverCount || 0),
-    seqNumber: Number(cfg.initialSeqNumber || 1),
-    seenKeys: [],
-  };
-
+  const cursor = await resolveStartCursor(cfg);
   const { events, apiPrefix } = await fetchEvents(cfg, cursor);
   log(`Fetched ${events.length} raw event(s) via prefix "${apiPrefix || '/'}".`);
 
   if (events.length === 0) {
     log('Probe OK — device reachable but no events at current cursor.');
-    return;
+    log('Tip: punch once on the device, wait a few seconds, run probe again.');
+    return { deviceOk: true, mapped: 0 };
   }
 
   const sample = events[0];
   log(`Sample raw event: ${JSON.stringify(sample)}`);
 
-  const logs = toLogs(events.slice(0, 5), cfg);
+  const logs = toLogs(events.slice(0, 10), cfg);
   if (logs.length === 0) {
     log('WARNING: Events returned but none mapped. Check employee user-id and event-id filters.');
-    return;
+    return { deviceOk: true, mapped: 0 };
   }
 
-  log(`Sample mapped log(s): ${JSON.stringify(logs.map(({ _dedupe, ...rest }) => rest))}`);
-  log('Probe complete.');
+  printValidationReport(logs);
+  log('Probe complete (no data sent to PunchPay).');
+  return { deviceOk: true, mapped: logs.length };
+}
+
+async function runDryRun(cfg) {
+  log('DRY RUN — fetch + map + validate only. Nothing is sent to PunchPay.');
+
+  const cursor = await resolveStartCursor(cfg);
+  log(`Using cursor: roll-over=${cursor.rollOverCount} seq=${cursor.seqNumber}`);
+
+  const { events: rawEvents, apiPrefix } = await fetchEvents(cfg, cursor);
+  log(`Fetched ${rawEvents.length} raw event(s) via prefix "${apiPrefix || '/'}".`);
+
+  if (!rawEvents.length) {
+    log('No events at cursor. Device reachable but nothing to map.');
+    log('Tip: punch on device or set syncFromLatest false and lower initialSeqNumber for history.');
+    return { ok: false, reason: 'no_events' };
+  }
+
+  const attendanceRaw = rawEvents.filter((ev) => isAttendanceEvent(ev, cfg));
+  log(`Attendance-related events (101–110 / 411): ${attendanceRaw.length} of ${rawEvents.length}`);
+
+  const logs = toLogs(rawEvents, cfg);
+  const report = printValidationReport(logs);
+
+  const previewPath = path.join(appDir, 'dry-run-preview.json');
+  const preview = {
+    generated_at: new Date().toISOString(),
+    device_ip: cfg.deviceIp,
+    note: 'Preview only — not sent to PunchPay. employee_code must exist in app before real sync.',
+    push_body: { logs: report.payload },
+    validation: {
+      total_mapped: logs.length,
+      valid_rows: report.valid.length,
+      invalid_rows: report.invalid.length,
+    },
+  };
+  writeJson(previewPath, preview);
+  log(`Full preview written to: ${previewPath}`);
+
+  if (report.ok) {
+    log('DRY RUN PASS — mapped data matches PunchPay push format. Safe to add device in app and run --once.');
+  } else if (logs.length === 0) {
+    log('DRY RUN WARN — device OK but no attendance rows mapped. Fix user-id / event filters.');
+  } else {
+    log('DRY RUN FAIL — some rows do not match PunchPay format. Fix mapping before going live.');
+  }
+
+  return { ok: report.ok, mapped: logs.length };
+}
+
+function validateDeviceConfig(cfg) {
+  if (!cfg.deviceIp || !cfg.cosecUsername || !cfg.cosecPassword) {
+    console.error('ERROR: config.cosec.json must include deviceIp, cosecUsername, cosecPassword.');
+    process.exit(1);
+  }
 }
 
 function validateConfig(cfg) {
-  if (!cfg.deviceIp || !cfg.deviceApiKey || !cfg.cosecUsername || !cfg.cosecPassword) {
-    console.error('ERROR: config.cosec.json must include deviceIp, deviceApiKey, cosecUsername, cosecPassword.');
+  validateDeviceConfig(cfg);
+  if (!cfg.deviceApiKey) {
+    console.error('ERROR: deviceApiKey is required for sync (--once / npm start).');
+    console.error('For testing without the app, use --probe or --dry-run (API key not needed).');
     process.exit(1);
   }
 }
 
 async function main() {
   const cfg = loadConfig();
-  validateConfig(cfg);
-
   const pollIntervalMs = Number(cfg.pollIntervalMs || 60000);
   const runOnce = process.argv.includes('--once');
   const isProbe = process.argv.includes('--probe');
+  const isDryRun = process.argv.includes('--dry-run');
 
-  if (isProbe) {
-    await runProbe(cfg);
-    process.exit(0);
+  if (isProbe || isDryRun) {
+    validateDeviceConfig(cfg);
+    const result = isDryRun ? await runDryRun(cfg) : await runProbe(cfg);
+    const exitOk = isDryRun ? result.ok === true : result.mapped > 0;
+    process.exit(exitOk ? 0 : 1);
   }
+
+  validateConfig(cfg);
 
   let cursor = readJson(statePath, null);
   if (!cursor) {
-    cursor = {
-      rollOverCount: Number(cfg.initialRollOverCount || 0),
-      seqNumber: Number(cfg.initialSeqNumber || 1),
-      seenKeys: [],
-      lastEventAt: null,
-      apiPrefix: cfg.apiPrefix || null,
-    };
+    cursor = buildInitialCursor(cfg);
 
     if (cfg.syncFromLatest === true) {
       try {

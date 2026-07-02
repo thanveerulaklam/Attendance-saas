@@ -2,6 +2,7 @@ node_modules/
 dist/*.exe
 dist/*-mac
 config.cosec.json
+dry-run-preview.json
 cosec.state.json
 connector-cosec.log
 install-log.txt

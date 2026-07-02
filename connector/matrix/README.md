@@ -45,8 +45,19 @@ Copy to client PC (e.g. `C:\MatrixConnector\`):
 
 ## Quick commands
 
+**Before configuring PunchPay** (no API key needed — only device IP + COSEC login):
+
 ```bash
-npm run probe    # test device, no cloud push
+# Copy probe template (no deviceApiKey required)
+cp config.example.probe.json config.cosec.json
+
+npm run probe      # quick: device reachability + sample mapping
+npm run dry-run    # full batch + PunchPay format validation + dry-run-preview.json
+```
+
+With API key (live sync):
+
+```bash
 npm run once     # one sync to PunchPay
 npm start        # continuous polling
 ```
@@ -55,8 +66,8 @@ Or with the exe:
 
 ```bash
 connector-cosec.exe --probe
+connector-cosec.exe --dry-run
 connector-cosec.exe --once
-connector-cosec.exe
 ```
 
 Logs: `connector-cosec.log` · State: `cosec.state.json`

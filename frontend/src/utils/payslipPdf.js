@@ -363,6 +363,14 @@ function renderCompactPayslip(
       },
     }) + layout.sectionGap;
 
+  const earningAmounts = [
+    b.basicSalary,
+    b.travelAllowance,
+    b.otherAllowance,
+    ...(allowOvertime ? [b.overtimePay] : []),
+    b.paidLeaveEncashmentAmount,
+    b.noLeaveIncentive,
+  ];
   const earningRows = rowsWithAmount([
     ['Earned basic', b.basicSalary],
     ['Travel', b.travelAllowance],
@@ -371,7 +379,8 @@ function renderCompactPayslip(
     ['Leave encash', b.paidLeaveEncashmentAmount],
     ['Incentive', b.noLeaveIncentive],
   ]);
-  earningRows.push(['Gross', money(b.grossSalary)]);
+  const earningsGross = earningAmounts.reduce((sum, n) => sum + Number(n || 0), 0);
+  earningRows.push(['Gross', money(earningsGross)]);
 
   const deductionRows = rowsWithAmount([
     ['Absent', b.absenceDeduction],
