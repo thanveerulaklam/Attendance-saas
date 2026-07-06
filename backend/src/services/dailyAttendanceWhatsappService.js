@@ -20,21 +20,35 @@ function formatDateLongIstYmd(ymd) {
 function buildSummaryFromRows(rows) {
   const list = Array.isArray(rows) ? rows : [];
   const present = list.filter((r) => r.present).length;
+  const shiftPending = list.filter((r) => r.shift_pending).length;
   const late = list.filter((r) => r.late).length;
   const overtimeHours = list.reduce((sum, r) => sum + (Number(r.overtime_hours) || 0), 0);
   return {
     total: list.length,
     present,
-    absent: list.length - present,
+    shiftPending,
+    absent: list.filter((r) => !r.present && !r.shift_pending).length,
     late,
     overtimeHours: Math.round(overtimeHours * 100) / 100,
   };
 }
 
 function formatAbsenteesList(rows) {
-  const absentees = (rows || []).filter((r) => !r.present);
-  if (absentees.length === 0) return 'None';
-  return absentees.map((r) => r.name || 'Unknown').join(', ');
+  const list = rows || [];
+  const absentees = list.filter((r) => !r.present && !r.shift_pending);
+  const pending = list.filter((r) => r.shift_pending);
+  const parts = [];
+  if (absentees.length === 0) {
+    parts.push('None');
+  } else {
+    parts.push(absentees.map((r) => r.name || 'Unknown').join(', '));
+  }
+  if (pending.length > 0) {
+    parts.push(
+      `Shift not started: ${pending.map((r) => r.name || 'Unknown').join(', ')}`
+    );
+  }
+  return parts.join(' | ');
 }
 
 /**
@@ -138,6 +152,7 @@ async function sendDailyAttendanceForCompany(company, options = {}) {
 module.exports = {
   buildSummaryFromRows,
   buildTemplateBodyParameters,
+  formatAbsenteesList,
   formatDateLongIstYmd,
   sendDailyAttendanceForCompany,
   resolveRecipientNumbers,
