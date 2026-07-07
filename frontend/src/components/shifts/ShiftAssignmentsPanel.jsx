@@ -15,6 +15,10 @@ export default function ShiftAssignmentsPanel({ shifts }) {
   const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
+  const [hideAssignedOnTarget, setHideAssignedOnTarget] = useState(true);
+  const [moveShiftId, setMoveShiftId] = useState('');
+  const [moveIds, setMoveIds] = useState([]);
+  const [moving, setMoving] = useState(false);
 
   const load = async () => {
     try {
@@ -82,10 +86,13 @@ export default function ShiftAssignmentsPanel({ shifts }) {
     return effectiveShifts.filter((row) => Number(row.shift_id) === sid);
   }, [effectiveShifts, shiftId]);
 
-  const isAssignedToTarget = (employeeId) => {
-    if (!shiftId) return false;
-    return Number(effectiveShiftByEmployeeId.get(employeeId)) === Number(shiftId);
-  };
+  const employeesForBulkList = useMemo(() => {
+    if (!hideAssignedOnTarget || !shiftId) return employees;
+    const sid = Number(shiftId);
+    return employees.filter(
+      (emp) => Number(effectiveShiftByEmployeeId.get(emp.id)) !== sid
+    );
+  }, [employees, hideAssignedOnTarget, shiftId, effectiveShiftByEmployeeId]);
 
   const toggleEmployee = (id) => {
     setSelectedIds((prev) =>
@@ -94,11 +101,49 @@ export default function ShiftAssignmentsPanel({ shifts }) {
   };
 
   const selectAll = () => {
-    if (selectedIds.length === employees.length) {
-      setSelectedIds([]);
+    const pool = employeesForBulkList;
+    const poolIds = pool.map((e) => e.id);
+    const allSelected = poolIds.length > 0 && poolIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds((prev) => prev.filter((id) => !poolIds.includes(id)));
     } else {
-      setSelectedIds(employees.map((e) => e.id));
+      setSelectedIds((prev) => [...new Set([...prev, ...poolIds])]);
     }
+  };
+
+  const handleMoveOffShift = async (event) => {
+    event.preventDefault();
+    if (!moveIds.length || !moveShiftId) return;
+    try {
+      setMoving(true);
+      setError(null);
+      setSuccess('');
+      const res = await authFetch('/api/shift-rotation/assignments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_ids: moveIds,
+          shift_id: Number(moveShiftId),
+          effective_from: effectiveFrom,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to move employees');
+      setSuccess(`Moved ${moveIds.length} employee(s) from ${effectiveFrom}.`);
+      setMoveIds([]);
+      setMoveShiftId('');
+      await Promise.all([load(), loadEffectiveShifts(effectiveFrom)]);
+    } catch (err) {
+      setError(err.message || 'Failed to move employees');
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  const toggleMoveId = (id) => {
+    setMoveIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   const handleAssign = async (event) => {
@@ -134,8 +179,9 @@ export default function ShiftAssignmentsPanel({ shifts }) {
       <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3 text-xs text-slate-700">
         <p className="font-medium text-slate-900">What to do here</p>
         <p className="mt-1">
-          Select employees, choose the shift they should work (Day or Night), and set the date the
-          change starts. Attendance and payroll use the shift that applies on each calendar day.
+          Select employees not yet on the target shift, choose Day or Night, and set the start date.
+          To move someone off a shift, use <strong>Shift details</strong> below and assign them to a
+          different shift.
         </p>
       </div>
       <p className="text-xs text-slate-500">
@@ -197,44 +243,65 @@ export default function ShiftAssignmentsPanel({ shifts }) {
         </div>
 
         <div className="border-t border-slate-100 pt-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-[11px] font-medium text-slate-700">Employees</span>
-            <button
-              type="button"
-              onClick={selectAll}
-              className="text-[11px] text-blue-600 hover:underline"
-            >
-              {selectedIds.length === employees.length ? 'Clear all' : 'Select all'}
-            </button>
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[11px] font-medium text-slate-700">
+              Employees to add
+              {shiftId && hideAssignedOnTarget ? (
+                <span className="ml-1 font-normal text-slate-500">
+                  ({employeesForBulkList.length} not on this shift yet)
+                </span>
+              ) : null}
+            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              {shiftId && (
+                <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={hideAssignedOnTarget}
+                    onChange={(e) => {
+                      setHideAssignedOnTarget(e.target.checked);
+                      setSelectedIds([]);
+                    }}
+                  />
+                  Hide already on this shift
+                </label>
+              )}
+              <button
+                type="button"
+                onClick={selectAll}
+                className="text-[11px] text-blue-600 hover:underline"
+              >
+                {employeesForBulkList.length > 0 &&
+                employeesForBulkList.every((e) => selectedIds.includes(e.id))
+                  ? 'Clear all'
+                  : 'Select all'}
+              </button>
+            </div>
           </div>
           <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-50">
             {loading ? (
               <p className="p-3 text-xs text-slate-500">Loading…</p>
-            ) : employees.length === 0 ? (
-              <p className="p-3 text-xs text-slate-500">No active employees.</p>
+            ) : employeesForBulkList.length === 0 ? (
+              <p className="p-3 text-xs text-slate-500">
+                {shiftId && hideAssignedOnTarget
+                  ? 'Everyone is already on this shift. Uncheck “Hide already on this shift” to see all staff, or use Shift details below to move someone off.'
+                  : 'No active employees.'}
+              </p>
             ) : (
-              employees.map((emp) => {
-                const assigned = isAssignedToTarget(emp.id);
-                return (
-                  <label
-                    key={emp.id}
-                    className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs hover:bg-slate-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(emp.id)}
-                      onChange={() => toggleEmployee(emp.id)}
-                    />
-                    <span className="font-medium text-slate-800">{emp.name}</span>
-                    <span className="text-slate-400">{emp.employee_code}</span>
-                    {assigned && (
-                      <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-emerald-100">
-                        Assigned
-                      </span>
-                    )}
-                  </label>
-                );
-              })
+              employeesForBulkList.map((emp) => (
+                <label
+                  key={emp.id}
+                  className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs hover:bg-slate-50"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(emp.id)}
+                    onChange={() => toggleEmployee(emp.id)}
+                  />
+                  <span className="font-medium text-slate-800">{emp.name}</span>
+                  <span className="text-slate-400">{emp.employee_code}</span>
+                </label>
+              ))
             )}
           </div>
         </div>
@@ -259,6 +326,7 @@ export default function ShiftAssignmentsPanel({ shifts }) {
               <table className="min-w-full text-left text-xs">
                 <thead>
                   <tr className="border-b border-slate-100 text-slate-500">
+                    <th className="py-2 pr-2 font-medium w-8" />
                     <th className="py-2 pr-4 font-medium">Employee</th>
                     <th className="py-2 pr-4 font-medium">Department</th>
                     <th className="py-2 font-medium">Since</th>
@@ -267,6 +335,14 @@ export default function ShiftAssignmentsPanel({ shifts }) {
                 <tbody>
                   {rosterOnSelectedShift.map((row) => (
                     <tr key={row.employee_id} className="border-b border-slate-50">
+                      <td className="py-2 pr-2">
+                        <input
+                          type="checkbox"
+                          checked={moveIds.includes(row.employee_id)}
+                          onChange={() => toggleMoveId(row.employee_id)}
+                          aria-label={`Select ${row.employee_name} to move`}
+                        />
+                      </td>
                       <td className="py-2 pr-4">
                         {row.employee_name}
                         <span className="ml-1 text-slate-400">{row.employee_code}</span>
@@ -281,10 +357,41 @@ export default function ShiftAssignmentsPanel({ shifts }) {
                   ))}
                 </tbody>
               </table>
+              {rosterOnSelectedShift.length > 0 && (
+                <form
+                  onSubmit={handleMoveOffShift}
+                  className="mt-3 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3"
+                >
+                  <p className="w-full text-[11px] text-slate-600">
+                    To remove someone from this shift, select them and move to another shift
+                    (effective from {effectiveFrom}).
+                  </p>
+                  <select
+                    value={moveShiftId}
+                    onChange={(e) => setMoveShiftId(e.target.value)}
+                    className="min-w-[180px] rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                  >
+                    <option value="">Move to shift…</option>
+                    {shifts
+                      .filter((s) => String(s.id) !== String(shiftId))
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.shift_name}
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="submit"
+                    disabled={moving || !moveIds.length || !moveShiftId}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {moving ? 'Moving…' : `Move ${moveIds.length || 0} selected`}
+                  </button>
+                </form>
+              )}
               <p className="mt-2 text-[11px] text-slate-500">
                 {rosterOnSelectedShift.length} employee
-                {rosterOnSelectedShift.length === 1 ? '' : 's'} on this shift. Select others above to
-                move them here or assign a different shift.
+                {rosterOnSelectedShift.length === 1 ? '' : 's'} on this shift.
               </p>
             </div>
           )}
