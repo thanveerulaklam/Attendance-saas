@@ -488,9 +488,11 @@ export default function EmployeesPage() {
                           { year: 'numeric', month: 'short', day: 'numeric' }
                         )
                       : '—';
-                    const shiftName = employee.shift_id != null
-                      ? shiftNameById[String(employee.shift_id)] ?? `#${employee.shift_id}`
-                      : '—';
+                    const shiftName =
+                      employee.effective_shift_name ||
+                      (employee.shift_id != null
+                        ? shiftNameById[String(employee.shift_id)] ?? `#${employee.shift_id}`
+                        : '—');
                     const branchLabel =
                       employee.branch_id != null
                         ? branchNameById[String(employee.branch_id)] || '—'

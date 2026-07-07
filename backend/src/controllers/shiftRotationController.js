@@ -14,6 +14,7 @@ const {
   buildRotationPreview,
   rotateGroupNow,
   processDueRotations,
+  syncRotationGroupAssignments,
 } = require('../services/shiftRotationService');
 const { assertShiftRotationEnabled } = require('../services/shiftRotationPolicyService');
 
@@ -164,6 +165,34 @@ async function postImportMembers(req, res, next) {
   }
 }
 
+async function postSyncAssignments(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const groupId = Number(req.params.id);
+    if (!companyId || !Number.isInteger(groupId)) {
+      return res.status(400).json({ success: false, message: 'Invalid request' });
+    }
+    const body = req.body || {};
+    const result = await syncRotationGroupAssignments(companyId, groupId, {
+      effectiveFrom: body.effective_from || body.effectiveFrom,
+      createdBy: req.user?.id,
+    });
+    const groups = await listRotationGroups(companyId);
+    const group = groups.find((g) => g.id === groupId);
+    return res.json({
+      success: true,
+      data: {
+        ...result,
+        group: group
+          ? { ...group, preview: buildRotationPreview(group, group.members) }
+          : null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deleteGroup(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -205,6 +234,7 @@ module.exports = {
   postGroup,
   putGroupMembers,
   postImportMembers,
+  postSyncAssignments,
   deleteGroup,
   postRotateNow,
 };

@@ -22,6 +22,7 @@ export default function ShiftRotationPanel({ shifts }) {
   const [creating, setCreating] = useState(false);
   const [rotatingId, setRotatingId] = useState(null);
   const [importingId, setImportingId] = useState(null);
+  const [syncingId, setSyncingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [success, setSuccess] = useState('');
   const [form, setForm] = useState({
@@ -156,6 +157,35 @@ export default function ShiftRotationPanel({ shifts }) {
     }
   };
 
+  const handleSyncAssignments = async (group) => {
+    if (
+      !window.confirm(
+        `Apply current shifts in "${group.name}" to all members for today? This updates employee records and attendance.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setSyncingId(group.id);
+      setError(null);
+      setSuccess('');
+      const res = await authFetch(`/api/shift-rotation/rotation-groups/${group.id}/sync-assignments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Sync failed');
+      const synced = json.data?.synced ?? 0;
+      setSuccess(`Applied shifts for ${synced} employee(s). Check the Employees page.`);
+      await load();
+    } catch (err) {
+      setError(err.message || 'Sync failed');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   const handleDelete = async (group) => {
     const label = group.name || 'this rotation group';
     if (
@@ -240,8 +270,9 @@ export default function ShiftRotationPanel({ shifts }) {
         <p className="mt-1">
           Pick the shifts that swap (e.g. Day and Night), then use{' '}
           <strong>Import from assignments</strong> to pull in everyone already on those shifts from
-          the Assignments tab. Set how many weeks between swaps, then use <strong>Rotate now</strong>{' '}
-          for an immediate swap or wait for the next rotation date.
+          the Assignments tab. Changing a member&apos;s shift or adding someone also updates their
+          employee record automatically. Use <strong>Apply shifts to staff</strong> if the Employees
+          page is out of date. Use <strong>Rotate now</strong> when the cycle should swap.
         </p>
       </div>
 
@@ -388,8 +419,27 @@ export default function ShiftRotationPanel({ shifts }) {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => handleSyncAssignments(group)}
+                  disabled={
+                    syncingId === group.id ||
+                    importingId === group.id ||
+                    rotatingId === group.id ||
+                    deletingId === group.id ||
+                    !(group.members || []).length
+                  }
+                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                >
+                  {syncingId === group.id ? 'Applying…' : 'Apply shifts to staff'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleRotate(group.id)}
-                  disabled={rotatingId === group.id || deletingId === group.id}
+                  disabled={
+                    rotatingId === group.id ||
+                    deletingId === group.id ||
+                    syncingId === group.id ||
+                    importingId === group.id
+                  }
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                 >
                   {rotatingId === group.id ? 'Rotating…' : 'Rotate now'}

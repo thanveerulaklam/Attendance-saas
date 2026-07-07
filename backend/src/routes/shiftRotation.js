@@ -9,6 +9,7 @@ const {
   postGroup,
   putGroupMembers,
   postImportMembers,
+  postSyncAssignments,
   deleteGroup,
   postRotateNow,
 } = require('../controllers/shiftRotationController');
@@ -27,6 +28,7 @@ router.get('/rotation-groups', auth, getGroups);
 router.post('/rotation-groups', auth, postGroup);
 router.put('/rotation-groups/:id/members', auth, putGroupMembers);
 router.post('/rotation-groups/:id/import-members', auth, postImportMembers);
+router.post('/rotation-groups/:id/sync-assignments', auth, postSyncAssignments);
 router.delete('/rotation-groups/:id', auth, deleteGroup);
 router.post('/rotation-groups/:id/rotate', auth, postRotateNow);
 

@@ -137,13 +137,62 @@ async function updateRotationGroupMembers(companyId, groupId, members) {
     }
 
     await client.query('COMMIT');
-    return listRotationGroups(companyId).then((groups) => groups.find((g) => g.id === gid));
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
   } finally {
     client.release();
   }
+
+  await syncRotationGroupAssignments(companyId, gid);
+  return listRotationGroups(companyId).then((groups) => groups.find((g) => g.id === gid));
+}
+
+/**
+ * Write rotation member slots to dated shift assignments + employees.shift_id for today.
+ */
+async function syncRotationGroupAssignments(companyId, groupId, { effectiveFrom, createdBy, notes } = {}) {
+  await assertShiftRotationEnabled(companyId);
+  const gid = Number(groupId);
+  const groupR = await pool.query(
+    `SELECT * FROM shift_rotation_groups WHERE company_id = $1 AND id = $2`,
+    [companyId, gid]
+  );
+  if (groupR.rowCount === 0) throw new AppError('Rotation group not found', 404);
+  const group = groupR.rows[0];
+  const fromDate = String(effectiveFrom || todayIstYmd()).slice(0, 10);
+
+  const membersR = await pool.query(
+    `SELECT employee_id, slot FROM shift_rotation_group_members WHERE group_id = $1`,
+    [gid]
+  );
+  if (membersR.rowCount === 0) {
+    return { synced: 0, effective_from: fromDate };
+  }
+
+  const buckets = new Map();
+  for (const m of membersR.rows) {
+    const shiftId = slotToShiftId(group, m.slot);
+    if (!shiftId) continue;
+    if (!buckets.has(shiftId)) buckets.set(shiftId, []);
+    buckets.get(shiftId).push(Number(m.employee_id));
+  }
+
+  let synced = 0;
+  for (const [shiftId, employeeIds] of buckets) {
+    await assignShiftBulk(companyId, {
+      employeeIds,
+      shiftId,
+      effectiveFrom: fromDate,
+      source: 'rotation',
+      rotationGroupId: gid,
+      notes: notes || `Rotation group: ${group.name}`,
+      createdBy,
+    });
+    synced += employeeIds.length;
+  }
+
+  return { synced, effective_from: fromDate };
 }
 
 /**
@@ -307,6 +356,7 @@ module.exports = {
   listRotationGroups,
   createRotationGroup,
   updateRotationGroupMembers,
+  syncRotationGroupAssignments,
   importRotationGroupMembersFromAssignments,
   deleteRotationGroup,
   buildRotationPreview,

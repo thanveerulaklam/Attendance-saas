@@ -2,7 +2,7 @@ const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { getCompanyCountryCode } = require('./companyService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
-const { assignShiftBulk } = require('./shiftAssignmentService');
+const { assignShiftBulk, resolveShiftIdsForEmployeesOnDate } = require('./shiftAssignmentService');
 const { todayIstYmd, pgDateToYmd } = require('../utils/istDate');
 const {
   validateCreateEmployee,
@@ -476,8 +476,63 @@ async function getEmployees(
     [...baseParams, pageSize, offset]
   );
 
+  let rows = listResult.rows;
+  const rotationEnabled = await isShiftRotationEnabled(companyId);
+  if (rotationEnabled && rows.length > 0) {
+    const client = await pool.connect();
+    try {
+      const employeesById = new Map(rows.map((r) => [Number(r.id), r]));
+      const employeeIds = rows.map((r) => Number(r.id));
+      const asOf = todayIstYmd();
+      const effectiveMap = await resolveShiftIdsForEmployeesOnDate(
+        client,
+        companyId,
+        employeeIds,
+        asOf,
+        employeesById
+      );
+      const shiftIds = [
+        ...new Set(
+          [...effectiveMap.values(), ...rows.map((r) => r.shift_id)]
+            .filter((id) => id != null)
+            .map(Number)
+        ),
+      ];
+      const nameMap = new Map();
+      if (shiftIds.length > 0) {
+        const namesR = await pool.query(
+          `SELECT id, shift_name FROM shifts WHERE company_id = $1 AND id = ANY($2::bigint[])`,
+          [companyId, shiftIds]
+        );
+        for (const s of namesR.rows) {
+          nameMap.set(Number(s.id), s.shift_name);
+        }
+      }
+      rows = rows.map((emp) => {
+        const eid = Number(emp.id);
+        const effectiveShiftId = effectiveMap.get(eid) ?? emp.shift_id ?? null;
+        const effectiveIdNum =
+          effectiveShiftId != null ? Number(effectiveShiftId) : null;
+        const defaultIdNum = emp.shift_id != null ? Number(emp.shift_id) : null;
+        return {
+          ...emp,
+          effective_shift_id: effectiveIdNum,
+          effective_shift_name:
+            effectiveIdNum != null ? nameMap.get(effectiveIdNum) || null : null,
+          shift_rotation_enabled: true,
+          shift_differs_from_default:
+            effectiveIdNum != null &&
+            defaultIdNum != null &&
+            effectiveIdNum !== defaultIdNum,
+        };
+      });
+    } finally {
+      client.release();
+    }
+  }
+
   return {
-    data: listResult.rows,
+    data: rows,
     page: pageNumber,
     limit: pageSize,
     total,
