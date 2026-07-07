@@ -269,10 +269,9 @@ export default function ShiftRotationPanel({ shifts }) {
         <p className="font-medium text-slate-900">What to do here (optional)</p>
         <p className="mt-1">
           Pick the shifts that swap (e.g. Day and Night), then use{' '}
-          <strong>Import from assignments</strong> to pull in everyone already on those shifts from
-          the Assignments tab. Changing a member&apos;s shift or adding someone also updates their
-          employee record automatically. Use <strong>Apply shifts to staff</strong> if the Employees
-          page is out of date. Use <strong>Rotate now</strong> when the cycle should swap.
+          <strong>Import from assignments</strong> pulls the latest roster from the Assignments tab.
+          Changing a member&apos;s shift or using <strong>Apply shifts to staff</strong> updates
+          Assignments and the Employees page. Assignments and Rotation stay in sync automatically.
         </p>
       </div>
 

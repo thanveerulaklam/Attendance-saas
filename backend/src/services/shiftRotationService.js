@@ -103,7 +103,7 @@ async function createRotationGroup(companyId, data) {
   return r.rows[0];
 }
 
-async function updateRotationGroupMembers(companyId, groupId, members) {
+async function replaceRotationGroupMembers(companyId, groupId, members, { syncAssignments = true } = {}) {
   await assertShiftRotationEnabled(companyId);
   const gid = Number(groupId);
   const groupR = await pool.query(
@@ -144,8 +144,14 @@ async function updateRotationGroupMembers(companyId, groupId, members) {
     client.release();
   }
 
-  await syncRotationGroupAssignments(companyId, gid);
+  if (syncAssignments) {
+    await syncRotationGroupAssignments(companyId, gid);
+  }
   return listRotationGroups(companyId).then((groups) => groups.find((g) => g.id === gid));
+}
+
+async function updateRotationGroupMembers(companyId, groupId, members, options) {
+  return replaceRotationGroupMembers(companyId, groupId, members, options);
 }
 
 /**
@@ -196,6 +202,38 @@ async function syncRotationGroupAssignments(companyId, groupId, { effectiveFrom,
 }
 
 /**
+ * After manual shift assignments, rebuild every rotation group's member list from
+ * who is currently on that group's Morning/Night shifts (same rules as Import).
+ */
+async function syncAllRotationGroupsFromAssignments(companyId, asOfDate) {
+  await assertShiftRotationEnabled(companyId);
+  const asOf = String(asOfDate || todayIstYmd()).slice(0, 10);
+  const groupsR = await pool.query(
+    `SELECT * FROM shift_rotation_groups WHERE company_id = $1 ORDER BY created_at ASC`,
+    [companyId]
+  );
+  if (groupsR.rowCount === 0) {
+    return { groups_updated: 0, as_of: asOf };
+  }
+
+  const { data } = await listEffectiveShiftAssignments(companyId, asOf);
+  let groupsUpdated = 0;
+
+  for (const group of groupsR.rows) {
+    const members = [];
+    for (const row of data) {
+      const slot = shiftIdToSlot(group, row.shift_id);
+      if (!slot) continue;
+      members.push({ employee_id: row.employee_id, slot });
+    }
+    await replaceRotationGroupMembers(companyId, group.id, members, { syncAssignments: false });
+    groupsUpdated += 1;
+  }
+
+  return { groups_updated: groupsUpdated, as_of: asOf };
+}
+
+/**
  * Sync rotation group members from effective shift assignments on a date.
  * Employees on shift A/B/C in the group are added with matching slots; others are removed.
  */
@@ -219,7 +257,9 @@ async function importRotationGroupMembersFromAssignments(companyId, groupId, { a
     members.push({ employee_id: row.employee_id, slot });
   }
 
-  const updated = await updateRotationGroupMembers(companyId, gid, members);
+  const updated = await replaceRotationGroupMembers(companyId, gid, members, {
+    syncAssignments: false,
+  });
   return {
     as_of: asOf,
     imported: members.length,
@@ -356,7 +396,9 @@ module.exports = {
   listRotationGroups,
   createRotationGroup,
   updateRotationGroupMembers,
+  replaceRotationGroupMembers,
   syncRotationGroupAssignments,
+  syncAllRotationGroupsFromAssignments,
   importRotationGroupMembersFromAssignments,
   deleteRotationGroup,
   buildRotationPreview,

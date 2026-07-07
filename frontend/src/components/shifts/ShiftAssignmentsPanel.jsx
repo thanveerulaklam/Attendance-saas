@@ -180,8 +180,7 @@ export default function ShiftAssignmentsPanel({ shifts }) {
         <p className="font-medium text-slate-900">What to do here</p>
         <p className="mt-1">
           Select employees not yet on the target shift, choose Day or Night, and set the start date.
-          To move someone off a shift, use <strong>Shift details</strong> below and assign them to a
-          different shift.
+          Saving here also updates the <strong>Rotation</strong> tab automatically.
         </p>
       </div>
       <p className="text-xs text-slate-500">

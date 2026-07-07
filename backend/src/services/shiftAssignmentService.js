@@ -143,7 +143,12 @@ async function assignShiftBulk(companyId, { employeeIds, shiftId, effectiveFrom,
     }
 
     await client.query('COMMIT');
-    return { assigned: ids.length, shift_id: sid, effective_from: fromDate };
+    const result = { assigned: ids.length, shift_id: sid, effective_from: fromDate };
+    if (src !== 'rotation') {
+      const { syncAllRotationGroupsFromAssignments } = require('./shiftRotationService');
+      await syncAllRotationGroupsFromAssignments(companyId, fromDate);
+    }
+    return result;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
