@@ -901,6 +901,8 @@ const WHATSAPP_LINK =
   'https://wa.me/919600844041?text=Hi%2C%20I%20want%20to%20try%20PunchPay%20for%20my%20business';
 const WHATSAPP_PRICING_LINK =
   'https://wa.me/919600844041?text=Hi%2C%20I%20want%20to%20know%20PunchPay%20plans%20and%20pricing';
+const WHATSAPP_NO_BIOMETRIC_LINK =
+  'https://wa.me/919600844041?text=Hi%2C%20I%20don%27t%20have%20a%20biometric%20machine.%20I%20want%20to%20use%20the%20PunchPay%20Android%20kiosk%20app.';
 
 /* ── Google Fonts injected once ── */
 if (!document.getElementById('pp-fonts')) {
@@ -1087,6 +1089,7 @@ if (!document.getElementById('pp-vars')) {
       .pp-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; row-gap: 12px !important; }
       .pp-stats-grid > div { border-right: none !important; }
       .pp-features-grid { grid-template-columns: 1fr !important; }
+      .pp-attendance-options-grid { grid-template-columns: 1fr !important; }
       .pp-steps-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
       .pp-steps-line { display: none !important; }
       .pp-testimonials-grid { grid-template-columns: 1fr !important; }
@@ -1299,9 +1302,10 @@ export default function LoginPage() {
                 <span style={{ WebkitTextStroke: '2px var(--pp-white-dim)', color: 'transparent' }}>Effortlessly.</span>
               </h1>
 
-              <p style={{ fontSize: 16, color: 'var(--pp-white-dim)', maxWidth: 480, lineHeight: 1.7, fontWeight: 300, marginBottom: 36 }}>
+              <p style={{ fontSize: 16, color: 'var(--pp-white-dim)', maxWidth: 520, lineHeight: 1.7, fontWeight: 300, marginBottom: 36 }}>
                 Attendance tracking and payroll automation built for Tamil Nadu SMBs.
-                Connect your biometric machine. Generate salary in one click.
+                Connect your biometric machine — or use our free Android kiosk app on any office tablet.
+                Generate salary in one click.
               </p>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 32 }}>
@@ -1310,7 +1314,7 @@ export default function LoginPage() {
               </div>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
-                {['No credit card needed','Setup in 30 minutes','Local support'].map(t => (
+                {['No credit card needed','Setup in 30 minutes','Works without biometric hardware','Local support'].map(t => (
                   <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--pp-white-dim)' }}>
                     <span style={S.gold}>✓</span> {t}
                   </div>
@@ -1376,7 +1380,8 @@ export default function LoginPage() {
 
             <div className="pp-features-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
               {[
-                { icon: '🔌', title: 'Biometric Sync',       desc: 'Connect ZKTeco or ESSL machine. Punch data syncs to cloud automatically. Zero manual entry.' },
+                { icon: '🔌', title: 'Biometric Sync',       desc: 'Already have ZKTeco or ESSL? Connect it and punches sync to the cloud automatically. Zero manual entry.' },
+                { icon: '📱', title: 'Android Face Kiosk',   desc: 'No biometric machine? Install our free Android app on an office tablet. Employees punch with face recognition — no extra hardware to buy.' },
                 { icon: '⏱️', title: 'Smart Attendance',     desc: 'Daily and monthly view. Overtime, lunch breaks, half-day detection — calculated automatically.' },
                 { icon: '💰', title: 'One-Click Payroll',    desc: 'Complete salary for all employees in one click. Deductions, advances, incentives — full breakdown.' },
                 { icon: '📋', title: 'Multi-Branch Support', desc: 'Manage all branches from one dashboard. Each branch has its own attendance and payroll.' },
@@ -1393,8 +1398,71 @@ export default function LoginPage() {
           </div>
         </section>
 
+        {/* ══ NO BIOMETRIC? ══ */}
+        <section id="attendance-options" style={{ ...S.section('#0d0d0d'), padding: '64px 24px' }}>
+          <div style={S.maxW}>
+            <div style={{ textAlign: 'center', marginBottom: 36 }}>
+              <div className="pp-eyebrow">Flexible Setup</div>
+              <h2 className="pp-syne" style={{ ...S.heading, fontSize: 32, marginBottom: 10 }}>
+                No Biometric Device? No Problem.
+              </h2>
+              <p style={{ ...S.dim, fontSize: 14, maxWidth: 560, margin: '0 auto', lineHeight: 1.7 }}>
+                Many shops and small offices don&apos;t have a fingerprint machine yet. PunchPay works either way —
+                connect existing hardware or start with our Android kiosk app on a tablet you already have.
+              </p>
+            </div>
+
+            <div
+              className="pp-attendance-options-grid"
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 16 }}
+            >
+              <div className="pp-card" style={{ padding: 24 }}>
+                <div style={{ fontSize: 28, marginBottom: 12 }}>🔌</div>
+                <h3 className="pp-syne" style={{ fontSize: 15, fontWeight: 700, color: 'var(--pp-white)', marginBottom: 8 }}>
+                  Have a biometric machine
+                </h3>
+                <p style={{ fontSize: 12.5, color: 'var(--pp-white-dim)', lineHeight: 1.65, marginBottom: 16 }}>
+                  Install our connector on your office PC. ZKTeco and ESSL punches sync automatically to PunchPay.
+                </p>
+                <button type="button" className="pp-btn-ghost" style={{ fontSize: 11, padding: '10px 16px' }} onClick={() => handleScrollToSection('how-it-works')}>
+                  See setup steps
+                </button>
+              </div>
+
+              <div className="pp-card-gold" style={{ padding: 24 }}>
+                <div style={{ fontSize: 28, marginBottom: 12 }}>📱</div>
+                <h3 className="pp-syne" style={{ fontSize: 15, fontWeight: 700, color: 'var(--pp-white)', marginBottom: 8 }}>
+                  No biometric machine
+                </h3>
+                <p style={{ fontSize: 12.5, color: 'var(--pp-white-dim)', lineHeight: 1.65, marginBottom: 16 }}>
+                  Download the <strong style={{ color: 'var(--pp-white)' }}>PunchPay Kiosk</strong> Android app, install it on your office tablet, enroll employee faces, and attendance is captured automatically.
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  <button type="button" className="pp-btn-gold" style={{ fontSize: 11, padding: '10px 16px' }} onClick={() => handleScrollToSection('login-section')}>
+                    Login to download APK
+                  </button>
+                  <a
+                    href={WHATSAPP_NO_BIOMETRIC_LINK}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="pp-btn-ghost"
+                    style={{ fontSize: 11, padding: '10px 16px', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+                  >
+                    Ask us to help
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            <p style={{ textAlign: 'center', fontSize: 11.5, color: 'rgba(255,255,255,0.35)', marginTop: 20, lineHeight: 1.6 }}>
+              After login: <strong style={{ color: 'var(--pp-gold-dim)' }}>Company Settings</strong> → enable face attendance →{' '}
+              <strong style={{ color: 'var(--pp-gold-dim)' }}>Download Android APK</strong> → generate a kiosk code for your branch.
+            </p>
+          </div>
+        </section>
+
         {/* ══ HOW IT WORKS ══ */}
-        <section id="how-it-works" ref={howItWorksRef} style={{ ...S.section('#0d0d0d') }}>
+        <section id="how-it-works" ref={howItWorksRef} style={S.section()}>
           <div style={S.maxW}>
             <div style={{ textAlign: 'center', marginBottom: 48 }}>
               <div className="pp-eyebrow">Setup in Minutes</div>
@@ -1408,7 +1476,7 @@ export default function LoginPage() {
               {[
                 { n:1, title:'Register & Get Approved', desc:'Sign up with company details. We approve within 2 hours.' },
                 { n:2, title:'Add Employees & Shifts',  desc:'Add staff, set salaries, assign shifts and weekly offs.' },
-                { n:3, title:'Connect Your Device',     desc:'Install connector on office PC. Biometric punches sync automatically.' },
+                { n:3, title:'Set Up Attendance',       desc:'Connect your biometric machine — or install the PunchPay Kiosk Android app on an office tablet for face attendance.' },
                 { n:4, title:'Generate Payroll',        desc:'Click Generate Payroll at month end. Net salary calculated in seconds.' },
               ].map((st, i) => (
                 <div key={st.n} className={howItWorksInView ? `pp-fade-up pp-delay-${i+1}` : ''} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '0 16px' }}>
@@ -1434,44 +1502,40 @@ export default function LoginPage() {
                 margin: '0 auto',
               }}
             >
-              <div className="pp-eyebrow">Transparent Pricing</div>
+              <div className="pp-eyebrow">Affordable Pricing</div>
               <h2 className="pp-syne" style={{ ...S.heading, fontSize: 34, marginBottom: 12 }}>
-                Choose Your Plan
+                Built for SMB Budgets
               </h2>
               <p style={{ ...S.dim, fontSize: 14, lineHeight: 1.7, maxWidth: 520, margin: '0 auto 24px' }}>
-                One subscription price for every plan — plus a one-time license and setup fee
-                based on your team size. All prices exclude 18% GST.
+                PunchPay is priced for factories and shops — not enterprise budgets.
+                Most competitors charge <strong style={{ color: 'var(--pp-white)' }}>3× more</strong> for the same attendance and payroll features.
+                We keep it simple and affordable so Tamil Nadu businesses can actually afford it.
               </p>
 
               <div style={{
                 background: 'rgba(212,168,67,0.08)',
                 border: '1px solid var(--pp-border)',
                 borderRadius: 14,
-                padding: '24px 20px',
+                padding: '28px 24px',
                 marginBottom: 24,
-                maxWidth: 420,
+                maxWidth: 480,
                 marginLeft: 'auto',
                 marginRight: 'auto',
               }}>
-                <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--pp-gold-dim)', fontWeight: 600, marginBottom: 8 }}>
-                  All Plans Include
+                <div className="pp-syne" style={{ fontSize: 22, fontWeight: 800, color: 'var(--pp-gold)', letterSpacing: '-0.5px', lineHeight: 1.3, marginBottom: 10 }}>
+                  Pricing tailored to your team size
                 </div>
-                <div className="pp-syne" style={{ fontSize: 40, fontWeight: 800, color: 'var(--pp-gold)', letterSpacing: '-2px', lineHeight: 1 }}>
-                  <span style={{ fontSize: 18, verticalAlign: 'top', marginTop: 6, display: 'inline-block' }}>₹</span>
-                  49
-                  <span style={{ fontSize: 16, color: 'var(--pp-white-dim)', fontWeight: 500, letterSpacing: 0 }}>/employee/mo</span>
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--pp-white-dim)', marginTop: 6 }}>billed annually</div>
-                <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 10, lineHeight: 1.5 }}>
-                  Same price on Silver, Gold, Platinum, Titanium &amp; Enterprise
-                </div>
+                <p style={{ fontSize: 13, color: 'var(--pp-white-dim)', lineHeight: 1.7, margin: 0 }}>
+                  Every business is different. WhatsApp or call us — we&apos;ll share a quote based on your employee count, branches, and setup needs. No hidden surprises.
+                </p>
               </div>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 12, marginBottom: 28 }}>
                 {[
-                  'Silver to Enterprise plans',
-                  'License & setup from ₹10,000',
+                  'Up to 3× cheaper than competitors',
+                  'Plans for 10 to 500+ employees',
                   'Multi-branch available',
+                  'Free demo before you decide',
                 ].map((t) => (
                   <div
                     key={t}
@@ -1501,7 +1565,7 @@ export default function LoginPage() {
                   style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="#0A0A0A"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M11.999 2C6.477 2 2 6.477 2 12c0 1.821.487 3.53 1.338 5.006L2 22l5.135-1.347A9.953 9.953 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12 2z"/></svg>
-                  Get Plans & Pricing
+                  Get Pricing on WhatsApp
                 </a>
                 <button type="button" className="pp-btn-ghost" onClick={() => handleScrollToSection('demo')}>
                   Request a Demo
@@ -1509,7 +1573,7 @@ export default function LoginPage() {
               </div>
 
               <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 20, lineHeight: 1.6 }}>
-                GST applies on license, setup, and subscription charges. Multi-branch pricing may vary.
+                Prefer a call? We&apos;re happy to explain plans and answer questions.
                 <br />
                 Anish: <strong style={S.gold}>+91 98424 81388</strong> · Thanveer: <strong style={S.gold}>+91 96008 44041</strong>
               </p>
@@ -1589,6 +1653,32 @@ export default function LoginPage() {
                     <a href={WHATSAPP_LINK} target="_blank" rel="noreferrer" style={S.gold}>Contact support</a>
                   </p>
                 </form>
+
+                <div style={{
+                  marginTop: 4, padding: 16, borderRadius: 10,
+                  background: 'rgba(212,168,67,0.06)', border: '1px solid var(--pp-border)',
+                }}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 22, lineHeight: 1 }}>📱</span>
+                    <div>
+                      <p className="pp-syne" style={{ fontSize: 13, fontWeight: 700, color: 'var(--pp-white)' }}>
+                        No biometric device?
+                      </p>
+                      <p style={{ fontSize: 12, color: 'var(--pp-white-dim)', lineHeight: 1.65, marginTop: 6 }}>
+                        Use the free <strong style={{ color: 'var(--pp-white)' }}>PunchPay Kiosk</strong> Android app on any office tablet.
+                        After you sign in, open <strong style={{ color: 'var(--pp-white)' }}>Company Settings</strong> to download the APK and set up face attendance.
+                      </p>
+                      <button
+                        type="button"
+                        className="pp-nav-link"
+                        style={{ marginTop: 8, fontSize: 12, color: 'var(--pp-gold)', padding: 0 }}
+                        onClick={() => handleScrollToSection('attendance-options')}
+                      >
+                        Learn how the Android kiosk works →
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="pp-divider" style={{ margin:'20px 0' }} />
                 <p style={{ textAlign:'center', fontSize:13, color:'var(--pp-white-dim)' }}>
@@ -1693,7 +1783,7 @@ export default function LoginPage() {
           <div>
             <div className="pp-syne" style={{ fontSize:12, fontWeight:700, color:'var(--pp-white-dim)', marginBottom:14, letterSpacing:'1px', textTransform:'uppercase' }}>Product</div>
             <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              {[['Features','features'],['How it Works','how-it-works'],['Plans & Pricing','pricing'],['Login','login-section']].map(([l,id]) => (
+              {[['Features','features'],['Face Kiosk App','attendance-options'],['How it Works','how-it-works'],['Plans & Pricing','pricing'],['Login','login-section']].map(([l,id]) => (
                 <button key={id} type="button" className="pp-nav-link" style={{ textAlign:'left', fontSize:12 }} onClick={() => handleScrollToSection(id)}>{l}</button>
               ))}
             </div>

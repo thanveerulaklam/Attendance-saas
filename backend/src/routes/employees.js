@@ -12,6 +12,9 @@ const {
   getEmployeeAppAccess,
   provisionEmployeeAppAccess,
   revokeEmployeeAppAccess,
+  getEmployeeFaceEnrollment,
+  enrollEmployeeFace,
+  removeEmployeeFaceEnrollment,
   deleteEmployee,
 } = require('../controllers/employeeController');
 const {
@@ -27,6 +30,11 @@ const router = express.Router();
 const employeeImportUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+const facePhotoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
 });
 
 function handleMulterEmployeeImport(req, res, next) {
@@ -73,6 +81,21 @@ router.get('/departments', withEmployeeAuth, getDepartments);
 router.get('/:id/app-access', withEmployeeAuth, getEmployeeAppAccess);
 router.post('/:id/app-access', withEmployeeAuth, requireHrBranchForMutation, provisionEmployeeAppAccess);
 router.delete('/:id/app-access', withEmployeeAuth, requireHrBranchForMutation, revokeEmployeeAppAccess);
+
+router.get('/:id/face-enrollment', withEmployeeAuth, getEmployeeFaceEnrollment);
+router.post(
+  '/:id/face-enrollment',
+  withEmployeeAuth,
+  requireHrBranchForMutation,
+  facePhotoUpload.single('photo'),
+  enrollEmployeeFace
+);
+router.delete(
+  '/:id/face-enrollment',
+  withEmployeeAuth,
+  requireHrBranchForMutation,
+  removeEmployeeFaceEnrollment
+);
 
 router.get('/:id', withEmployeeAuth, getEmployeeById);
 

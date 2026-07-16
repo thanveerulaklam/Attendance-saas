@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { IST } from '../utils/istDisplay';
@@ -10,6 +11,12 @@ import {
   resolveCompanyTimezone,
 } from '../utils/companyLocalDisplay';
 import { formatWorkedHours } from '../utils/durationFormat';
+import {
+  branchesFromAttendanceRows,
+  branchesFromEmployees,
+  mergeBranchLists,
+  normalizeBranchesPayload,
+} from '../utils/branchOptions';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -72,6 +79,8 @@ export default function AttendancePage() {
   const [monthlyData, setMonthlyData] = useState(null);
   const [dailyData, setDailyData] = useState(null);
   const [company, setCompany] = useState(null);
+  const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
+  const [kioskSetupReady, setKioskSetupReady] = useState(false);
   const companyTz = resolveCompanyTimezone(company || user?.company_locale);
   const todayStr = useMemo(() => todayYmdInTimezone(companyTz), [companyTz]);
   const [departmentOptions, setDepartmentOptions] = useState([]);
@@ -137,10 +146,20 @@ export default function AttendancePage() {
     authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
-        if (isMounted) setCompany(json?.data || null);
+        if (isMounted) {
+          setCompany(json?.data || null);
+          setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled));
+          const fromCompany = normalizeBranchesPayload(json?.data);
+          if (fromCompany.length > 0) {
+            setBranches((prev) => mergeBranchLists(prev, fromCompany));
+          }
+        }
       })
       .catch(() => {
-        if (isMounted) setCompany(null);
+        if (isMounted) {
+          setCompany(null);
+          setMobileAttendanceEnabled(false);
+        }
       });
     return () => {
       isMounted = false;
@@ -149,24 +168,71 @@ export default function AttendancePage() {
 
   useEffect(() => {
     let isMounted = true;
-    authFetch('/api/company/branches', {
-      headers: { 'Content-Type': 'application/json' },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Failed to load branches');
-        const json = await res.json();
+
+    async function loadBranchOptions() {
+      try {
+        const res = await authFetch('/api/company/branches', {
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const json = res.ok ? await res.json() : null;
         if (!isMounted) return;
-        setBranches(Array.isArray(json.data) ? json.data : []);
+        const fromBranchesApi = normalizeBranchesPayload(json?.data);
+        setBranches((prev) =>
+          mergeBranchLists(prev, fromBranchesApi, branchesFromEmployees(employees))
+        );
+      } catch {
+        if (!isMounted) return;
+        setBranches((prev) => mergeBranchLists(prev, branchesFromEmployees(employees)));
+      }
+    }
+
+    loadBranchOptions();
+    return () => {
+      isMounted = false;
+    };
+  }, [employees]);
+
+  useEffect(() => {
+    if (!mobileAttendanceEnabled) {
+      setKioskSetupReady(false);
+      return undefined;
+    }
+
+    let isMounted = true;
+    const branchIds = (branches || [])
+      .map((b) => Number(b.id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    if (branchIds.length === 0) {
+      setKioskSetupReady(false);
+      return undefined;
+    }
+
+    Promise.all(
+      branchIds.map(async (branchId) => {
+        try {
+          const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (!res.ok) return false;
+          const json = await res.json().catch(() => ({}));
+          return Boolean(json.data?.token || json.data?.kiosk?.kiosk_code);
+        } catch {
+          return false;
+        }
+      })
+    )
+      .then((results) => {
+        if (isMounted) setKioskSetupReady(results.some(Boolean));
       })
       .catch(() => {
-        if (!isMounted) return;
-        setBranches([]);
+        if (isMounted) setKioskSetupReady(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [mobileAttendanceEnabled, branches]);
 
   useEffect(() => {
     let isMounted = true;
@@ -185,6 +251,11 @@ export default function AttendancePage() {
       isMounted = false;
     };
   }, []);
+
+  const branchFilterOptions = useMemo(
+    () => mergeBranchLists(branches, branchesFromEmployees(employees), branchesFromAttendanceRows(dailyData)),
+    [branches, employees, dailyData]
+  );
 
   const devicesForBranch = useMemo(() => {
     if (!branchFilter) return devices;
@@ -545,6 +616,30 @@ export default function AttendancePage() {
         </p>
       </header>
 
+      {mobileAttendanceEnabled && (
+        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-xs text-emerald-900 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {kioskSetupReady ? (
+            <span>Face attendance kiosk is enabled.</span>
+          ) : (
+            <>
+              <span>
+                Face attendance kiosk is enabled. Generate a branch kiosk code in{' '}
+                <Link to="/settings/company" className="font-medium underline">
+                  Company settings
+                </Link>
+                , install the PunchPay Kiosk app on the office tablet, and enroll employee faces.
+              </span>
+              <Link
+                to="/settings/company"
+                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-emerald-700 px-3 py-1.5 text-[11px] font-medium text-white"
+              >
+                Set up kiosk
+              </Link>
+            </>
+          )}
+        </div>
+      )}
+
       {/* Daily summary card for selected date */}
       <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -573,7 +668,7 @@ export default function AttendancePage() {
               className="w-full sm:w-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
             >
               <option value="">All branches</option>
-              {(branches || []).map((b) => (
+              {(branchFilterOptions || []).map((b) => (
                 <option key={String(b.id)} value={String(b.id)}>
                   {b.name || `Branch #${b.id}`}
                 </option>
@@ -586,6 +681,8 @@ export default function AttendancePage() {
             >
               <option value="">All devices</option>
               <option value="manual">Manual attendance</option>
+              <option value="mobile">Mobile / QR</option>
+              <option value="kiosk">Face kiosk</option>
               <option value="auto_out">Auto OUT</option>
               {(devicesForBranch || []).map((d) => (
                 <option key={String(d.id)} value={String(d.id)}>
@@ -736,11 +833,29 @@ export default function AttendancePage() {
                           const deviceId = (p.device_id || '').toLowerCase();
                           const isAuto = deviceId === 'auto_out' && punchType === 'out';
                           const isManual = deviceId === 'manual';
-                          const suffix = isAuto ? ' OUT (Auto — shift end)' : ` ${punchType.toUpperCase()}`;
+                          const isMobile = deviceId === 'mobile';
+                          const isKiosk = deviceId === 'kiosk';
+                          const suffix = isAuto
+                            ? ' OUT (Auto — shift end)'
+                            : isKiosk
+                              ? ` ${punchType.toUpperCase()}`
+                              : isMobile
+                              ? ` ${punchType.toUpperCase()} (Mobile)`
+                              : isManual
+                                ? ` ${punchType.toUpperCase()} (Manual)`
+                                : ` ${punchType.toUpperCase()}`;
                           return (
                             <span
                               key={p.id || `${row.employee_id}-${idx}-${p.punch_time}`}
-                              className={isManual ? 'text-orange-600 font-medium' : undefined}
+                              className={
+                                isManual
+                                  ? 'text-orange-600 font-medium'
+                                  : isKiosk
+                                    ? 'text-emerald-600 font-medium'
+                                    : isMobile
+                                    ? 'text-violet-600 font-medium'
+                                    : undefined
+                              }
                             >
                               {`${timeStr}${suffix}`}
                               {idx < punches.length - 1 ? ', ' : ''}

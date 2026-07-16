@@ -127,6 +127,44 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'users' AND column_name = 'employee_id'
   )`,
+  '079_mobile_attendance.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'companies' AND column_name = 'mobile_attendance_enabled'
+  )`,
+  '080_kiosk_face_attendance.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'branch_kiosk_devices'
+  )`,
+  '081_kiosk_face_photo.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'employee_face_enrollments'
+      AND column_name = 'photo_data'
+  )`,
+  '082_kiosk_settings_pin.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'branch_kiosk_devices'
+      AND column_name = 'settings_pin_hash'
+  )`,
+  '083_kiosk_permanent_code.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'branch_kiosk_devices'
+      AND column_name = 'kiosk_code'
+  )`,
+  '084_kiosk_preferences.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'branch_kiosk_devices'
+      AND column_name = 'duplicate_punch_seconds'
+  )`,
+  '085_kiosk_min_recognize.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'branch_kiosk_devices'
+      AND column_name = 'min_recognize_seconds'
+  )`,
 };
 
 async function hasExistingSchema(client) {

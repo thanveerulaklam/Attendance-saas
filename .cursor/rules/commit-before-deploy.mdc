@@ -1,0 +1,14 @@
+---
+description: Always commit (and preferably push) before any production deployment
+alwaysApply: true
+---
+
+# Commit before production deploy
+
+Before deploying any change to production (VPS, punchpay.in, APK upload, migrations, frontend build on server):
+
+1. **Commit first** — stage and commit all related local changes with a clear message.
+2. **Do not deploy uncommitted work** — never upload/tarball/rsync/scp production from a dirty working tree for those changes.
+3. **Prefer push** — after commit, push to `origin` unless the user says not to, so git matches what is live.
+4. **Exclude secrets** — never commit `.env`, keystores, passwords, or APK binaries (`backend/downloads/*.apk`).
+5. If the user asks to deploy and the tree is dirty, commit (or ask them to confirm the commit) **before** starting the deploy steps.

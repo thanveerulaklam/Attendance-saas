@@ -49,6 +49,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         labour_card_number,
         iban,
         contract_type,
+        attendance_channel,
         created_at`;
 
 const EMPLOYEE_LIST_SELECT_FIELDS = `
@@ -82,6 +83,7 @@ const EMPLOYEE_LIST_SELECT_FIELDS = `
         e.labour_card_number,
         e.iban,
         e.contract_type,
+        e.attendance_channel,
         e.created_at`;
 
 function stripIndiaStatutoryForNonIn(payload, countryCode, { isCreate = false } = {}) {

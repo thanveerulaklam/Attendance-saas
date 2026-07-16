@@ -55,6 +55,16 @@ export default function EmployeeFormModal({
   const [factoryShiftRotation, setFactoryShiftRotation] = useState(false);
   const [countryCode, setCountryCode] = useState('IN');
   const [companyCurrency, setCompanyCurrency] = useState('INR');
+  const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
+  const [attendanceChannel, setAttendanceChannel] = useState('device');
+  const [appAccessUser, setAppAccessUser] = useState(null);
+  const [appAccessEmail, setAppAccessEmail] = useState('');
+  const [appAccessPassword, setAppAccessPassword] = useState('');
+  const [appAccessLoading, setAppAccessLoading] = useState(false);
+  const [appAccessSaving, setAppAccessSaving] = useState(false);
+  const [faceEnrolled, setFaceEnrolled] = useState(false);
+  const [faceLoading, setFaceLoading] = useState(false);
+  const [faceSaving, setFaceSaving] = useState(false);
   const [currentAssignment, setCurrentAssignment] = useState(null);
 
   const showIndiaStatutory = isIndiaCompany(countryCode);
@@ -94,12 +104,14 @@ export default function EmployeeFormModal({
           setFactoryShiftRotation(json?.data?.enable_shift_rotation === true);
           setCountryCode(json?.data?.country_code || 'IN');
           setCompanyCurrency(json?.data?.currency || 'INR');
+          setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled));
         })
         .catch(() => {
           setMonthlyOnlyPayroll(false);
           setFactoryShiftRotation(false);
           setCountryCode('IN');
           setCompanyCurrency('INR');
+          setMobileAttendanceEnabled(false);
         });
     }
   }, [open]);
@@ -160,6 +172,7 @@ export default function EmployeeFormModal({
         );
         setPayrollFrequency(employee.payroll_frequency || 'monthly');
         setSalaryType(employee.salary_type || 'monthly');
+        setAttendanceChannel(employee.attendance_channel || 'device');
       } else {
         setName('');
         setEmployeeCode('');
@@ -188,11 +201,52 @@ export default function EmployeeFormModal({
         setBranchId('');
         setPayrollFrequency('monthly');
         setSalaryType('monthly');
+        setAttendanceChannel('device');
+        setAppAccessUser(null);
+        setAppAccessEmail('');
+        setAppAccessPassword('');
+        setFaceEnrolled(false);
       }
       setErrors({});
       setToast(null);
     }
   }, [open, employee]);
+
+  useEffect(() => {
+    if (!open || !isEdit || !employee?.id) {
+      setAppAccessUser(null);
+      setAppAccessEmail('');
+      setAppAccessPassword('');
+      return;
+    }
+    setAppAccessLoading(true);
+    authFetch(`/api/employees/${employee.id}/app-access`)
+      .then((res) => res.json())
+      .then((json) => {
+        if (json?.data) {
+          setAppAccessUser(json.data);
+          setAppAccessEmail(json.data.email || '');
+        } else {
+          setAppAccessUser(null);
+          setAppAccessEmail('');
+        }
+      })
+      .catch(() => setAppAccessUser(null))
+      .finally(() => setAppAccessLoading(false));
+  }, [open, isEdit, employee?.id]);
+
+  useEffect(() => {
+    if (!open || !isEdit || !employee?.id) {
+      setFaceEnrolled(false);
+      return;
+    }
+    setFaceLoading(true);
+    authFetch(`/api/employees/${employee.id}/face-enrollment`)
+      .then((res) => res.json())
+      .then((json) => setFaceEnrolled(Boolean(json?.data?.id)))
+      .catch(() => setFaceEnrolled(false))
+      .finally(() => setFaceLoading(false));
+  }, [open, isEdit, employee?.id]);
 
   useEffect(() => {
     if (!open || !factoryShiftRotation || !employee?.id) {
@@ -375,6 +429,7 @@ export default function EmployeeFormModal({
         shift_id: shiftId === '' ? null : Number(shiftId),
         payroll_frequency: payrollFrequency,
         salary_type: salaryType,
+        attendance_channel: attendanceChannel,
       };
 
       const resolvedBranch =
@@ -425,6 +480,99 @@ export default function EmployeeFormModal({
       });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleProvisionAppAccess = async () => {
+    if (!isEdit || !employee?.id || appAccessSaving) return;
+    if (!appAccessEmail.trim() || !appAccessPassword || appAccessPassword.length < 6) {
+      setToast({ type: 'error', message: 'Email and password (min 6 chars) are required.' });
+      return;
+    }
+    try {
+      setAppAccessSaving(true);
+      const res = await authFetch(`/api/employees/${employee.id}/app-access`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: appAccessEmail.trim(),
+          password: appAccessPassword,
+          name: name.trim() || employee.name,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to provision app access');
+      setAppAccessUser(json.data?.user || json.data);
+      setAppAccessPassword('');
+      setToast({ type: 'success', message: 'Mobile app login saved.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to save app access' });
+    } finally {
+      setAppAccessSaving(false);
+    }
+  };
+
+  const handleRevokeAppAccess = async () => {
+    if (!isEdit || !employee?.id || appAccessSaving || !appAccessUser) return;
+    const ok = window.confirm('Revoke mobile app login for this employee?');
+    if (!ok) return;
+    try {
+      setAppAccessSaving(true);
+      const res = await authFetch(`/api/employees/${employee.id}/app-access`, {
+        method: 'DELETE',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to revoke app access');
+      setAppAccessUser(null);
+      setAppAccessEmail('');
+      setAppAccessPassword('');
+      setToast({ type: 'success', message: 'Mobile app access revoked.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to revoke' });
+    } finally {
+      setAppAccessSaving(false);
+    }
+  };
+
+  const handleEnrollFace = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !isEdit || !employee?.id || faceSaving) return;
+    try {
+      setFaceSaving(true);
+      const formData = new FormData();
+      formData.append('photo', file);
+      const res = await authFetch(`/api/employees/${employee.id}/face-enrollment`, {
+        method: 'POST',
+        body: formData,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Face enrollment failed');
+      setFaceEnrolled(true);
+      setToast({ type: 'success', message: json.message || 'Face enrolled for kiosk attendance.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Face enrollment failed' });
+    } finally {
+      setFaceSaving(false);
+    }
+  };
+
+  const handleRemoveFace = async () => {
+    if (!isEdit || !employee?.id || faceSaving || !faceEnrolled) return;
+    if (!window.confirm('Remove face enrollment for this employee?')) return;
+    try {
+      setFaceSaving(true);
+      const res = await authFetch(`/api/employees/${employee.id}/face-enrollment`, {
+        method: 'DELETE',
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to remove face');
+      setFaceEnrolled(false);
+      setToast({ type: 'success', message: 'Face enrollment removed.' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to remove face' });
+    } finally {
+      setFaceSaving(false);
     }
   };
 
@@ -1024,6 +1172,45 @@ export default function EmployeeFormModal({
               <p className="mt-1 text-[11px] text-rose-600">{errors.shift_id}</p>
             )}
           </div>
+
+          {mobileAttendanceEnabled && isEdit && (
+            <div className="rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-3 space-y-3">
+              <p className="text-xs font-semibold text-violet-900">Face attendance (office tablet)</p>
+              <p className="text-[11px] text-slate-600">
+                Upload a clear front-facing photo. The employee can then punch at the branch kiosk — no personal phone or password needed.
+              </p>
+              {faceLoading ? (
+                <p className="text-[11px] text-slate-500">Checking enrollment…</p>
+              ) : faceEnrolled ? (
+                <p className="text-[11px] text-emerald-700 font-medium">Face enrolled for kiosk attendance</p>
+              ) : (
+                <p className="text-[11px] text-amber-700">Not enrolled yet</p>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="cursor-pointer rounded-lg bg-violet-600 px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50">
+                  {faceSaving ? 'Uploading…' : faceEnrolled ? 'Replace photo' : 'Upload face photo'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="user"
+                    className="hidden"
+                    disabled={faceSaving}
+                    onChange={handleEnrollFace}
+                  />
+                </label>
+                {faceEnrolled && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveFace}
+                    disabled={faceSaving}
+                    className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-[11px] font-medium text-rose-700"
+                  >
+                    Remove face
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-slate-700">

@@ -10,7 +10,7 @@ async function listBranches(companyId, allowedBranchIds = null) {
     return [];
   }
 
-  const selectFields = `id, company_id, name, address, latitude, longitude, geofence_radius_m, created_at`;
+  const selectFields = `id, company_id, name, address, latitude, longitude, geofence_radius_m, mobile_attendance_enabled, created_at`;
 
   if (allowedBranchIds == null) {
     const result = await pool.query(
@@ -104,7 +104,7 @@ async function createBranch(companyId, { name, address, latitude, longitude, geo
   const result = await pool.query(
     `INSERT INTO branches (company_id, name, address, latitude, longitude, geofence_radius_m)
      VALUES ($1, $2, $3, $4, $5, $6)
-     RETURNING id, company_id, name, address, latitude, longitude, geofence_radius_m, created_at`,
+     RETURNING id, company_id, name, address, latitude, longitude, geofence_radius_m, mobile_attendance_enabled, created_at`,
     [companyId, trimmed, addr, lat, lon, radiusM]
   );
 
@@ -140,7 +140,7 @@ async function updateBranch(companyId, branchId, { name, address, latitude, long
     `UPDATE branches
      SET name = $3, address = $4, latitude = $5, longitude = $6, geofence_radius_m = $7
      WHERE company_id = $1 AND id = $2
-     RETURNING id, company_id, name, address, latitude, longitude, geofence_radius_m, created_at`,
+     RETURNING id, company_id, name, address, latitude, longitude, geofence_radius_m, mobile_attendance_enabled, created_at`,
     [companyId, id, trimmed, addr, lat, lon, radiusM]
   );
   if (result.rowCount === 0) {

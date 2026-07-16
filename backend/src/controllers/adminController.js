@@ -92,6 +92,11 @@ async function getAdminOverview(req, res, next) {
          c.timezone,
          c.currency,
          (
+           SELECT u.email FROM users u
+           WHERE u.company_id = c.id AND u.role = 'admin'
+           ORDER BY u.id ASC LIMIT 1
+         ) AS admin_email,
+         (
            SELECT MAX(d.last_seen_at)
            FROM devices d
            WHERE d.company_id = c.id
@@ -169,6 +174,7 @@ async function getAdminOverview(req, res, next) {
           country_code: row.country_code,
           timezone: row.timezone,
           currency: row.currency,
+          admin_email: row.admin_email || null,
           next_amc_due_date: computeNextAmcDueDate(row),
           last_device_sync_at: row.last_device_sync_at,
           last_payroll_generated_at: row.last_payroll_generated_at,
@@ -1489,6 +1495,11 @@ async function getCollectionsQueue(req, res, next) {
          c.onetime_fee_paid, c.onetime_fee_amount, c.amc_amount,
          c.last_amc_payment_date, c.last_onetime_payment_date,
          c.is_active,
+         (
+           SELECT u.email FROM users u
+           WHERE u.company_id = c.id AND u.role = 'admin'
+           ORDER BY u.id ASC LIMIT 1
+         ) AS admin_email,
          COUNT(e.id) FILTER (WHERE e.status = 'active')::int AS active_staff
        FROM companies c
        LEFT JOIN employees e ON e.company_id = c.id

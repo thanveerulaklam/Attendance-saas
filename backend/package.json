@@ -15,7 +15,11 @@
     "connector": "node ./scripts/biometric-connector.js",
     "connector:once": "node ./scripts/biometric-connector.js --once",
     "import:employees:excel": "node ./scripts/import-employees-from-xlsx.js",
-    "whatsapp:daily": "node ./scripts/run-whatsapp-daily-job.js"
+    "whatsapp:daily": "node ./scripts/run-whatsapp-daily-job.js",
+    "mobile:qr-cleanup": "node ./scripts/run-mobile-qr-cleanup.js",
+    "face:models": "node ./scripts/download-face-models.js",
+    "test": "node --test test/*.test.js",
+    "test:mobile": "node ./scripts/test-mobile-punch.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -29,7 +33,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "@vladmandic/face-api": "^1.7.15",
     "bcrypt": "^5.1.1",
+    "canvas": "^3.2.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "exceljs": "^4.4.0",

@@ -6,6 +6,7 @@ const SALARY_TYPE_VALUES = ['monthly', 'per_day'];
 const DEDUCTION_MODE_VALUES = ['fixed', 'percentage'];
 const GENDER_VALUES = ['male', 'female', 'other'];
 const CONTRACT_TYPE_VALUES = ['unlimited', 'limited'];
+const ATTENDANCE_CHANNEL_VALUES = ['device', 'mobile', 'both'];
 
 const isValidDate = (value) => {
   const date = new Date(value);
@@ -349,6 +350,11 @@ const validateCreateEmployee = (payload = {}) => {
         : Number(payload.branch_id);
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'attendance_channel')) {
+    const ch = String(payload.attendance_channel || 'device').toLowerCase();
+    result.attendance_channel = ATTENDANCE_CHANNEL_VALUES.includes(ch) ? ch : 'device';
+  }
+
   return result;
 };
 
@@ -638,6 +644,15 @@ const validateUpdateEmployee = (payload = {}) => {
       } else {
         clean.branch_id = bid;
       }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'attendance_channel')) {
+    const ch = String(payload.attendance_channel || 'device').toLowerCase();
+    if (!ATTENDANCE_CHANNEL_VALUES.includes(ch)) {
+      errors.attendance_channel = `attendance_channel must be one of: ${ATTENDANCE_CHANNEL_VALUES.join(', ')}`;
+    } else {
+      clean.attendance_channel = ch;
     }
   }
 

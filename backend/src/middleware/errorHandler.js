@@ -20,6 +20,7 @@ function errorHandler(err, _req, res, _next) {
     message: process.env.NODE_ENV === 'production' && status >= 500
       ? 'Internal server error'
       : message,
+    ...(err.code && { code: err.code }),
     ...(process.env.NODE_ENV !== 'production' && err.stack && { stack: err.stack }),
   };
 

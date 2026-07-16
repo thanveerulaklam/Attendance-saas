@@ -1167,7 +1167,7 @@ export default function AdminPage() {
   const openResetModal = (company) => {
     if (!company) return;
     setResetForm({
-      admin_email: '',
+      admin_email: company.admin_email || '',
       admin_user_id: '',
       new_password: '',
       confirm_new_password: '',
@@ -2735,9 +2735,19 @@ export default function AdminPage() {
               <h2 className="text-base font-semibold text-slate-900 mb-1">
                 Reset admin password – {resetModalCompany.name || `Company #${resetModalCompany.id}`}
               </h2>
-              <p className="text-xs text-slate-500 mb-4">
+              <p className="text-xs text-slate-500 mb-2">
                 Enter admin email (or user ID) and a new temporary password. Share it securely.
               </p>
+              {resetModalCompany.admin_email ? (
+                <p className="mb-4 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">
+                  Registered admin email:{' '}
+                  <span className="font-semibold text-slate-900">{resetModalCompany.admin_email}</span>
+                </p>
+              ) : (
+                <p className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                  No registered admin email found for this tenant.
+                </p>
+              )}
               <form onSubmit={handleResetAdminPassword} className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>

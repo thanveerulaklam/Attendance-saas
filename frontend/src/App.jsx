@@ -22,6 +22,8 @@ import SalaryCalculator from './pages/tools/SalaryCalculator';
 import PFESICalculator from './pages/tools/PFESICalculator';
 import PayslipGenerator from './pages/tools/PayslipGenerator';
 import PayrollCostCalculator from './pages/tools/PayrollCostCalculator';
+import MobileQrDisplayPage from './pages/MobileQrDisplayPage';
+import MobilePunchAttemptsPage from './pages/MobilePunchAttemptsPage';
 
 function RootRedirect() {
   const { isAuthenticated, loading } = useAuth();
@@ -44,6 +46,14 @@ function App() {
           <Route path="/tools/payslip-generator" element={<PayslipGenerator />} />
           <Route path="/tools/payroll-cost-calculator" element={<PayrollCostCalculator />} />
           <Route
+            path="/mobile-qr/:branchId"
+            element={
+              <ProtectedRoute>
+                <MobileQrDisplayPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             element={
               <ProtectedRoute>
                 <DashboardLayout />
@@ -55,6 +65,7 @@ function App() {
             <Route path="/attendance" element={<AttendancePage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings/company" element={<CompanySettingsPage />} />
+            <Route path="/mobile-punch-log" element={<MobilePunchAttemptsPage />} />
             <Route path="/shifts" element={<ShiftsPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/payroll" element={<PayrollPage />} />

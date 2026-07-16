@@ -41,6 +41,7 @@ export default function DevicesPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteStep, setDeleteStep] = useState(1);
   const [deleteTypedName, setDeleteTypedName] = useState('');
+  const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
 
   const branchNameById = useMemo(() => {
     const m = {};
@@ -49,6 +50,13 @@ export default function DevicesPage() {
     });
     return m;
   }, [branches]);
+
+  useEffect(() => {
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled)))
+      .catch(() => setMobileAttendanceEnabled(false));
+  }, []);
 
   const loadBranches = async () => {
     try {
@@ -376,6 +384,20 @@ export default function DevicesPage() {
           Register biometric or punch devices and verify that they are syncing correctly.
         </p>
       </header>
+
+      {mobileAttendanceEnabled && (
+        <div className="rounded-lg border border-violet-100 bg-violet-50 px-4 py-3 text-xs text-violet-900">
+          Mobile attendance is enabled for your company. Biometric devices on this page continue to
+          work independently. Configure geofence and QR display in{' '}
+          <Link to="/settings/company" className="font-medium underline hover:text-violet-700">
+            Company settings
+          </Link>
+          .{' '}
+          <Link to="/mobile-punch-log" className="font-medium underline hover:text-violet-700">
+            Punch log
+          </Link>
+        </div>
+      )}
 
       <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
         <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

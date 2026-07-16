@@ -1,5 +1,6 @@
 const employeeService = require('../services/employeeService');
 const employeeAppService = require('../services/employeeAppService');
+const faceEnrollmentService = require('../services/faceEnrollmentService');
 const employeeBulkImportService = require('../services/employeeBulkImportService');
 const { buildEmployeeImportTemplateBuffer } = require('../services/employeeImportTemplate');
 const auditService = require('../services/auditService');
@@ -256,6 +257,47 @@ const revokeEmployeeAppAccess = asyncHandler(async (req, res) => {
   return res.json({ success: true, message: 'Employee app login removed' });
 });
 
+const getEmployeeFaceEnrollment = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+  const enrollment = await faceEnrollmentService.getEnrollment(companyId, id);
+  return res.json({ success: true, data: enrollment });
+});
+
+const enrollEmployeeFace = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+  if (!req.file?.buffer) {
+    throw new AppError('Photo file is required', 400);
+  }
+  const result = await faceEnrollmentService.enrollEmployeeFace(
+    companyId,
+    id,
+    req.file.buffer,
+    req.user?.user_id ?? null
+  );
+  auditService
+    .log(companyId, req.user?.user_id, 'employee.face_enroll', 'employee', id, {
+      name: result.employee.name,
+    })
+    .catch(() => {});
+  return res.status(201).json({
+    success: true,
+    data: result.enrollment,
+    message: `Face enrolled for ${result.employee.name}`,
+  });
+});
+
+const removeEmployeeFaceEnrollment = asyncHandler(async (req, res) => {
+  const companyId = req.companyId;
+  const id = Number(req.params.id);
+  await faceEnrollmentService.removeEmployeeFace(companyId, id);
+  auditService
+    .log(companyId, req.user?.user_id, 'employee.face_enroll_remove', 'employee', id, {})
+    .catch(() => {});
+  return res.json({ success: true, message: 'Face enrollment removed' });
+});
+
 /**
  * DELETE /api/employees/:id
  */
@@ -291,6 +333,9 @@ module.exports = {
   getEmployeeAppAccess,
   provisionEmployeeAppAccess,
   revokeEmployeeAppAccess,
+  getEmployeeFaceEnrollment,
+  enrollEmployeeFace,
+  removeEmployeeFaceEnrollment,
   deleteEmployee,
 };
 

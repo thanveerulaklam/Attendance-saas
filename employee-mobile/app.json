@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "PunchPay Kiosk",
+    "slug": "punchpay-kiosk",
+    "version": "1.0.2",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "punchpay-kiosk",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.punchpay.kiosk",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture employee faces for attendance at the office kiosk.",
+        "NSLocationWhenInUseUsageDescription": "Optional location access for kiosk diagnostics."
+      }
+    },
+    "android": {
+      "package": "com.punchpay.kiosk",
+      "versionCode": 3,
+      "adaptiveIcon": {
+        "backgroundColor": "#D4A843",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "WAKE_LOCK"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Capture employee faces for attendance at the office kiosk."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Optional location access for kiosk diagnostics."
+        }
+      ]
+    ]
+  }
+}

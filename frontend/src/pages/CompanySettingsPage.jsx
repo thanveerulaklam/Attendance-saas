@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -111,6 +112,40 @@ export default function CompanySettingsPage() {
   const [deleteBranchStep, setDeleteBranchStep] = useState(1);
   const [deleteBranchTypedName, setDeleteBranchTypedName] = useState('');
 
+  const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
+  const [mobileSaving, setMobileSaving] = useState(false);
+  const [mobileToast, setMobileToast] = useState(null);
+  const [editingGeofenceId, setEditingGeofenceId] = useState(null);
+  const [geofenceForm, setGeofenceForm] = useState({
+    latitude: '',
+    longitude: '',
+    geofence_radius_m: '200',
+    mobile_attendance_enabled: true,
+  });
+  const [geofenceSaving, setGeofenceSaving] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [kioskBusyBranchId, setKioskBusyBranchId] = useState(null);
+  const [kioskReveal, setKioskReveal] = useState(null);
+  const [kioskSettingsPins, setKioskSettingsPins] = useState({});
+  const [apkDownloading, setApkDownloading] = useState(false);
+
+  const normalizeKioskPinInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 6);
+
+  const setBranchKioskPin = (branchId, value) => {
+    setKioskSettingsPins((prev) => ({
+      ...prev,
+      [branchId]: normalizeKioskPinInput(value),
+    }));
+  };
+
+  const kioskPayload = (branchId, branchName) => {
+    const pin = kioskSettingsPins[branchId] || '';
+    return {
+      label: `${branchName} tablet`,
+      ...(pin ? { settings_pin: pin } : {}),
+    };
+  };
+
   const loadBranches = async () => {
     if (!isAdmin) return;
     try {
@@ -166,6 +201,7 @@ export default function CompanySettingsPage() {
         });
         setShiftRotationEnabled(Boolean(data.enable_shift_rotation));
         setFlexibleHoursEnabled(Boolean(data.flexible_hours_mode));
+        setMobileAttendanceEnabled(Boolean(data.mobile_attendance_enabled));
         setSubscriptionForm({
           subscription_start_date: toDateInputValue(data.subscription_start_date),
           subscription_end_date: toDateInputValue(data.subscription_end_date),
@@ -414,6 +450,273 @@ export default function CompanySettingsPage() {
       setCpError(err.message || 'Failed to change password.');
     } finally {
       setCpSaving(false);
+    }
+  };
+
+  const handleToggleMobileAttendance = async (nextEnabled) => {
+    if (!nextEnabled && mobileAttendanceEnabled) {
+      const ok = window.confirm(
+        'Turn off mobile attendance? Employees will no longer be able to punch from the mobile app. Biometric devices are not affected.'
+      );
+      if (!ok) return;
+    }
+    try {
+      setMobileSaving(true);
+      setMobileToast(null);
+      const res = await authFetch('/api/company/mobile-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile_attendance_enabled: nextEnabled }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save mobile settings');
+      setMobileAttendanceEnabled(Boolean(json.data?.mobile_attendance_enabled));
+      setMobileToast({
+        type: 'success',
+        message: nextEnabled ? 'Mobile attendance enabled.' : 'Mobile attendance disabled.',
+      });
+    } catch (err) {
+      setMobileToast({ type: 'error', message: err.message || 'Failed to save' });
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  const startGeofenceEdit = (branch) => {
+    setBranchError(null);
+    setBranchSuccess(null);
+    setEditingGeofenceId(branch.id);
+    setGeofenceForm({
+      latitude: branch.latitude != null ? String(branch.latitude) : '',
+      longitude: branch.longitude != null ? String(branch.longitude) : '',
+      geofence_radius_m: branch.geofence_radius_m != null ? String(branch.geofence_radius_m) : '200',
+      mobile_attendance_enabled: branch.mobile_attendance_enabled !== false,
+    });
+  };
+
+  const cancelGeofenceEdit = () => {
+    if (geofenceSaving) return;
+    setEditingGeofenceId(null);
+  };
+
+  const handleUseMyLocation = () => {
+    if (locating || geofenceSaving) return;
+    if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+      setBranchError('Location requires HTTPS (or localhost). Open this page in Chrome/Safari, not an embedded preview.');
+      return;
+    }
+    if (!navigator.geolocation) {
+      setBranchError('Geolocation is not supported in this browser. Open http://localhost:5174 in Chrome and try again.');
+      return;
+    }
+
+    setBranchError(null);
+    setBranchSuccess(null);
+    setLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setGeofenceForm((prev) => ({
+          ...prev,
+          latitude: String(Number(pos.coords.latitude.toFixed(6))),
+          longitude: String(Number(pos.coords.longitude.toFixed(6))),
+        }));
+        setBranchSuccess(
+          `Location filled (±${Math.round(pos.coords.accuracy || 0)}m). Click Save geofence.`
+        );
+        setLocating(false);
+      },
+      (err) => {
+        const code = err?.code;
+        let msg = 'Could not get your location.';
+        if (code === 1) {
+          msg =
+            'Location permission denied. Allow location for this site in the browser address bar, or enter lat/lng manually.';
+        } else if (code === 2) {
+          msg = 'Location unavailable. Try again outdoors, or enter coordinates manually.';
+        } else if (code === 3) {
+          msg = 'Location timed out. Try again, or enter coordinates manually.';
+        }
+        // Cursor Simple Browser / embedded previews often block GPS with no useful error
+        if (!code) {
+          msg +=
+            ' Tip: open Company Settings in Chrome/Safari (not the editor preview) — GPS often does not work in embedded browsers.';
+        }
+        setBranchError(msg);
+        setLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 15000,
+        maximumAge: 0,
+      }
+    );
+  };
+
+  const handleDownloadKioskApk = async () => {
+    if (apkDownloading) return;
+    try {
+      setApkDownloading(true);
+      setMobileToast(null);
+      const res = await authFetch('/api/company/kiosk-apk');
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.message || 'Unable to download APK');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'PunchPay-Kiosk.apk';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMobileToast({
+        type: 'success',
+        message:
+          'APK downloaded. On Android: open the file → Allow install from this source → Install.',
+      });
+    } catch (err) {
+      setMobileToast({
+        type: 'error',
+        message: err.message || 'Failed to download APK',
+      });
+    } finally {
+      setApkDownloading(false);
+    }
+  };
+
+  const handleGenerateKioskCode = async (branchId, branchName) => {
+    if (kioskBusyBranchId) return;
+    try {
+      setKioskBusyBranchId(branchId);
+      setBranchError(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(kioskPayload(branchId, branchName)),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to create kiosk code');
+      setKioskReveal({
+        branchId,
+        branchName,
+        token: json.data?.token,
+        settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
+      });
+      setBranchSuccess(json.message || 'Kiosk code ready for this branch.');
+    } catch (err) {
+      setBranchError(err.message || 'Failed to generate kiosk code');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleSaveKioskPin = async (branchId, branchName) => {
+    if (kioskBusyBranchId) return;
+    const pin = kioskSettingsPins[branchId] || '';
+    if (!/^\d{6}$/.test(pin)) {
+      setBranchError(`Settings PIN for ${branchName} must be exactly 6 digits.`);
+      return;
+    }
+    try {
+      setKioskBusyBranchId(branchId);
+      setBranchError(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk/pin`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings_pin: pin }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save Settings PIN');
+      setKioskReveal((prev) =>
+        prev?.branchId === branchId
+          ? { ...prev, settingsPinConfigured: true }
+          : prev
+      );
+      setBranchSuccess(`Settings PIN saved for ${branchName}.`);
+    } catch (err) {
+      setBranchError(err.message || 'Failed to save Settings PIN');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleRegenerateKioskCode = async (branchId, branchName) => {
+    if (kioskBusyBranchId) return;
+    if (
+      !window.confirm(
+        `Generate a new kiosk code for ${branchName}? The tablet will need to be activated again with the new code.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setKioskBusyBranchId(branchId);
+      setBranchError(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...kioskPayload(branchId, branchName), regenerate: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to regenerate kiosk code');
+      setKioskReveal({
+        branchId,
+        branchName,
+        token: json.data?.token,
+        settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
+      });
+      setBranchSuccess(json.message || 'New kiosk code generated.');
+    } catch (err) {
+      setBranchError(err.message || 'Failed to regenerate kiosk code');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleRevokeKioskCode = async (branchId) => {
+    if (!window.confirm('Revoke kiosk access for this branch? The tablet will need a new code.')) return;
+    try {
+      setKioskBusyBranchId(branchId);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to revoke kiosk');
+      setKioskReveal(null);
+      setBranchSuccess('Kiosk access revoked.');
+    } catch (err) {
+      setBranchError(err.message || 'Failed to revoke kiosk');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleSaveGeofence = async (branchId) => {
+    if (geofenceSaving) return;
+    try {
+      setGeofenceSaving(true);
+      setBranchError(null);
+      setBranchSuccess(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/geofence`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          latitude: geofenceForm.latitude === '' ? null : Number(geofenceForm.latitude),
+          longitude: geofenceForm.longitude === '' ? null : Number(geofenceForm.longitude),
+          geofence_radius_m: Number(geofenceForm.geofence_radius_m) || 200,
+          mobile_attendance_enabled: Boolean(geofenceForm.mobile_attendance_enabled),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save geofence');
+      await loadBranches();
+      setEditingGeofenceId(null);
+      setBranchSuccess('Branch geofence saved.');
+    } catch (err) {
+      setBranchError(err.message || 'Failed to save geofence');
+    } finally {
+      setGeofenceSaving(false);
     }
   };
 
@@ -830,6 +1133,79 @@ export default function CompanySettingsPage() {
 
       {isAdmin && (
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Face attendance (office tablet)</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Install the PunchPay Kiosk app on a reception tablet. Employees punch by face — no personal phone or login needed.
+          </p>
+          {mobileToast && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-[11px] ${
+                mobileToast.type === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-700'
+                  : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {mobileToast.message}
+            </div>
+          )}
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={mobileAttendanceEnabled}
+              onChange={(e) => handleToggleMobileAttendance(e.target.checked)}
+              disabled={loading || mobileSaving}
+            />
+            <span>
+              <span className="font-medium">Enable mobile attendance</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                When off, mobile punch APIs return an error. Existing biometric punches are unchanged.
+              </span>
+            </span>
+          </label>
+          {mobileAttendanceEnabled && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+              <p className="text-xs font-semibold text-slate-900">Install office tablet app</p>
+              <p className="mt-1 text-[11px] text-slate-600">
+                Download the PunchPay Kiosk APK, install it on the branch Android tablet, then create the
+                permanent 8-character kiosk code below and activate the tablet once. On Android: open the downloaded file → allow
+                install from Files/Chrome → Install.
+              </p>
+              <button
+                type="button"
+                disabled={apkDownloading}
+                onClick={handleDownloadKioskApk}
+                className="mt-3 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {apkDownloading ? 'Downloading…' : 'Download Android APK'}
+              </button>
+            </div>
+          )}
+          {mobileAttendanceEnabled && branches.length > 0 && (
+            <p className="mt-3 text-[11px] text-slate-600">
+              For each branch: set a <strong>6-digit Settings PIN</strong>, create the{' '}
+              <strong>8-character kiosk code</strong>, enter the code once on the office tablet, then enroll employee faces.{' '}
+              <Link to="/mobile-punch-log" className="font-medium text-indigo-600 underline">
+                View punch log
+              </Link>
+            </p>
+          )}
+          {kioskReveal?.token && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-[11px] text-amber-950">
+              <p className="font-semibold">Kiosk code for {kioskReveal.branchName}</p>
+              <p className="mt-1 break-all font-mono text-xs">{kioskReveal.token}</p>
+              <p className="mt-2 text-amber-800">
+                {kioskReveal.settingsPinConfigured
+                  ? 'Settings PIN is configured for this branch. Use that branch PIN on the tablet.'
+                  : 'Save a Settings PIN for this branch before opening Settings on the tablet.'}
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
           <h2 className="text-sm font-semibold text-slate-900">Branches</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
             Add one row per physical location. Employees and devices are assigned to a branch; HR users only see data for branches assigned to them (configured by your service provider).
@@ -887,28 +1263,166 @@ export default function CompanySettingsPage() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-slate-900">{b.name}</span>
-                      {b.address && (
-                        <span className="text-xs text-slate-500">{b.address}</span>
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-slate-900">{b.name}</span>
+                        {b.address && (
+                          <span className="text-xs text-slate-500">{b.address}</span>
+                        )}
+                        <span className="text-[10px] text-slate-400">ID {b.id}</span>
+                        {mobileAttendanceEnabled && b.latitude != null && b.longitude != null && (
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-100">
+                            Geofence {b.geofence_radius_m || 100}m
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => startEditBranch(b)}
+                          disabled={branchSaving}
+                          className="ml-auto text-[11px] font-medium text-primary-700 hover:text-primary-800 disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                        {mobileAttendanceEnabled && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateKioskCode(b.id, b.name)}
+                              disabled={branchSaving || kioskBusyBranchId === b.id}
+                              className="text-[11px] font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+                            >
+                              {kioskBusyBranchId === b.id ? 'Working…' : 'Show kiosk code'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRegenerateKioskCode(b.id, b.name)}
+                              disabled={branchSaving || kioskBusyBranchId === b.id}
+                              className="text-[11px] font-medium text-amber-700 hover:text-amber-800 disabled:opacity-50"
+                            >
+                              New code
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeKioskCode(b.id)}
+                              disabled={branchSaving || kioskBusyBranchId === b.id}
+                              className="text-[11px] font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                            >
+                              Revoke kiosk
+                            </button>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openDeleteBranchModal(b)}
+                          disabled={branchSaving}
+                          className="text-[11px] font-medium text-rose-700 hover:text-rose-800 disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {mobileAttendanceEnabled && (
+                        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <label className="text-[11px] font-medium text-slate-700">
+                            Settings PIN
+                          </label>
+                          <input
+                            type="password"
+                            inputMode="numeric"
+                            autoComplete="off"
+                            maxLength={6}
+                            value={kioskSettingsPins[b.id] || ''}
+                            onChange={(e) => setBranchKioskPin(b.id, e.target.value)}
+                            placeholder="6 digits"
+                            disabled={branchSaving || kioskBusyBranchId === b.id}
+                            className="w-[120px] rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs tracking-[0.25em] text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300 disabled:opacity-50"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleSaveKioskPin(b.id, b.name)}
+                            disabled={branchSaving || kioskBusyBranchId === b.id}
+                            className="rounded-md bg-violet-600 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                          >
+                            {kioskBusyBranchId === b.id ? 'Saving…' : 'Save PIN'}
+                          </button>
+                          <span className="text-[10px] text-slate-500">
+                            PIN for this branch tablet only
+                          </span>
+                        </div>
                       )}
-                      <span className="text-[10px] text-slate-400">ID {b.id}</span>
-                      <button
-                        type="button"
-                        onClick={() => startEditBranch(b)}
-                        disabled={branchSaving}
-                        className="ml-auto text-[11px] font-medium text-primary-700 hover:text-primary-800 disabled:opacity-50"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openDeleteBranchModal(b)}
-                        disabled={branchSaving}
-                        className="text-[11px] font-medium text-rose-700 hover:text-rose-800 disabled:opacity-50"
-                      >
-                        Remove
-                      </button>
+                      {editingGeofenceId === b.id && (
+                        <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3 space-y-2">
+                          <p className="text-[11px] font-medium text-indigo-900">Branch geofence (mobile)</p>
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <input
+                              value={geofenceForm.latitude}
+                              onChange={(e) =>
+                                setGeofenceForm((p) => ({ ...p, latitude: e.target.value }))
+                              }
+                              disabled={geofenceSaving}
+                              placeholder="Latitude"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                            <input
+                              value={geofenceForm.longitude}
+                              onChange={(e) =>
+                                setGeofenceForm((p) => ({ ...p, longitude: e.target.value }))
+                              }
+                              disabled={geofenceSaving}
+                              placeholder="Longitude"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                            <input
+                              value={geofenceForm.geofence_radius_m}
+                              onChange={(e) =>
+                                setGeofenceForm((p) => ({ ...p, geofence_radius_m: e.target.value }))
+                              }
+                              disabled={geofenceSaving}
+                              placeholder="Radius (m)"
+                              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                            />
+                          </div>
+                          <label className="flex items-center gap-2 text-[11px] text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={geofenceForm.mobile_attendance_enabled}
+                              onChange={(e) =>
+                                setGeofenceForm((p) => ({
+                                  ...p,
+                                  mobile_attendance_enabled: e.target.checked,
+                                }))
+                              }
+                              disabled={geofenceSaving}
+                            />
+                            Mobile enabled for this branch
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={handleUseMyLocation}
+                              disabled={geofenceSaving || locating}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 disabled:opacity-50"
+                            >
+                              {locating ? 'Getting location…' : 'Use my location'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveGeofence(b.id)}
+                              disabled={geofenceSaving}
+                              className="rounded-lg bg-indigo-600 px-3 py-1.5 text-[11px] font-medium text-white"
+                            >
+                              {geofenceSaving ? 'Saving…' : 'Save geofence'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelGeofenceEdit}
+                              disabled={geofenceSaving}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </li>

@@ -25,6 +25,7 @@ const salaryPaymentsRouter = require('./routes/salaryPayments');
 const demoEnquiriesRouter = require('./routes/demoEnquiries');
 const admsRouter = require('./routes/adms');
 const employeeAppRouter = require('./routes/employeeApp');
+const kioskRouter = require('./routes/kiosk');
 
 const app = express();
 
@@ -51,6 +52,11 @@ const allowedOrigins = [
   'https://punchpay.in',
   'https://www.punchpay.in',
   'http://localhost:5173',
+  'http://localhost:5174',
+  'http://localhost:5175',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5174',
+  'http://127.0.0.1:5175',
   'http://localhost:3000',
 ];
 
@@ -63,6 +69,13 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, curl, Postman, connector)
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    // Vite picks the next free port when 5173 is busy (5174, 5175, …)
+    if (
+      process.env.NODE_ENV !== 'production' &&
+      /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)
+    ) {
       return callback(null, true);
     }
     return callback(new Error('Not allowed by CORS'));
@@ -122,6 +135,7 @@ app.use('/api/shift-rotation', shiftRotationRouter);
 app.use('/api/holidays', holidaysRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/employee-app', employeeAppRouter);
+app.use('/api/kiosk', kioskRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/dashboard', dashboardRouter);
