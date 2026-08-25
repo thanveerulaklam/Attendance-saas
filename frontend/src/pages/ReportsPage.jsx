@@ -86,7 +86,8 @@ function getDayStatusLabel(row) {
   if (!row.present) return 'Absent';
   if (row.full_day) return row.late ? 'Full day (late)' : 'Full day';
   if (row.half_day) return row.late ? 'Half day (late)' : 'Half day';
-  if (row.left_during_lunch) return 'Left at lunch';
+  if (row.open_break_name) return `On ${String(row.open_break_name).toLowerCase()}`;
+  if (row.left_during_lunch) return 'On lunch';
   return row.late ? 'Present (late)' : 'Present';
 }
 

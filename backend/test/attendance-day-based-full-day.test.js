@@ -101,3 +101,11 @@ test('day_based: single IN after shift end today is absent', () => {
   const status = computeDayStatus(logs, shift, dayStr, true, nowMs);
   assert.equal(status.present, false);
 });
+
+test('day_based: skip-lunch 2-punch at shift end is full day, not left during lunch', () => {
+  const status = computeDayStatus(punches(['09:30', '21:30']), baseShift, day);
+  assert.equal(status.present, true);
+  assert.equal(status.fullDay, true);
+  assert.equal(status.leftDuringLunch, false);
+  assert.equal(status.openBreakName, null);
+});

@@ -5,6 +5,7 @@ import { authFetch } from '../../utils/api';
 import { formatMoneyAmount, formatMoneyWithSymbol } from '../../utils/formatMoney';
 import { regionFeaturesForCountry, companyCurrency } from '../../utils/regionFeatures';
 import RecordPaymentModal, { paymentModeLabel } from './RecordPaymentModal';
+import { lateDeductionLabel, overtimePayLabel, overtimeWindowLabel } from '../../utils/payrollPayLabels';
 
 const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const MONTH_LONG = [
@@ -145,10 +146,19 @@ function buildPayslipWhatsAppText({
   const overtimeHours = formatHours(att?.overtimeHours);
   const fmt = (n) => formatMoneyAmount(n, currency);
   const moneyPrefix = currency === 'INR' ? 'Rs' : currency;
+  const extraBreakRows =
+    Array.isArray(b.breakOverstayLines) && b.breakOverstayLines.some((line) => Number(line?.amount || 0) > 0)
+      ? b.breakOverstayLines
+          .filter((line) => String(line?.name || '').toLowerCase() !== 'lunch' && Number(line?.amount || 0) > 0)
+          .map((line) => [`${line.name} overstay`, line.amount])
+      : Number(b.otherBreakOverDeduction || 0) > 0
+        ? [['Other breaks', b.otherBreakOverDeduction]]
+        : [];
   const detailedDeductions = [
     ['Permission Offset', b.permissionOffsetAmount],
-    ['Late Deduction', b.lateDeduction],
+    [lateDeductionLabel(b.lateDeductionMode), b.lateDeduction],
     ['Lunch Deduction', b.lunchOverDeduction],
+    ...extraBreakRows,
     ['Advance Repayment', b.salaryAdvance],
     ['Absent Deduction', b.absenceDeduction],
     ...(showIndiaStatutory
@@ -567,11 +577,20 @@ export default function PayslipModal({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span>Overtime Hours</span>
+                <span>
+                  Overtime Hours
+                  {breakdown.breakdown?.overtimeWindow &&
+                  breakdown.breakdown.overtimeWindow !== 'total_extra'
+                    ? ` (${overtimeWindowLabel(breakdown.breakdown.overtimeWindow)})`
+                    : ''}
+                </span>
                 <span className="font-medium text-emerald-700">
                   {(() => {
                     const v = formatHours(breakdown.attendance?.overtimeHours);
                     return v === '—' ? '—' : `${v} hrs`;
+                  })()}
+                </span>
+              </div>
                   })()}
                 </span>
               </div>
@@ -635,7 +654,7 @@ export default function PayslipModal({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Overtime Pay</span>
+                  <span>{overtimePayLabel(breakdown.breakdown?.overtimePayMode)}</span>
                   <span className="font-medium text-emerald-700">
                     {fmtSym(breakdown.breakdown?.overtimePay)}
                   </span>
@@ -674,7 +693,7 @@ export default function PayslipModal({
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Late Deduction</span>
+                  <span>{lateDeductionLabel(breakdown.breakdown?.lateDeductionMode)}</span>
                   <span className="font-medium text-amber-700">
                     {fmtSym(breakdown.breakdown?.lateDeduction)}
                   </span>
@@ -685,6 +704,21 @@ export default function PayslipModal({
                     {fmtSym(breakdown.breakdown?.lunchOverDeduction)}
                   </span>
                 </div>
+                {(Array.isArray(breakdown.breakdown?.breakOverstayLines)
+                  ? breakdown.breakdown.breakOverstayLines.filter(
+                      (line) =>
+                        String(line?.name || '').toLowerCase() !== 'lunch' &&
+                        Number(line?.amount || 0) > 0
+                    )
+                  : Number(breakdown.breakdown?.otherBreakOverDeduction || 0) > 0
+                    ? [{ name: 'Other breaks', amount: breakdown.breakdown.otherBreakOverDeduction }]
+                    : []
+                ).map((line) => (
+                  <div key={line.name} className="flex justify-between">
+                    <span>{line.name} overstay</span>
+                    <span className="font-medium text-amber-700">{fmtSym(line.amount)}</span>
+                  </div>
+                ))}
                 <div className="flex justify-between">
                   <span>Advance Repayment</span>
                   <span className="font-medium text-amber-700">

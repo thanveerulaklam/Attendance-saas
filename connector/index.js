@@ -104,8 +104,8 @@ function formatErr(err) {
 /** Split pushes so each request stays under proxy limits (413) even with months of backlog. */
 const MAX_LOGS_PER_PUSH = 1200;
 
-/** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
-const MIN_BREAK_MINUTES = 30;
+/** Double-taps only. Real tea/prayer punches (10–15 min) must not be dropped. */
+const MIN_BREAK_MINUTES = 5;
 
 function assignInOut(logs) {
   const byUserAndDay = new Map();
@@ -124,7 +124,7 @@ function assignInOut(logs) {
   for (const list of byUserAndDay.values()) {
     list.sort((a, b) => new Date(a.punch_time) - new Date(b.punch_time));
 
-    // Remove OUT→IN pairs where gap < 30 min (short breaks / double-taps)
+    // Remove OUT→IN pairs where gap is a double-tap (not a real break)
     let filtered = [];
     for (let i = 0; i < list.length; i++) {
       const curr = list[i];

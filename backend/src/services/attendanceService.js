@@ -15,6 +15,12 @@ const {
 const { resolveEffectiveShiftIdsForDate } = require('./shiftResolverService');
 const { isFlexibleHoursMode, getCompanyTimezone } = require('./companyService');
 const { getHolidayDatesForMonth } = require('./holidayService');
+const { loadBreaksByShiftIds } = require('./shiftService');
+const {
+  classifyBreaks,
+  computeWindowOvertimeMs,
+  normalizeOvertimeWindow,
+} = require('../utils/shiftRules');
 
 async function withCompanyIdTimezone(companyId, fn) {
   const tz = await getCompanyTimezone(companyId);
@@ -111,6 +117,7 @@ function rowToShiftConfig(row) {
     Number.isFinite(fullDayHours) && fullDayHours >= 0 ? fullDayHours : null;
   const overtimeAllowed = row.allow_overtime === true || row.allow_overtime === 'true';
   return {
+    id: row.id != null ? Number(row.id) : null,
     startHour,
     startMinute,
     endHour,
@@ -125,6 +132,16 @@ function rowToShiftConfig(row) {
     /** null = derive from shift span − allotted lunch; else minimum worked hours for full day (0 = punch pattern only). */
     fullDayHours: fullDayHoursResolved,
     overtimeAllowed,
+    lateDeductionMode: String(row.late_deduction_mode || 'per_day').toLowerCase() === 'per_minute'
+      ? 'per_minute'
+      : 'per_day',
+    overtimePayMode: ['per_day', 'per_minute'].includes(
+      String(row.overtime_pay_mode || 'per_hour').toLowerCase()
+    )
+      ? String(row.overtime_pay_mode).toLowerCase()
+      : 'per_hour',
+    overtimeWindow: normalizeOvertimeWindow(row.overtime_window),
+    breaks: Array.isArray(row.breaks) ? row.breaks : [],
   };
 }
 
@@ -194,7 +211,8 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
  */
 async function getShiftConfig(companyId) {
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime,
+            late_deduction_mode, overtime_pay_mode, overtime_window
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -206,7 +224,7 @@ async function getShiftConfig(companyId) {
     throw new AppError('No shift configured for company', 400);
   }
 
-  return rowToShiftConfig(result.rows[0]);
+  return attachBreaksToShiftConfig(rowToShiftConfig(result.rows[0]), result.rows[0].id);
 }
 
 /**
@@ -215,12 +233,13 @@ async function getShiftConfig(companyId) {
 async function getShiftConfigById(shiftId) {
   if (!shiftId) return null;
   const result = await pool.query(
-    `SELECT start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime,
+            late_deduction_mode, overtime_pay_mode, overtime_window
      FROM shifts WHERE id = $1`,
     [shiftId]
   );
   if (result.rowCount === 0) return null;
-  return rowToShiftConfig(result.rows[0]);
+  return attachBreaksToShiftConfig(rowToShiftConfig(result.rows[0]), result.rows[0].id);
 }
 
 /**
@@ -234,12 +253,16 @@ async function getShiftConfigMap(companyId, shiftIds) {
   const uniqueIds = [...new Set((shiftIds || []).filter(Boolean))];
   if (uniqueIds.length === 0) return map;
   const result = await pool.query(
-    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours
+    `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours,
+            allow_overtime, late_deduction_mode, overtime_pay_mode, overtime_window
      FROM shifts WHERE id = ANY($1::bigint[])`,
     [uniqueIds]
   );
+  const breakMap = await loadBreaksByShiftIds(uniqueIds.map(Number));
   for (const row of result.rows) {
-    map.set(Number(row.id), rowToShiftConfig(row));
+    const cfg = rowToShiftConfig(row);
+    cfg.breaks = breakMap.get(Number(row.id)) || [];
+    map.set(Number(row.id), cfg);
   }
   for (const id of uniqueIds) {
     const nid = Number(id);
@@ -553,13 +576,48 @@ function computeHoursInsideForHoursBasedPayroll(
   return workedMs / (60 * 60 * 1000);
 }
 
+function emptyDayStatus(shiftConfig) {
+  return {
+    present: false,
+    late: false,
+    overtimeHours: 0,
+    overtimeMinutes: 0,
+    overtimeDays: 0,
+    fullDay: false,
+    leftDuringLunch: false,
+    lunchMinutes: null,
+    lunchMinutesAllotted: shiftConfig?.lunchMinutesAllotted ?? 60,
+    lunchOverMinutes: null,
+    firstInTime: null,
+    lastOutTime: null,
+    minutesLate: 0,
+    breaks: [],
+    openBreakName: null,
+  };
+}
+
+async function attachBreaksToShiftConfig(config, shiftId) {
+  if (!shiftId) return config;
+  const map = await loadBreaksByShiftIds([Number(shiftId)]);
+  config.breaks = map.get(Number(shiftId)) || [];
+  return config;
+}
+
+function resolveOvertimeMs(workedMs, shiftConfig, workSegments, shiftStartMs, shiftEndMs) {
+  const windowMs = computeWindowOvertimeMs(
+    workSegments,
+    shiftStartMs,
+    shiftEndMs,
+    shiftConfig.overtimeWindow
+  );
+  if (windowMs != null) return windowMs;
+  return Math.max(0, workedMs - shiftConfig.shiftMs - shiftConfig.graceMs);
+}
+
 /**
- * Compute present, late, overtime, full-day, left-during-lunch, and lunch duration for one day's logs.
- * Expects 4-punch pattern: 1=IN, 2=OUT (lunch start), 3=IN (lunch end), 4=OUT (end of day).
- * shiftConfig: { startHour, startMinute, shiftMs, graceMs, lunchMinutesAllotted, halfDayHours, fullDayHours }
- * calendarDateStr: YYYY-MM-DD attendance day in IST
- * @param {boolean} [isCurrentDate] - when true, unpaired IN counts through now (capped at shift end) for thresholds and hours
- * @param {number} [nowMs] - current time for in-progress segments (defaults to Date.now())
+ * Compute present, late, overtime, full-day, breaks, and lunch duration for one day's logs.
+ * Breaks are inferred from OUT→IN gaps vs shift break windows. Last OUT near shift end is checkout,
+ * not lunch — so IN+OUT at start/end of shift is a normal day, not "left during lunch".
  */
 function computeDayStatus(
   dayLogs,
@@ -568,73 +626,16 @@ function computeDayStatus(
   isCurrentDate = false,
   nowMs = Date.now()
 ) {
-  const empty = {
-    present: false,
-    late: false,
-    overtimeHours: 0,
-    fullDay: false,
-    leftDuringLunch: false,
-    lunchMinutes: null,
-    lunchMinutesAllotted: shiftConfig.lunchMinutesAllotted ?? 60,
-    lunchOverMinutes: null,
-    firstInTime: null,
-    lastOutTime: null,
-  };
+  const empty = emptyDayStatus(shiftConfig);
 
   if (!dayLogs.length) {
     return empty;
   }
 
-  let workedMs = 0;
-  let firstInTime = null;
-  let currentIn = null;
-  let lunchStartTime = null; // time of first OUT (lunch start)
-  let lunchEndTime = null;   // time of second IN (lunch end)
-  let lastOutTime = null;
-
   const sorted = [...dayLogs].sort(
     (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
   );
 
-  for (const log of sorted) {
-    const t = new Date(log.punch_time);
-    const type = (log.punch_type || '').toLowerCase();
-    if (type === 'in') {
-      if (firstInTime == null) firstInTime = t;
-      // First IN after lunch OUT = end of lunch (do not overwrite on later INs, e.g. 6-punch days)
-      if (currentIn == null && lunchStartTime != null && lunchEndTime == null) {
-        lunchEndTime = t;
-      }
-      currentIn = t;
-    } else if (type === 'out') {
-      if (currentIn != null) {
-        workedMs += Math.max(0, t - currentIn);
-        if (lunchStartTime == null) {
-          lunchStartTime = t; // first OUT = lunch start
-        }
-      }
-      currentIn = null;
-      lastOutTime = t;
-    }
-  }
-
-  // Left during lunch = exactly 2 punches (IN, OUT) — went out for lunch and never punched back IN
-  const punchCount = sorted.length;
-  const leftDuringLunch = punchCount === 2 &&
-    sorted[0].punch_type?.toLowerCase() === 'in' &&
-    sorted[1].punch_type?.toLowerCase() === 'out';
-
-  const allotted = shiftConfig.lunchMinutesAllotted ?? 60;
-  let lunchMinutes = null;
-  let lunchOverMinutes = null;
-  if (lunchStartTime != null && lunchEndTime != null) {
-    lunchMinutes = Math.round((lunchEndTime - lunchStartTime) / (60 * 1000));
-    lunchOverMinutes = Math.max(0, lunchMinutes - allotted);
-  }
-
-  // Anchor shift start to the attendance day (shift start date), not the first punch's calendar day.
-  // Required for day_based and overnight shift_based so a morning punch on day 2 does not move
-  // the expected start to day 2.
   const [y, mo, dd] = calendarDateStr.split('-').map(Number);
   const shiftStartMs = getShiftStartMsForDate(
     y,
@@ -644,6 +645,35 @@ function computeDayStatus(
     shiftConfig.startMinute
   );
   const shiftEndMs = shiftStartMs + shiftConfig.shiftMs;
+  const classified = classifyBreaks({
+    sortedLogs: sorted,
+    shiftConfig,
+    shiftStartMs,
+    shiftEndMs,
+    isCurrentDate,
+    nowMs,
+  });
+
+  let workedMs = 0;
+  let firstInTime = classified.firstInTime;
+  let currentIn = null;
+  let lastOutTime = classified.lastOutTime;
+
+  for (const log of sorted) {
+    const t = new Date(log.punch_time);
+    const type = (log.punch_type || '').toLowerCase();
+    if (type === 'in') {
+      if (firstInTime == null) firstInTime = t;
+      currentIn = t;
+    } else if (type === 'out') {
+      if (currentIn != null) {
+        workedMs += Math.max(0, t - currentIn);
+      }
+      currentIn = null;
+      lastOutTime = t;
+    }
+  }
+
   const maxOpenSessionMs = 24 * 60 * 60 * 1000;
   if (
     isCurrentDate &&
@@ -660,16 +690,25 @@ function computeDayStatus(
     }
   }
 
+  workedMs = Math.max(0, workedMs - Number(classified.scheduledUnpaidMs || 0));
+
+  const leftDuringLunch = Boolean(classified.leftDuringLunch);
+  const allotted = classified.lunchMinutesAllotted;
+
   const late =
     (workedMs > 0 || firstInTime != null) &&
     firstInTime != null &&
     firstInTime.getTime() > shiftStartMs + shiftConfig.graceMs;
 
-  const overtimeMs = Math.max(
-    0,
-    workedMs - shiftConfig.shiftMs - shiftConfig.graceMs
+  const overtimeMs = resolveOvertimeMs(
+    workedMs,
+    shiftConfig,
+    classified.workSegments,
+    shiftStartMs,
+    shiftEndMs
   );
   const overtimeHours = overtimeMs / (60 * 60 * 1000);
+  const overtimeMinutes = Math.round(overtimeMs / 60000);
   const workedHours = workedMs / (60 * 60 * 1000);
   const fullDayMinHours = Number(shiftConfig.fullDayHours);
   const halfDayMinHours = Number(shiftConfig.halfDayHours);
@@ -710,7 +749,6 @@ function computeDayStatus(
       halfDay = false;
     }
   } else {
-    // Backward-compatible behavior for legacy shifts without configured thresholds.
     fullDay = workedMs + 0.001 >= fullDayMinWorkMs;
     halfDay = present && !fullDay;
   }
@@ -719,11 +757,13 @@ function computeDayStatus(
     present,
     late,
     overtimeHours,
+    overtimeMinutes,
+    overtimeDays: overtimeMinutes > 0 ? 1 : 0,
     fullDay,
     leftDuringLunch,
-    lunchMinutes,
+    lunchMinutes: classified.lunchMinutes,
     lunchMinutesAllotted: allotted,
-    lunchOverMinutes: lunchOverMinutes !== null ? lunchOverMinutes : null,
+    lunchOverMinutes: classified.lunchOverMinutes,
     firstInTime,
     lastOutTime,
     minutesLate:
@@ -738,6 +778,8 @@ function computeDayStatus(
           )
         : 0,
     halfDay,
+    breaks: classified.breaks,
+    openBreakName: classified.openBreakName,
   };
 }
 
@@ -749,19 +791,9 @@ function computeHoursBasedDayStatus(
   nowMs
 ) {
   const empty = {
-    present: false,
-    late: false,
-    overtimeHours: 0,
-    fullDay: false,
-    leftDuringLunch: false,
-    lunchMinutes: null,
+    ...emptyDayStatus({ ...shiftConfig, lunchMinutesAllotted: 0 }),
     lunchMinutesAllotted: 0,
-    lunchOverMinutes: null,
     totalHoursInside: 0,
-    halfDay: false,
-    firstInTime: null,
-    lastOutTime: null,
-    minutesLate: 0,
   };
   if (!dayLogs.length) return empty;
 
@@ -769,51 +801,71 @@ function computeHoursBasedDayStatus(
     (a, b) => new Date(a.punch_time) - new Date(b.punch_time)
   );
 
-  const workedMs = computeWorkedMsFromShiftStartToNow(
+  const [y, mo, dd] = String(calendarDateStr).split('-').map(Number);
+  const shiftStartMs = getShiftStartMsForDate(
+    y,
+    mo,
+    dd,
+    shiftConfig.startHour,
+    shiftConfig.startMinute
+  );
+  const shiftEndMs = shiftStartMs + shiftConfig.shiftMs;
+  const classified = classifyBreaks({
+    sortedLogs: sorted,
+    shiftConfig,
+    shiftStartMs,
+    shiftEndMs,
+    isCurrentDate,
+    nowMs,
+  });
+
+  let workedMs = computeWorkedMsFromShiftStartToNow(
     dayLogs,
     shiftConfig,
     calendarDateStr,
     isCurrentDate,
     nowMs
   );
+  workedMs = Math.max(0, workedMs - Number(classified.scheduledUnpaidMs || 0));
   const totalHoursInside = workedMs / (60 * 60 * 1000);
 
-  let firstInTime = null;
-  for (const log of sorted) {
-    if (String(log.punch_type || '').toLowerCase() === 'in') {
-      firstInTime = new Date(log.punch_time);
-      break;
-    }
-  }
-
+  const firstInTime = classified.firstInTime;
+  const lastOutTime = classified.lastOutTime;
   const required = Number(shiftConfig.requiredHoursPerDay || 8);
 
   let present = false;
   let halfDay = false;
   let overtimeHours = 0;
+  let overtimeMs = 0;
+
+  const windowOt = computeWindowOvertimeMs(
+    classified.workSegments,
+    shiftStartMs,
+    shiftEndMs,
+    shiftConfig.overtimeWindow
+  );
 
   if (totalHoursInside >= required) {
     present = true;
-    overtimeHours = totalHoursInside - required;
+    overtimeHours = windowOt != null ? windowOt / (60 * 60 * 1000) : totalHoursInside - required;
+    overtimeMs = windowOt != null ? windowOt : (totalHoursInside - required) * 60 * 60 * 1000;
   } else if (totalHoursInside >= required * 0.5) {
     present = true;
     halfDay = true;
+    if (windowOt != null && windowOt > 0) {
+      overtimeMs = windowOt;
+      overtimeHours = windowOt / (60 * 60 * 1000);
+    }
+  } else if (windowOt != null && windowOt > 0) {
+    overtimeMs = windowOt;
+    overtimeHours = windowOt / (60 * 60 * 1000);
   }
 
   const fullDay = present && !halfDay;
 
-  // Late detection based on first IN punch vs shift start + grace
   let late = false;
   let minutesLate = 0;
   if (firstInTime) {
-    const { year: y, month: mo, day: dd } = ymdParts(firstInTime);
-    const shiftStartMs = getShiftStartMsForDate(
-      y,
-      mo,
-      dd,
-      shiftConfig.startHour,
-      shiftConfig.startMinute
-    );
     const allowedStartMs = shiftStartMs + shiftConfig.graceMs;
     if (firstInTime.getTime() > allowedStartMs) {
       late = true;
@@ -823,28 +875,26 @@ function computeHoursBasedDayStatus(
     }
   }
 
-  let lastOutTime = null;
-  for (let i = sorted.length - 1; i >= 0; i -= 1) {
-    if (String(sorted[i].punch_type || '').toLowerCase() === 'out') {
-      lastOutTime = new Date(sorted[i].punch_time);
-      break;
-    }
-  }
+  const overtimeMinutes = Math.round(overtimeMs / 60000);
 
   return {
     present,
     late,
     overtimeHours,
+    overtimeMinutes,
+    overtimeDays: overtimeMinutes > 0 ? 1 : 0,
     fullDay,
-    leftDuringLunch: false,
-    lunchMinutes: null,
-    lunchMinutesAllotted: 0,
-    lunchOverMinutes: null,
+    leftDuringLunch: Boolean(classified.leftDuringLunch),
+    lunchMinutes: classified.lunchMinutes,
+    lunchMinutesAllotted: classified.lunchMinutesAllotted,
+    lunchOverMinutes: classified.lunchOverMinutes,
     totalHoursInside,
     halfDay,
     firstInTime,
     lastOutTime,
     minutesLate,
+    breaks: classified.breaks,
+    openBreakName: classified.openBreakName,
   };
 }
 
@@ -1078,6 +1128,8 @@ async function getDailyAttendance(
         minutes_late:
           status.minutesLate != null ? Math.round(status.minutesLate) : 0,
         is_provisional: isProvisionalHoursBased,
+        breaks: status.breaks || [],
+        open_break_name: status.openBreakName || null,
         punches,
       };
     });
@@ -1302,6 +1354,8 @@ async function getMonthlyAttendance(
           lunch_minutes: status.lunchMinutes,
           lunch_minutes_allotted: status.lunchMinutesAllotted,
           lunch_over_minutes: status.lunchOverMinutes,
+          breaks: status.breaks || [],
+          open_break_name: status.openBreakName || null,
           attendance_mode: shiftConfig.attendanceMode,
           required_hours_per_day:
             shiftConfig.attendanceMode === 'hours_based'
@@ -1438,9 +1492,9 @@ async function addManualPunch(
 
 /**
  * Mark full-day manual attendance.
- * Creates 4 punches so the day is "Full day" (not "Left at lunch"):
- * IN (shift start), OUT (lunch start), IN (lunch end), OUT (shift end).
- * Uses server local time so stored times match company timezone when server runs in same zone.
+ * Creates IN at shift start and OUT at shift end. Checkout is not treated as lunch,
+ * so a 2-punch day is a full day when worked hours meet the threshold.
+
  * @param {number} companyId
  * @param {object} params - { employeeId, date (YYYY-MM-DD) }
  * @returns {Promise<{ inserted: number, punches: Array }>}
@@ -1479,10 +1533,6 @@ async function addManualFullDay(companyId, { employeeId, date }, allowedBranchId
 
     // Use local time (not UTC) so 9 AM stays 9 AM in display when server is in company timezone.
     const inTime = new Date(year, month - 1, dayNum, shiftConfig.startHour, shiftConfig.startMinute, 0);
-    const lunchMs = (shiftConfig.lunchMinutesAllotted || 60) * 60 * 1000;
-    const workBeforeLunchMs = Math.max(0, shiftConfig.shiftMs - lunchMs) / 2;
-    const outLunchTime = new Date(inTime.getTime() + workBeforeLunchMs);
-    const inLunchTime = new Date(outLunchTime.getTime() + lunchMs);
     const outTime = new Date(inTime.getTime() + shiftConfig.shiftMs);
 
     let inserted = 0;
@@ -1490,8 +1540,6 @@ async function addManualFullDay(companyId, { employeeId, date }, allowedBranchId
 
     const toInsert = [
       [inTime, 'in'],
-      [outLunchTime, 'out'],
-      [inLunchTime, 'in'],
       [outTime, 'out'],
     ];
 

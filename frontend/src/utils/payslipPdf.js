@@ -6,6 +6,7 @@ import {
   formatGroupedLateDetailsText,
   resolvePayslipAttendanceDates,
 } from './payslipAttendance';
+import { lateDeductionLabel, overtimePayLabel } from './payrollPayLabels';
 
 const LAYOUTS = {
   a5: {
@@ -375,17 +376,30 @@ function renderCompactPayslip(
     ['Earned basic', b.basicSalary],
     ['Travel', b.travelAllowance],
     ['Other allow.', b.otherAllowance],
-    ...(allowOvertime ? [['Overtime', b.overtimePay]] : []),
+    ...(allowOvertime ? [[overtimePayLabel(b.overtimePayMode), b.overtimePay]] : []),
     ['Leave encash', b.paidLeaveEncashmentAmount],
     ['Incentive', b.noLeaveIncentive],
   ]);
   const earningsGross = earningAmounts.reduce((sum, n) => sum + Number(n || 0), 0);
   earningRows.push(['Gross', money(earningsGross)]);
 
+  const extraBreakRows =
+    Array.isArray(b.breakOverstayLines) &&
+    b.breakOverstayLines.some((line) => Number(line?.amount || 0) > 0)
+      ? b.breakOverstayLines
+          .filter(
+            (line) =>
+              String(line?.name || '').toLowerCase() !== 'lunch' && Number(line?.amount || 0) > 0
+          )
+          .map((line) => [String(line.name), line.amount])
+      : Number(b.otherBreakOverDeduction || 0) > 0
+        ? [['Other breaks', b.otherBreakOverDeduction]]
+        : [];
   const deductionRows = rowsWithAmount([
     ['Absent', b.absenceDeduction],
-    ['Late', b.lateDeduction],
+    [lateDeductionLabel(b.lateDeductionMode), b.lateDeduction],
     ['Lunch', b.lunchOverDeduction],
+    ...extraBreakRows,
     ['ESI', b.esiDeduction],
     ['PF', b.pfDeduction],
   ]);

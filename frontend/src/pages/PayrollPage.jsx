@@ -8,6 +8,7 @@ import { buildBulkPayslipsDoc, openBulkPayslipsForPrint } from '../utils/payslip
 import { formatMoneyAmount, formatMoneyWithSymbol, currencySymbol } from '../utils/formatMoney';
 import { formatWorkedHours } from '../utils/durationFormat';
 import { regionFeaturesForCountry } from '../utils/regionFeatures';
+import { lateDeductionLabel, overtimePayLabel } from '../utils/payrollPayLabels';
 
 const PAGE_SIZE = 50;
 const PAYROLL_COLUMN_STORAGE_KEY = 'payroll.visibleColumns.v1';
@@ -1197,10 +1198,23 @@ export default function PayrollPage() {
       });
       const data = await getMonthlyBreakdown(row);
       const b = data?.breakdown || {};
+      const extraBreakRows =
+        Array.isArray(b.breakOverstayLines) &&
+        b.breakOverstayLines.some((line) => Number(line?.amount || 0) > 0)
+          ? b.breakOverstayLines
+              .filter(
+                (line) =>
+                  String(line?.name || '').toLowerCase() !== 'lunch' && Number(line?.amount || 0) > 0
+              )
+              .map((line) => [`${line.name} overstay`, fmt(line.amount)])
+          : Number(b.otherBreakOverDeduction || 0) > 0
+            ? [['Other breaks', fmt(b.otherBreakOverDeduction)]]
+            : [];
       const deductionRows = [
         ['Absent Deduction', fmt(b.absenceDeduction)],
-        ['Late Deduction', fmt(b.lateDeduction)],
+        [lateDeductionLabel(b.lateDeductionMode), fmt(b.lateDeduction)],
         ['Lunch Deduction', fmt(b.lunchOverDeduction)],
+        ...extraBreakRows,
         ...(showIndiaStatutory
           ? [
               ['ESI Deduction', fmt(b.esiDeduction)],

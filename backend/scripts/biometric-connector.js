@@ -44,12 +44,12 @@ function log(msg) {
 /** Keep each POST under reverse-proxy body limits (avoid 413). */
 const MAX_LOGS_PER_PUSH = 1200;
 
-/** Minimum minutes between OUT and next IN to count as a real break; shorter gaps are treated as accidental. */
-const MIN_BREAK_MINUTES = 30;
+/** Double-taps only. Real tea/prayer punches (10–15 min) must not be dropped. */
+const MIN_BREAK_MINUTES = 5;
 
 /**
  * Infer punch_type when device doesn't provide it: first punch of day = in, second = out, etc.
- * Removes OUT→IN pairs where gap < 30 min (short breaks/double-taps).
+ * Removes OUT→IN pairs where gap is a double-tap (not a real break).
  */
 function assignInOut(logs) {
   const byUserAndDay = new Map();

@@ -14,6 +14,7 @@ const {
   computeDayStatus,
   attributedShiftStartDateStr,
   computeHoursInsideForHoursBasedPayroll,
+  computeHoursBasedDayStatus,
   computeFlexibleDailyHoursFromLogs,
   computeMonthlyRawWorkedHoursFromLogs,
 } = require('./attendanceService');
@@ -32,6 +33,16 @@ const {
 const { normalizeMode } = require('../utils/statutoryDeductions');
 const { getCompanyTimezone } = require('./companyService');
 const { getPayrollRulesForCompanyId } = require('../payroll/rules');
+const { loadBreaksByShiftIds } = require('./shiftService');
+const {
+  computeLateDeductionAmount,
+  computeOverstayDeduction,
+  computeOvertimePayAmount,
+  normalizeLateMode,
+  normalizeOvertimePayMode,
+  normalizeOvertimeWindow,
+  isLateDayEligible,
+} = require('../utils/shiftRules');
 
 async function withCompanyIdTimezone(companyId, fn) {
   const tz = await getCompanyTimezone(companyId);
@@ -335,12 +346,14 @@ function rowToShiftConfig(row) {
       String(row.overtime_rate_mode || 'fixed').toLowerCase() === 'auto'
         ? 'auto'
         : 'fixed',
+    lateDeductionMode: normalizeLateMode(row.late_deduction_mode),
+    overtimePayMode: normalizeOvertimePayMode(row.overtime_pay_mode),
+    overtimeWindow: normalizeOvertimeWindow(row.overtime_window),
+    breaks: Array.isArray(row.breaks) ? row.breaks : [],
   };
 }
 
-async function getDefaultShiftForCompany(client, companyId) {
-  const result = await client.query(
-    `SELECT
+const PAYROLL_SHIFT_COLUMNS = `
        id,
        start_time,
        end_time,
@@ -348,6 +361,7 @@ async function getDefaultShiftForCompany(client, companyId) {
        lunch_minutes,
        late_deduction_minutes,
        late_deduction_amount,
+       late_deduction_mode,
        lunch_over_deduction_minutes,
        lunch_over_deduction_amount,
        no_leave_incentive,
@@ -360,7 +374,169 @@ async function getDefaultShiftForCompany(client, companyId) {
        required_hours_per_day,
        allow_overtime,
        overtime_rate_per_hour,
-       overtime_rate_mode
+       overtime_rate_mode,
+       overtime_pay_mode,
+       overtime_window`;
+
+async function attachPayrollShiftBreaks(client, config) {
+  if (!config?.id) return config;
+  const map = await loadBreaksByShiftIds([Number(config.id)], client);
+  config.breaks = map.get(Number(config.id)) || [];
+  return config;
+}
+
+function payrollLogsForStatus(sorted) {
+  return (sorted || []).map((l) => ({
+    punch_time: l.punchTime,
+    punch_type: l.punchType,
+  }));
+}
+
+function accumulateBreakOverstay(acc, status) {
+  const rows = status?.breaks;
+  if (Array.isArray(rows) && rows.length) {
+    for (const b of rows) {
+      const over = Number(b.overMinutes || 0);
+      if (!(over > 0)) continue;
+      const key = String(b.name || 'Break');
+      if (!acc.has(key)) {
+        acc.set(key, {
+          name: key,
+          overDeductionMode: b.overDeductionMode || 'none',
+          overDeductionAmount: Number(b.overDeductionAmount || 0),
+          overDeductionMinutes: Number(b.overDeductionMinutes || 0),
+          overDays: 0,
+          overMinutes: 0,
+        });
+      }
+      const row = acc.get(key);
+      row.overDays += 1;
+      row.overMinutes += over;
+    }
+    return;
+  }
+  const lunchOver = Number(status?.lunchOverMinutes || 0);
+  if (lunchOver > 0) {
+    if (!acc.has('Lunch')) {
+      acc.set('Lunch', {
+        name: 'Lunch',
+        overDeductionMode: 'per_day',
+        overDeductionAmount: 0,
+        overDeductionMinutes: 0,
+        overDays: 0,
+        overMinutes: 0,
+      });
+    }
+    const row = acc.get('Lunch');
+    row.overDays += 1;
+    row.overMinutes += lunchOver;
+  }
+}
+
+function withPayRuleSummaryFields(base, shift, extras = {}) {
+  return {
+    ...base,
+    lateDeductionMode: shift.lateDeductionMode || 'per_day',
+    overtimePayMode: shift.overtimePayMode || 'per_hour',
+    overtimeWindow: shift.overtimeWindow || 'total_extra',
+    overtimeDays: extras.overtimeDays || 0,
+    overtimeMinutes: extras.overtimeMinutes || 0,
+    breakOverstay: extras.breakOverstay || [],
+  };
+}
+
+function shouldCountLateDay(shift, minutesLate) {
+  return isLateDayEligible({
+    minutesLate,
+    mode: shift?.lateDeductionMode,
+    thresholdMinutes: shift?.lateDeductionMinutes,
+  });
+}
+
+function payRuleBreakdownFields(summary, overstay) {
+  return {
+    lateDeductionMode: summary.lateDeductionMode || 'per_day',
+    overtimePayMode: summary.overtimePayMode || 'per_hour',
+    overtimeWindow: summary.overtimeWindow || 'total_extra',
+    otherBreakOverDeduction: Number(overstay?.otherBreakOverDeduction || 0),
+    breakOverstayLines: Array.isArray(overstay?.lines) ? overstay.lines : [],
+  };
+}
+
+function resolveLateDeduction(summary, flexibleHoursMode) {
+  return computeLateDeductionAmount({
+    mode: summary.lateDeductionMode,
+    lateDays: summary.lateDays,
+    lateMinutes: summary.lateMinutes,
+    amount: summary.lateDeductionAmount,
+    thresholdMinutes: summary.lateDeductionMinutes,
+    flexibleHoursMode,
+  });
+}
+
+function resolveOverstayAmounts(summary, shift) {
+  let rows = summary.breakOverstay;
+  if (!Array.isArray(rows) || !rows.length) {
+    rows = [
+      {
+        name: 'Lunch',
+        overDeductionMode:
+          Number(summary.lunchOverDeductionMinutes || 0) > 0 &&
+          Number(summary.lunchOverDeductionAmount || 0) > 0
+            ? 'per_day'
+            : 'none',
+        overDeductionAmount: Number(summary.lunchOverDeductionAmount || 0),
+        overDeductionMinutes: Number(summary.lunchOverDeductionMinutes || 0),
+        overDays: Number(summary.lunchOverDays || 0),
+        overMinutes: Number(summary.lunchOverMinutes || 0),
+      },
+    ];
+  } else {
+    rows = rows.map((r) => {
+      if (String(r.name).toLowerCase() !== 'lunch') return r;
+      return {
+        ...r,
+        overDeductionMode:
+          r.overDeductionMode && r.overDeductionMode !== 'none'
+            ? r.overDeductionMode
+            : Number(summary.lunchOverDeductionMinutes || shift?.lunchOverDeductionMinutes || 0) > 0 &&
+              Number(summary.lunchOverDeductionAmount || shift?.lunchOverDeductionAmount || 0) > 0
+              ? 'per_day'
+              : r.overDeductionMode,
+        overDeductionAmount:
+          Number(r.overDeductionAmount || summary.lunchOverDeductionAmount || shift?.lunchOverDeductionAmount || 0),
+        overDeductionMinutes:
+          Number(r.overDeductionMinutes || summary.lunchOverDeductionMinutes || shift?.lunchOverDeductionMinutes || 0),
+      };
+    });
+  }
+  return computeOverstayDeduction(rows);
+}
+
+function resolveOvertimePay({
+  includeOvertime,
+  shiftConfig,
+  summary,
+  dailyRate,
+  shiftHours,
+}) {
+  return computeOvertimePayAmount({
+    includeOvertime,
+    allowOvertime: shiftConfig.allowOvertime,
+    payMode: summary.overtimePayMode || shiftConfig.overtimePayMode,
+    rateMode: shiftConfig.overtimeRateMode,
+    ratePerHour: shiftConfig.overtimeRatePerHour,
+    overtimeHours: summary.overtimeHours,
+    overtimeDays: summary.overtimeDays,
+    overtimeMinutes: summary.overtimeMinutes,
+    dailyRate,
+    shiftHours,
+  });
+}
+
+async function getDefaultShiftForCompany(client, companyId) {
+  const result = await client.query(
+    `SELECT ${PAYROLL_SHIFT_COLUMNS}
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -372,7 +548,7 @@ async function getDefaultShiftForCompany(client, companyId) {
     throw new AppError('No shift configured for company', 400);
   }
 
-  return rowToShiftConfig(result.rows[0]);
+  return attachPayrollShiftBreaks(client, rowToShiftConfig(result.rows[0]));
 }
 
 /**
@@ -401,60 +577,15 @@ async function getShiftForEmployee(client, companyId, employeeId, dateStr = null
   }
 
   if (shiftId) {
-    let result;
-    try {
-      result = await client.query(
-        `SELECT
-           id, start_time, end_time, grace_minutes, lunch_minutes,
-           late_deduction_minutes, late_deduction_amount,
-           lunch_over_deduction_minutes, lunch_over_deduction_amount,
-           no_leave_incentive,
-           paid_leave_days,
-           weekly_off_days,
-           attendance_mode,
-           monthly_permission_hours,
-           half_day_hours,
-           full_day_hours,
-           required_hours_per_day,
-           allow_overtime,
-           overtime_rate_per_hour,
-           overtime_rate_mode
-         FROM shifts
-         WHERE company_id = $1 AND id = $2`,
-        [companyId, shiftId]
-      );
-    } catch (err) {
-      // Backward compatibility: older DBs may not have overtime_rate_mode column yet.
-      if (
-        err?.code === '42703' &&
-        String(err?.message || '').toLowerCase().includes('overtime_rate_mode')
-      ) {
-        result = await client.query(
-          `SELECT
-             id, start_time, end_time, grace_minutes, lunch_minutes,
-             late_deduction_minutes, late_deduction_amount,
-             lunch_over_deduction_minutes, lunch_over_deduction_amount,
-             no_leave_incentive,
-             paid_leave_days,
-             weekly_off_days,
-             attendance_mode,
-             monthly_permission_hours,
-             half_day_hours,
-             full_day_hours,
-             required_hours_per_day,
-             allow_overtime,
-             overtime_rate_per_hour
-           FROM shifts
-           WHERE company_id = $1 AND id = $2`,
-          [companyId, shiftId]
-        );
-      } else {
-        throw err;
-      }
-    }
+    const result = await client.query(
+      `SELECT ${PAYROLL_SHIFT_COLUMNS}
+       FROM shifts
+       WHERE company_id = $1 AND id = $2`,
+      [companyId, shiftId]
+    );
 
     if (result?.rowCount > 0) {
-      return rowToShiftConfig(result.rows[0]);
+      return attachPayrollShiftBreaks(client, rowToShiftConfig(result.rows[0]));
     }
   }
 
@@ -601,6 +732,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     let presentDays = 0;
     let presentWorkingDays = 0;
     let totalOvertimeMs = 0;
+    let overtimeDays = 0;
+    const breakOverstayAcc = new Map();
     let totalLateMs = 0;
     let totalLunchOverMs = 0;
     /** Number of days employee was late (for fixed deduction per late day). */
@@ -620,6 +753,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       let rawAbsenceDays = 0;
       let rawAbsenceHours = 0;
       let overtimeHours = 0;
+      let overtimeDays = 0;
+      let overtimeMinutesAcc = 0;
+      const breakOverstayAcc = new Map();
 
       const flexibleDailyHours = flexibleHoursMode
         ? computeFlexibleDailyHoursFromLogs(logsResult.rows)
@@ -672,8 +808,21 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         const presentFraction = required > 0 ? workedHoursCapped / required : 0;
         let statusLabel = 'absent';
 
-        if (!flexibleHoursMode && hoursInside >= required) {
-          overtimeHours += hoursInside - required;
+        if (!flexibleHoursMode) {
+          const hbStatus = computeHoursBasedDayStatus(
+            payrollLogsForStatus(sorted),
+            dayShift,
+            dayKey,
+            false
+          );
+          accumulateBreakOverstay(breakOverstayAcc, hbStatus);
+          const dayOtHours = Number(hbStatus.overtimeHours || 0);
+          const dayOtMin = Number(hbStatus.overtimeMinutes || Math.round(dayOtHours * 60));
+          if (dayOtMin > 0) {
+            overtimeHours += dayOtHours;
+            overtimeMinutesAcc += dayOtMin;
+            overtimeDays += 1;
+          }
         }
         if (hoursInside >= required) {
           statusLabel = 'present';
@@ -705,8 +854,10 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
             isLate = true;
             const diffMs = firstInTime.getTime() - allowedStartMs;
             minutesLate = Math.round(diffMs / (60 * 1000));
-            totalLateMs += diffMs;
-            lateDays += 1;
+            if (shouldCountLateDay(dayShift, minutesLate)) {
+              totalLateMs += diffMs;
+              lateDays += 1;
+            }
           }
         }
 
@@ -824,7 +975,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       const overtimeHoursFinal = overtimeHours;
       const lateMinutes = totalLateMs / (60 * 1000);
 
-      const hoursBasedSummary = {
+      const hoursBasedSummary = withPayRuleSummaryFields({
         daysInMonth,
         workingDaysUpToDate: lastDateToConsider,
         workingDays,
@@ -858,7 +1009,11 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         monthlyRequiredHours,
         monthlyBalanceHours,
         dayDetails,
-      };
+      }, shift, {
+        overtimeDays,
+        overtimeMinutes: overtimeMinutesAcc,
+        breakOverstay: Array.from(breakOverstayAcc.values()),
+      });
       const overridesMap = await loadOverridesMap(
         client,
         companyId,
@@ -913,7 +1068,9 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
       if (status.overtimeHours && status.overtimeHours > 0) {
         totalOvertimeMs += status.overtimeHours * 60 * 60 * 1000;
+        overtimeDays += 1;
       }
+      accumulateBreakOverstay(breakOverstayAcc, status);
 
       if (status.late && !isHoliday) {
         const [y2, m2, d2] = dayKey.split('-').map(Number);
@@ -927,8 +1084,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         const allowedStartMs = shiftStartMs + dayShift.graceMs;
         const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
         if (firstInTime) {
-          totalLateMs += Math.max(0, firstInTime.getTime() - allowedStartMs);
-          lateDays += 1;
+          const lateMs = Math.max(0, firstInTime.getTime() - allowedStartMs);
+          const minutesLate = Math.round(lateMs / 60000);
+          if (shouldCountLateDay(dayShift, minutesLate)) {
+            totalLateMs += lateMs;
+            lateDays += 1;
+          }
         }
       }
 
@@ -980,6 +1141,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
     const unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
 
     const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
+    const overtimeMinutes = Math.round(overtimeHours * 60);
     const lateMinutes = totalLateMs / (60 * 1000);
     const lunchOverMinutes = totalLunchOverMs / (60 * 1000);
 
@@ -1043,7 +1205,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       }
     }
 
-    const shiftBasedSummary = {
+    const shiftBasedSummary = withPayRuleSummaryFields({
       daysInMonth,
       workingDaysUpToDate: lastDateToConsider,
       workingDays,
@@ -1072,7 +1234,11 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       attendanceMode: shift.attendanceMode || 'day_based',
       requiredHoursPerDay: shift.requiredHoursPerDay || 8,
       dayDetails,
-    };
+    }, shift, {
+      overtimeDays,
+      overtimeMinutes,
+      breakOverstay: Array.from(breakOverstayAcc.values()),
+    });
     const overridesMap = await loadOverridesMap(
       client,
       companyId,
@@ -1224,6 +1390,8 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     let lunchOverDays = 0;
     let halfDayDays = 0;
     let totalOvertimeMs = 0;
+    let overtimeDays = 0;
+    const breakOverstayAcc = new Map();
     let rawAbsenceHours = 0;
 
     const presentDayKeys = new Set();
@@ -1301,8 +1469,10 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
             isLate = true;
             const diffMs = firstInTime.getTime() - allowedStartMs;
             minutesLate = Math.round(diffMs / (60 * 1000));
-            totalLateMs += diffMs;
-            lateDays += 1;
+            if (shouldCountLateDay(shift, minutesLate)) {
+              totalLateMs += diffMs;
+              lateDays += 1;
+            }
           }
         }
 
@@ -1400,7 +1570,9 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         if (status.overtimeHours && status.overtimeHours > 0) {
           totalOvertimeMs += status.overtimeHours * 60 * 60 * 1000;
+          overtimeDays += 1;
         }
+        accumulateBreakOverstay(breakOverstayAcc, status);
 
         if (status.late && !isHoliday) {
           const { y, m, d } = parseYmd(dayKey);
@@ -1414,8 +1586,12 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
           const allowedStartMs = shiftStartMs + shift.graceMs;
           const firstInTime = sorted.find((l) => l.punchType === 'in')?.punchTime || null;
           if (firstInTime) {
-            totalLateMs += Math.max(0, firstInTime.getTime() - allowedStartMs);
-            lateDays += 1;
+            const lateMs = Math.max(0, firstInTime.getTime() - allowedStartMs);
+            const minutesLate = Math.round(lateMs / 60000);
+            if (shouldCountLateDay(shift, minutesLate)) {
+              totalLateMs += lateMs;
+              lateDays += 1;
+            }
           }
         }
 
@@ -1494,6 +1670,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     const unusedPaidLeaveMinutes = Math.round(unusedPaidLeaveHoursRaw * 60);
 
     const overtimeHours = totalOvertimeMs / (60 * 60 * 1000);
+    const overtimeMinutes = Math.round(overtimeHours * 60);
     const lateMinutes = totalLateMs / (60 * 1000);
     const lunchOverMinutes = totalLunchOverMs / (60 * 1000);
 
@@ -1504,7 +1681,7 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       return diffDays + 1;
     })();
 
-    const rangeSummary = {
+    const rangeSummary = withPayRuleSummaryFields({
       daysInRange,
       workingDaysUpToDate: lastDateToConsider,
       workingDays,
@@ -1533,7 +1710,11 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       attendanceMode: shift.attendanceMode || 'day_based',
       requiredHoursPerDay: shift.requiredHoursPerDay || 8,
       dayDetails,
-    };
+    }, shift, {
+      overtimeDays,
+      overtimeMinutes,
+      breakOverstay: Array.from(breakOverstayAcc.values()),
+    });
     const overridesMap = await loadOverridesMap(
       client,
       companyId,
@@ -1632,17 +1813,13 @@ async function computePayrollWageBasesForRange(
       ? Number(summary.requiredHoursPerDay || 8)
       : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
 
-  const effectiveOvertimeRate =
-    shiftConfig.overtimeRateMode === 'auto'
-      ? shiftHoursForRate > 0
-        ? dailyRate / shiftHoursForRate
-        : 0
-      : Number(shiftConfig.overtimeRatePerHour || 0);
-
-  const overtimePay =
-    includeOvertime && shiftConfig.allowOvertime
-      ? summary.overtimeHours * effectiveOvertimeRate
-      : 0;
+  const overtimePay = resolveOvertimePay({
+    includeOvertime,
+    shiftConfig,
+    summary,
+    dailyRate,
+    shiftHours: shiftHoursForRate,
+  });
   const travelAllowance =
     Number(employee.daily_travel_allowance || 0) * (summary.presentWorkingDays ?? 0);
   const otherAllowance = computeOtherAllowance(employee, summary, { daysInMonth });
@@ -1744,17 +1921,13 @@ async function generateWeeklyPayroll(
         ? Number(summary.requiredHoursPerDay || 8)
         : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
 
-    const effectiveOvertimeRate =
-      shiftConfig.overtimeRateMode === 'auto'
-        ? shiftHoursForRate > 0
-          ? dailyRate / shiftHoursForRate
-          : 0
-        : Number(shiftConfig.overtimeRatePerHour || 0);
-
-    const overtimePay =
-      includeOvertime && shiftConfig.allowOvertime
-        ? summary.overtimeHours * effectiveOvertimeRate
-        : 0;
+    const overtimePay = resolveOvertimePay({
+      includeOvertime,
+      shiftConfig,
+      summary,
+      dailyRate,
+      shiftHours: shiftHoursForRate,
+    });
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * (summary.presentWorkingDays ?? 0);
     const otherAllowance = computeOtherAllowance(employee, summary, {
@@ -1772,23 +1945,10 @@ async function generateWeeklyPayroll(
       absenceDeduction = dailyRate * (summary.absenceDays || 0);
     }
 
-    let lateDeduction = 0;
-    if (
-      (summary.lateDays || 0) > 0 &&
-      summary.lateDeductionMinutes > 0 &&
-      summary.lateDeductionAmount > 0
-    ) {
-      lateDeduction = summary.lateDays * summary.lateDeductionAmount;
-    }
-
-    let lunchOverDeduction = 0;
-    if (
-      (summary.lunchOverDays || 0) > 0 &&
-      summary.lunchOverDeductionMinutes > 0 &&
-      summary.lunchOverDeductionAmount > 0
-    ) {
-      lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
-    }
+    const lateDeduction = resolveLateDeduction(summary, summary.flexibleHoursMode);
+    const overstay = resolveOverstayAmounts(summary);
+    const lunchOverDeduction = overstay.lunchOverDeduction;
+    const otherBreakOverDeduction = overstay.otherBreakOverDeduction;
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
     let statutoryEarnedBasic = earnedBasic;
@@ -1821,7 +1981,7 @@ async function generateWeeklyPayroll(
           asOfDate: weekEnd,
         })
       : { esiDeduction: 0, pfDeduction: 0, gratuityAccrual: 0, gratuityEstimate: 0 };
-    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
+    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
 
     const salaryAdvanceBase = applySalaryAdvances
       ? await getAdvanceForEmployeeMonth(companyId, employeeId, endYear, endMonth)
@@ -2249,17 +2409,13 @@ async function getWeeklyPayrollBreakdown(
       ? Number(shiftSummary.requiredHoursPerDay || 8)
       : Number(shiftConfig.shiftMs || 0) / (60 * 60 * 1000);
 
-  const effectiveOvertimeRate =
-    shiftConfig.overtimeRateMode === 'auto'
-      ? shiftHoursForRate > 0
-        ? dailyRate / shiftHoursForRate
-        : 0
-      : Number(shiftConfig.overtimeRatePerHour || 0);
-
-  const overtimePay =
-    includeOvertime && shiftConfig.allowOvertime
-      ? shiftSummary.overtimeHours * effectiveOvertimeRate
-      : 0;
+  const overtimePay = resolveOvertimePay({
+    includeOvertime,
+    shiftConfig,
+    summary: shiftSummary,
+    dailyRate,
+    shiftHours: shiftHoursForRate,
+  });
   const weeklyOvertimeHoursBillable = shiftConfig.allowOvertime
     ? Number(shiftSummary.overtimeHours || 0)
     : 0;
@@ -2279,23 +2435,10 @@ async function getWeeklyPayrollBreakdown(
     absenceDeduction = dailyRate * (shiftSummary.absenceDays || 0);
   }
 
-  let lateDeduction = 0;
-  if (
-    (shiftSummary.lateDays || 0) > 0 &&
-    shiftSummary.lateDeductionMinutes > 0 &&
-    shiftSummary.lateDeductionAmount > 0
-  ) {
-    lateDeduction = shiftSummary.lateDays * shiftSummary.lateDeductionAmount;
-  }
-
-  let lunchOverDeduction = 0;
-  if (
-    (shiftSummary.lunchOverDays || 0) > 0 &&
-    shiftSummary.lunchOverDeductionMinutes > 0 &&
-    shiftSummary.lunchOverDeductionAmount > 0
-  ) {
-    lunchOverDeduction = shiftSummary.lunchOverDays * shiftSummary.lunchOverDeductionAmount;
-  }
+  const lateDeduction = resolveLateDeduction(shiftSummary, shiftSummary.flexibleHoursMode);
+  const overstay = resolveOverstayAmounts(shiftSummary);
+  const lunchOverDeduction = overstay.lunchOverDeduction;
+  const otherBreakOverDeduction = overstay.otherBreakOverDeduction;
 
   const monthLastDay = getDaysInMonth(endYear, endMonth);
   const monthLastDayStr = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
@@ -2340,7 +2483,7 @@ async function getWeeklyPayrollBreakdown(
         })
       : { esiDeduction: 0, pfDeduction: 0, gratuityAccrual: 0, gratuityEstimate: 0 };
 
-  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
+  const totalDeductions = absenceDeduction + lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
 
   // Weekly payroll records currently don't store permission allocation/offset fields,
   // so for payslip breakdown we show permission offset as zero.
@@ -2395,7 +2538,7 @@ async function getWeeklyPayrollBreakdown(
       isWeekComplete,
       basicSalary: earnedBasic,
       overtimePay,
-      overtimeRatePerHour: effectiveOvertimeRate,
+      overtimeRatePerHour: Number(shiftConfig.overtimeRatePerHour || 0),
       allowOvertime: Boolean(shiftConfig.allowOvertime),
       travelAllowance,
       otherAllowance,
@@ -2405,6 +2548,7 @@ async function getWeeklyPayrollBreakdown(
       absenceDeduction,
       lateDeduction,
       lunchOverDeduction,
+      ...payRuleBreakdownFields(shiftSummary, overstay),
       esiDeduction,
       pfDeduction,
       gratuityAccrual,
@@ -2510,8 +2654,13 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
 
     const allowOvertime = Boolean(shiftConfig.allowOvertime);
     const overtimeHoursBillable = allowOvertime ? Number(summary.overtimeHours || 0) : 0;
-    const overtimePay =
-      includeOvertime && allowOvertime ? Number(summary.overtimeHours || 0) * hourlyRate : 0;
+    const overtimePay = resolveOvertimePay({
+      includeOvertime,
+      shiftConfig,
+      summary,
+      dailyRate,
+      shiftHours: shiftHoursForHourlyConversion,
+    });
     const presentWorkingDays = summary.presentWorkingDays ?? 0;
     const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
     const travelAllowance = dailyTravelAllowance * presentWorkingDays;
@@ -2560,26 +2709,10 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       absenceDeduction = computed.absenceDeduction;
     }
 
-    let lateDeduction = 0;
-    if (
-      !summary.flexibleHoursMode &&
-      (summary.lateDays || 0) > 0 &&
-      summary.lateDeductionMinutes > 0 &&
-      summary.lateDeductionAmount > 0
-    ) {
-      // Fixed amount per late day: e.g. late 5 days → 5 × amount
-      lateDeduction = summary.lateDays * summary.lateDeductionAmount;
-    }
-
-    let lunchOverDeduction = 0;
-    if (
-      (summary.lunchOverDays || 0) > 0 &&
-      summary.lunchOverDeductionMinutes > 0 &&
-      summary.lunchOverDeductionAmount > 0
-    ) {
-      // Fixed amount per day they went over lunch: e.g. 3 days over → 3 × amount
-      lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
-    }
+    const lateDeduction = resolveLateDeduction(summary, summary.flexibleHoursMode);
+    const overstay = resolveOverstayAmounts(summary);
+    const lunchOverDeduction = overstay.lunchOverDeduction;
+    const otherBreakOverDeduction = overstay.otherBreakOverDeduction;
 
     const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentAmount;
     const monthLastDay = summary.daysInMonth || getDaysInMonth(year, month);
@@ -2591,7 +2724,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         grossSalary,
         asOfDate: gratuityAsOf,
       });
-    const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
+    const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
     const effectivePermissionHours =
       employee.permission_hours_override != null
         ? Number(employee.permission_hours_override || 0)
@@ -2867,8 +3000,13 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
 
   const allowOvertime = Boolean(shiftConfig.allowOvertime);
   const overtimeHoursBillable = allowOvertime ? Number(summary.overtimeHours || 0) : 0;
-  const overtimePay =
-    includeOvertime && allowOvertime ? Number(summary.overtimeHours || 0) * hourlyRate : 0;
+  const overtimePay = resolveOvertimePay({
+    includeOvertime,
+    shiftConfig,
+    summary,
+    dailyRate,
+    shiftHours: shiftHoursForHourlyConversion,
+  });
   const presentWorkingDays = summary.presentWorkingDays ?? 0;
   const dailyTravelAllowance = Number(employee.daily_travel_allowance || 0);
   const travelAllowance = dailyTravelAllowance * presentWorkingDays;
@@ -2916,26 +3054,10 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     absenceDeduction = computed.absenceDeduction;
   }
 
-  let lateDeduction = 0;
-  if (
-    !summary.flexibleHoursMode &&
-    (summary.lateDays || 0) > 0 &&
-    summary.lateDeductionMinutes > 0 &&
-    summary.lateDeductionAmount > 0
-  ) {
-    // Fixed amount per late day: e.g. late 5 days → 5 × amount
-    lateDeduction = summary.lateDays * summary.lateDeductionAmount;
-  }
-
-  let lunchOverDeduction = 0;
-  if (
-    (summary.lunchOverDays || 0) > 0 &&
-    summary.lunchOverDeductionMinutes > 0 &&
-    summary.lunchOverDeductionAmount > 0
-  ) {
-    // Fixed amount per day they went over lunch: e.g. 3 days over → 3 × amount
-    lunchOverDeduction = summary.lunchOverDays * summary.lunchOverDeductionAmount;
-  }
+  const lateDeduction = resolveLateDeduction(summary, summary.flexibleHoursMode);
+  const overstay = resolveOverstayAmounts(summary);
+  const lunchOverDeduction = overstay.lunchOverDeduction;
+  const otherBreakOverDeduction = overstay.otherBreakOverDeduction;
 
   const grossSalaryComputed = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentComputed;
   const monthLastDay = getDaysInMonth(year, month);
@@ -2947,7 +3069,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       grossSalary: grossSalaryComputed,
       asOfDate: gratuityAsOf,
     });
-  const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
+  const deductionsBeforePermission = absenceDeduction + lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
   const permissionOffsetComputed =
     summary.flexibleHoursMode || !isMonthComplete
       ? { allocatedHours: 0, usedMinutes: 0, offsetAmount: 0 }
@@ -3055,7 +3177,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     totalDeductions = Number(payrollRecordSnap.deductions ?? totalDeductions);
 
     const nonAbsentFixedDeductions =
-      lateDeduction + lunchOverDeduction + esiDeduction + pfDeduction;
+      lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
     absenceDeduction = Math.max(
       0,
       totalDeductions - nonAbsentFixedDeductions + permissionOffsetAmount
@@ -3189,6 +3311,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       absenceDeduction,
       lateDeduction,
       lunchOverDeduction,
+      ...payRuleBreakdownFields(summary, overstay),
       esiDeduction,
       pfDeduction,
       gratuityAccrual,

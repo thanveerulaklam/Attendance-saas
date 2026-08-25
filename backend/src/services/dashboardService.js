@@ -18,20 +18,21 @@ async function getDashboardSummary(companyId, allowedBranchIds = null) {
     .map((r) => r.name)
     .sort();
 
-  // Currently on lunch = have exactly 2 punches today (IN, OUT) — out for lunch, not yet back
+  // Currently on a break = last classified as an open named/lunch break (not end-of-shift checkout)
   const todayOnLunch = (dailyResult || [])
-    .filter(
-      (r) =>
-        r.punches &&
-        r.punches.length === 2 &&
-        (r.punches[0].punch_type || '').toLowerCase() === 'in' &&
-        (r.punches[1].punch_type || '').toLowerCase() === 'out'
-    )
-    .map((r) => ({
-      name: r.name,
-      employee_code: r.employee_code || '',
-      punched_out_at: r.punches[1].punch_time,
-    }))
+    .filter((r) => r.open_break_name || r.left_during_lunch)
+    .map((r) => {
+      const punches = Array.isArray(r.punches) ? r.punches : [];
+      const lastOut = [...punches].reverse().find(
+        (p) => String(p.punch_type || '').toLowerCase() === 'out'
+      );
+      return {
+        name: r.name,
+        employee_code: r.employee_code || '',
+        punched_out_at: lastOut?.punch_time || null,
+        break_name: r.open_break_name || 'Break',
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
 
   // Branch-wise summary for multi-branch admins (defaults to all branches for admin users).

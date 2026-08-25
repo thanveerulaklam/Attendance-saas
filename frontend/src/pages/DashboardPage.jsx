@@ -104,8 +104,8 @@ export default function DashboardPage() {
       <section className="grid gap-5 lg:grid-cols-2">
         <article className="rounded-xl bg-white shadow-soft px-5 py-4 border border-slate-100 flex flex-col transition-all duration-200 hover:shadow-md">
           <div className="mb-4">
-            <h2 className="text-sm font-semibold text-slate-900">Currently on lunch break</h2>
-            <p className="mt-1 text-xs text-slate-500">Punched out for lunch, not yet back</p>
+            <h2 className="text-sm font-semibold text-slate-900">Currently on break</h2>
+            <p className="mt-1 text-xs text-slate-500">Punched out for a break, not yet back</p>
           </div>
           {loading ? (
             <div className="mt-4 h-24 rounded-lg bg-slate-50 animate-pulse" />
@@ -123,6 +123,9 @@ export default function DashboardPage() {
                     {emp.employee_code && (
                       <span className="text-xs text-slate-500">({emp.employee_code})</span>
                     )}
+                    {emp.break_name && (
+                      <span className="text-[11px] text-sky-700">{emp.break_name}</span>
+                    )}
                     {outAt && (
                       <span className="text-xs text-slate-500 ml-auto">Out {outAt}</span>
                     )}
@@ -131,7 +134,7 @@ export default function DashboardPage() {
               })}
             </ul>
           ) : (
-            <p className="mt-2 text-sm text-slate-500 italic">No one on lunch break right now</p>
+            <p className="mt-2 text-sm text-slate-500 italic">No one on break right now</p>
           )}
         </article>
 

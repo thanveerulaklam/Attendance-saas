@@ -59,8 +59,238 @@ function sanitizeShiftBody(form, shiftPayloadCompact) {
     body.allow_overtime = false;
     body.overtime_rate_per_hour = 0;
     body.overtime_rate_mode = 'fixed';
+    body.late_deduction_mode = 'per_day';
+    body.overtime_pay_mode = 'per_hour';
+    body.overtime_window = 'total_extra';
+  }
+  if (Array.isArray(body.breaks)) {
+    body.breaks = body.breaks.map((b, i) => ({
+      name: b.name,
+      allotted_minutes: Number(b.allotted_minutes || 0),
+      window_start: b.window_start || null,
+      window_end: b.window_end || null,
+      tracking: b.tracking || 'punch',
+      paid: b.paid === true,
+      over_deduction_mode: shiftPayloadCompact ? 'none' : (b.over_deduction_mode || 'none'),
+      over_deduction_amount: shiftPayloadCompact ? 0 : Number(b.over_deduction_amount || 0),
+      over_deduction_minutes: shiftPayloadCompact ? 0 : Number(b.over_deduction_minutes || 0),
+      sort_order: i,
+    }));
   }
   return body;
+}
+
+function emptyBreak(overrides = {}) {
+  return {
+    name: 'Lunch',
+    allotted_minutes: 60,
+    window_start: '',
+    window_end: '',
+    tracking: 'punch',
+    paid: false,
+    over_deduction_mode: 'none',
+    over_deduction_amount: 0,
+    over_deduction_minutes: 0,
+    ...overrides,
+  };
+}
+
+function breaksFromShift(shift, compact) {
+  if (Array.isArray(shift?.breaks) && shift.breaks.length) {
+    return shift.breaks.map((b, i) => ({
+      name: b.name || `Break ${i + 1}`,
+      allotted_minutes: b.allotted_minutes ?? 0,
+      window_start: b.window_start ? String(b.window_start).slice(0, 5) : '',
+      window_end: b.window_end ? String(b.window_end).slice(0, 5) : '',
+      tracking: b.tracking || 'punch',
+      paid: b.paid === true,
+      over_deduction_mode: b.over_deduction_mode || 'none',
+      over_deduction_amount: b.over_deduction_amount ?? 0,
+      over_deduction_minutes: b.over_deduction_minutes ?? 0,
+    }));
+  }
+  return [
+    emptyBreak({
+      allotted_minutes: shift?.lunch_minutes ?? (compact ? 0 : 60),
+      over_deduction_mode:
+        Number(shift?.lunch_over_deduction_amount || 0) > 0 &&
+        Number(shift?.lunch_over_deduction_minutes || 0) > 0
+          ? 'per_day'
+          : 'none',
+      over_deduction_amount: shift?.lunch_over_deduction_amount ?? 0,
+      over_deduction_minutes: shift?.lunch_over_deduction_minutes ?? 0,
+    }),
+  ];
+}
+
+function BreaksEditor({ form, setForm, disabled, compact }) {
+  const breaks = Array.isArray(form.breaks) ? form.breaks : [];
+  const updateBreak = (idx, patch) => {
+    setForm((prev) => {
+      const next = [...(prev.breaks || [])];
+      next[idx] = { ...next[idx], ...patch };
+      const lunch = next.find((b) => String(b.name).toLowerCase() === 'lunch') || next[0];
+      return {
+        ...prev,
+        breaks: next,
+        lunch_minutes: lunch ? Number(lunch.allotted_minutes || 0) : prev.lunch_minutes,
+        lunch_over_deduction_minutes: lunch ? Number(lunch.over_deduction_minutes || 0) : prev.lunch_over_deduction_minutes,
+        lunch_over_deduction_amount: lunch ? Number(lunch.over_deduction_amount || 0) : prev.lunch_over_deduction_amount,
+      };
+    });
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-[11px] font-medium text-slate-700">Breaks</p>
+          <p className="text-[10px] text-slate-500">
+            Lunch, tea, prayer, dinner. Optional time window so an end-of-shift punch is not treated as a break.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() =>
+            setForm((prev) => ({
+              ...prev,
+              breaks: [...(prev.breaks || []), emptyBreak({ name: 'Tea', allotted_minutes: 15 })],
+            }))
+          }
+          className="rounded-md border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          + Add break
+        </button>
+      </div>
+      {breaks.map((b, idx) => (
+        <div key={idx} className="rounded-md border border-slate-100 bg-slate-50/70 p-2 space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={b.name}
+              disabled={disabled}
+              onChange={(e) => updateBreak(idx, { name: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+              placeholder="Name"
+            />
+            <input
+              type="number"
+              min={0}
+              value={b.allotted_minutes}
+              disabled={disabled}
+              onChange={(e) => updateBreak(idx, { allotted_minutes: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+              placeholder="Minutes"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              type="time"
+              value={b.window_start || ''}
+              disabled={disabled}
+              onChange={(e) => updateBreak(idx, { window_start: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+            />
+            <input
+              type="time"
+              value={b.window_end || ''}
+              disabled={disabled}
+              onChange={(e) => updateBreak(idx, { window_end: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={b.tracking || 'punch'}
+              disabled={disabled}
+              onChange={(e) => updateBreak(idx, { tracking: e.target.value })}
+              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+            >
+              <option value="punch">Punch tracked</option>
+              <option value="scheduled">Scheduled (no extra punch)</option>
+            </select>
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-700">
+              <input
+                type="checkbox"
+                checked={b.paid === true}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { paid: e.target.checked })}
+              />
+              Paid
+            </label>
+          </div>
+          {!compact && (
+            <div className="grid grid-cols-3 gap-2">
+              <select
+                value={b.over_deduction_mode || 'none'}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { over_deduction_mode: e.target.value })}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+              >
+                <option value="none">No overstay pay cut</option>
+                <option value="per_day">Fixed per day over</option>
+                <option value="per_minute">Per extra minute</option>
+              </select>
+              <input
+                type="number"
+                min={0}
+                value={b.over_deduction_minutes}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { over_deduction_minutes: e.target.value })}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                placeholder="Min over"
+              />
+              <input
+                type="number"
+                min={0}
+                value={b.over_deduction_amount}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { over_deduction_amount: e.target.value })}
+                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                placeholder="Amount"
+              />
+            </div>
+          )}
+          {breaks.length > 1 && (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() =>
+                setForm((prev) => ({
+                  ...prev,
+                  breaks: (prev.breaks || []).filter((_, i) => i !== idx),
+                }))
+              }
+              className="text-[10px] text-red-600 hover:underline disabled:opacity-50"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function overtimeAmountLabel(form) {
+  const mode = form?.overtime_pay_mode || 'per_hour';
+  if (mode === 'per_day') return 'Amount per overtime day (₹)';
+  if (mode === 'per_minute') return 'Amount per extra minute (₹)';
+  return 'Overtime rate per hour (₹)';
+}
+
+function syncLunchMinutesIntoBreaks(next) {
+  const lunchMin = Number(next.lunch_minutes || 0);
+  const breaks = Array.isArray(next.breaks) ? next.breaks.map((b) => ({ ...b })) : [];
+  const idx = breaks.findIndex((b) => String(b.name).toLowerCase() === 'lunch');
+  if (idx >= 0) {
+    breaks[idx].allotted_minutes = lunchMin;
+  } else if (breaks.length) {
+    breaks[0].allotted_minutes = lunchMin;
+  } else {
+    breaks.push(emptyBreak({ allotted_minutes: lunchMin }));
+  }
+  next.breaks = breaks;
+  return next;
 }
 
 /** @param {boolean} compact — matches `companies.shifts_compact_ui` (Tharagai-style simplified shifts). */
@@ -74,6 +304,7 @@ function getEmptyForm(compact) {
     weekly_off_days: [],
     late_deduction_minutes: 0,
     late_deduction_amount: 0,
+    late_deduction_mode: 'per_day',
     lunch_over_deduction_minutes: 0,
     lunch_over_deduction_amount: 0,
     no_leave_incentive: 0,
@@ -86,6 +317,9 @@ function getEmptyForm(compact) {
     allow_overtime: true,
     overtime_rate_per_hour: 0,
     overtime_rate_mode: 'fixed',
+    overtime_pay_mode: 'per_hour',
+    overtime_window: 'total_extra',
+    breaks: [emptyBreak({ allotted_minutes: compact ? 0 : 60 })],
   };
 }
 
@@ -236,14 +470,17 @@ export default function ShiftsPage() {
             const lunch = clampNumber(Number(next.lunch_minutes) || 0, 0, spanMinutes);
             next.lunch_minutes = lunch;
             next.required_hours_per_day = Number(((spanMinutes - lunch) / 60).toFixed(2));
+            syncLunchMinutesIntoBreaks(next);
           } else if (field === 'required_hours_per_day') {
             const required = clampNumber(Number(next.required_hours_per_day) || 0, 0, spanMinutes / 60);
             next.required_hours_per_day = Number(required.toFixed(2));
             next.lunch_minutes = Math.round(spanMinutes - required * 60);
+            syncLunchMinutesIntoBreaks(next);
           } else if (field === 'start_time' || field === 'end_time') {
             const lunch = clampNumber(Number(next.lunch_minutes) || 0, 0, spanMinutes);
             next.lunch_minutes = lunch;
             next.required_hours_per_day = Number(((spanMinutes - lunch) / 60).toFixed(2));
+            syncLunchMinutesIntoBreaks(next);
           }
         }
       }
@@ -298,6 +535,10 @@ export default function ShiftsPage() {
       allow_overtime: shift.allow_overtime !== false,
       overtime_rate_per_hour: shift.overtime_rate_per_hour ?? 0,
       overtime_rate_mode: shift.overtime_rate_mode || 'fixed',
+      late_deduction_mode: shift.late_deduction_mode || 'per_day',
+      overtime_pay_mode: shift.overtime_pay_mode || 'per_hour',
+      overtime_window: shift.overtime_window || 'total_extra',
+      breaks: breaksFromShift(shift, shiftsCompactUi),
     });
     setEditingShift(shift);
     setError(null);
@@ -661,24 +902,9 @@ export default function ShiftsPage() {
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
                   />
                 </div>
-                {form.attendance_mode === 'day_based' && (
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">
-                      Lunch minutes (allotted)
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      value={form.lunch_minutes}
-                      onChange={handleChange('lunch_minutes')}
-                      disabled={creating}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
-                      placeholder="60"
-                      title="Max minutes staff can take for lunch break"
-                    />
-                  </div>
-                )}
               </div>
+
+              <BreaksEditor form={form} setForm={setForm} disabled={creating} compact={shiftsCompactUi} />
 
               {form.attendance_mode === 'hours_based' && (
                 <div className="space-y-2">
@@ -743,6 +969,36 @@ export default function ShiftsPage() {
                   />
                   <span className="text-[11px] text-slate-700">Allow overtime pay</span>
                 </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">When OT counts</label>
+                    <select
+                      value={form.overtime_window || 'total_extra'}
+                      onChange={handleChange('overtime_window')}
+                      disabled={creating || form.allow_overtime !== true}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
+                    >
+                      <option value="total_extra">Extra hours vs shift length (current)</option>
+                      <option value="after_end">After shift end only</option>
+                      <option value="before_start">Before shift start only</option>
+                      <option value="both">Before start and after end</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">OT pay mode</label>
+                    <select
+                      value={form.overtime_pay_mode || 'per_hour'}
+                      onChange={handleChange('overtime_pay_mode')}
+                      disabled={creating || form.allow_overtime !== true}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
+                    >
+                      <option value="per_hour">Per extra hour</option>
+                      <option value="per_day">Fixed per overtime day</option>
+                      <option value="per_minute">Per extra minute</option>
+                    </select>
+                  </div>
+                </div>
+                {(form.overtime_pay_mode || 'per_hour') === 'per_hour' && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
                     Overtime rate mode
@@ -760,9 +1016,10 @@ export default function ShiftsPage() {
                     If set to Auto, overtime is paid using the employee’s daily wage divided by the shift working hours.
                   </p>
                 </div>
+                )}
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
-                    Overtime rate per hour (₹)
+                    {overtimeAmountLabel(form)}
                   </label>
                   <input
                     type="number"
@@ -773,7 +1030,8 @@ export default function ShiftsPage() {
                     disabled={
                       creating ||
                       form.allow_overtime !== true ||
-                      (form.overtime_rate_mode || 'fixed') === 'auto'
+                      ((form.overtime_pay_mode || 'per_hour') === 'per_hour' &&
+                        (form.overtime_rate_mode || 'fixed') === 'auto')
                     }
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300 disabled:bg-slate-100"
                     placeholder="e.g. 100"
@@ -868,15 +1126,22 @@ export default function ShiftsPage() {
                       Late arrival deduction (optional)
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      If staff punch IN late (after grace), deduct this fixed amount per late day (e.g. late 5 days = 5 × amount).
+                      After grace: fixed amount per late day, or amount × late minutes (e.g. ₹1 per minute).
                     </p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                       <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-slate-700">Late minutes</label>
+                        <label className="text-[11px] font-medium text-slate-700">Mode</label>
+                        <select value={form.late_deduction_mode || 'per_day'} onChange={handleChange('late_deduction_mode')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs">
+                          <option value="per_day">Fixed per late day</option>
+                          <option value="per_minute">Per late minute</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-medium text-slate-700">{(form.late_deduction_mode || 'per_day') === 'per_minute' ? 'Min minutes (optional)' : 'Enable minutes'}</label>
                         <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 15" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[11px] font-medium text-slate-700">Deduction amount</label>
+                        <label className="text-[11px] font-medium text-slate-700">Amount</label>
                         <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={creating} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300" placeholder="e.g. 50" />
                       </div>
                     </div>
@@ -1295,6 +1560,36 @@ export default function ShiftsPage() {
                   />
                   <span className="text-[11px] text-slate-700">Allow overtime pay</span>
                 </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">When OT counts</label>
+                    <select
+                      value={form.overtime_window || 'total_extra'}
+                      onChange={handleChange('overtime_window')}
+                      disabled={savingEdit || form.allow_overtime !== true}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
+                    >
+                      <option value="total_extra">Extra hours vs shift length (current)</option>
+                      <option value="after_end">After shift end only</option>
+                      <option value="before_start">Before shift start only</option>
+                      <option value="both">Before start and after end</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-slate-700">OT pay mode</label>
+                    <select
+                      value={form.overtime_pay_mode || 'per_hour'}
+                      onChange={handleChange('overtime_pay_mode')}
+                      disabled={savingEdit || form.allow_overtime !== true}
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
+                    >
+                      <option value="per_hour">Per extra hour</option>
+                      <option value="per_day">Fixed per overtime day</option>
+                      <option value="per_minute">Per extra minute</option>
+                    </select>
+                  </div>
+                </div>
+                {(form.overtime_pay_mode || 'per_hour') === 'per_hour' && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">
                     Overtime rate mode
@@ -1312,8 +1607,9 @@ export default function ShiftsPage() {
                     If set to Auto, overtime is paid using the employee’s daily wage divided by the shift working hours.
                   </p>
                 </div>
+                )}
                 <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-slate-700">Overtime rate per hour (₹)</label>
+                  <label className="text-[11px] font-medium text-slate-700">{overtimeAmountLabel(form)}</label>
                   <input
                     type="number"
                     min={0}
@@ -1323,7 +1619,8 @@ export default function ShiftsPage() {
                     disabled={
                       savingEdit ||
                       form.allow_overtime !== true ||
-                      (form.overtime_rate_mode || 'fixed') === 'auto'
+                      ((form.overtime_pay_mode || 'per_hour') === 'per_hour' &&
+                        (form.overtime_rate_mode || 'fixed') === 'auto')
                     }
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs disabled:bg-slate-100"
                   />
@@ -1467,13 +1764,8 @@ export default function ShiftsPage() {
                   <label className="text-[11px] font-medium text-slate-700">Grace min</label>
                   <input type="number" min={0} value={form.grace_minutes} onChange={handleChange('grace_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
-                {form.attendance_mode === 'day_based' && (
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Lunch min</label>
-                    <input type="number" min={0} value={form.lunch_minutes} onChange={handleChange('lunch_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                  </div>
-                )}
               </div>
+              <BreaksEditor form={form} setForm={setForm} disabled={savingEdit} compact={shiftsCompactUi} />
               {!shiftsCompactUi && (
                 <>
                   <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
@@ -1487,29 +1779,24 @@ export default function ShiftsPage() {
                       ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-slate-700">Late mode</label>
+                      <select value={form.late_deduction_mode || 'per_day'} onChange={handleChange('late_deduction_mode')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs">
+                        <option value="per_day">Fixed per day</option>
+                        <option value="per_minute">Per minute</option>
+                      </select>
+                    </div>
                     <div className="space-y-1">
                       <label className="text-[11px] font-medium text-slate-700">Late min</label>
                       <input type="number" min={0} value={form.late_deduction_minutes} onChange={handleChange('late_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[11px] font-medium text-slate-700">Late deduction amt</label>
+                      <label className="text-[11px] font-medium text-slate-700">Late amount</label>
                       <input type="number" min={0} value={form.late_deduction_amount} onChange={handleChange('late_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                     </div>
                   </div>
                 </>
-              )}
-              {!shiftsCompactUi && form.attendance_mode === 'day_based' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Lunch over min</label>
-                    <input type="number" min={0} value={form.lunch_over_deduction_minutes} onChange={handleChange('lunch_over_deduction_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-slate-700">Lunch over deduction amt</label>
-                    <input type="number" min={0} value={form.lunch_over_deduction_amount} onChange={handleChange('lunch_over_deduction_amount')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
-                  </div>
-                </div>
               )}
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={cancelEdit} disabled={savingEdit} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50">
