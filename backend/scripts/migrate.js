@@ -165,6 +165,10 @@ const APPLIED_CHECKS = {
       AND table_name = 'branch_kiosk_devices'
       AND column_name = 'min_recognize_seconds'
   )`,
+  '086_shift_breaks_and_pay_modes.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'shift_breaks'
+  )`,
 };
 
 async function hasExistingSchema(client) {
@@ -190,7 +194,8 @@ async function shouldExecuteMigration(client, file, existingSchema) {
   }
   const checkSql = APPLIED_CHECKS[file];
   if (!checkSql) {
-    return false;
+    // Unrecorded files without a probe must run. Legacy 001–046 are already in schema_migrations.
+    return true;
   }
   const applied = await isSchemaApplied(client, file);
   return applied !== true;
