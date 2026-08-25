@@ -591,9 +591,6 @@ export default function PayslipModal({
                   })()}
                 </span>
               </div>
-                  })()}
-                </span>
-              </div>
             </div>
             <p className="payslip-print-hidden mt-2 text-[10px] text-slate-500">
               {isFlexibleHoursPayroll
