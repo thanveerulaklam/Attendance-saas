@@ -98,12 +98,8 @@ function formatBreakCell(row, breakName) {
     return { text: allotted > 0 ? `${allotted}m sched.` : '—', cls: 'text-slate-500' };
   }
   const minutes = matched?.minutes ?? (key === 'lunch' ? row.lunch_minutes : null);
-  const over = Number(
-    matched?.overMinutes ??
-      matched?.over_minutes ??
-      (key === 'lunch' ? row.lunch_over_minutes : 0) ||
-      0
-  );
+  const overRaw = matched?.overMinutes ?? matched?.over_minutes ?? (key === 'lunch' ? row.lunch_over_minutes : 0);
+  const over = Number(overRaw || 0);
   if (minutes != null && minutes !== '') {
     if (over > 0) return { text: `${minutes}m (+${over} over)`, cls: 'text-amber-600' };
     return { text: `${minutes}m`, cls: 'text-slate-600' };
