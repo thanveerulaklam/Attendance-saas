@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { authFetch } from '../utils/api';
 import ShiftAssignmentsPanel from '../components/shifts/ShiftAssignmentsPanel';
 import ShiftRotationPanel from '../components/shifts/ShiftRotationPanel';
+import { overtimeWindowLabel } from '../utils/payrollPayLabels';
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -123,6 +124,45 @@ function breaksFromShift(shift, compact) {
   ];
 }
 
+function shiftBreaksForDisplay(shift) {
+  if (Array.isArray(shift?.breaks) && shift.breaks.length) return shift.breaks;
+  return [
+    {
+      name: 'Lunch',
+      allotted_minutes: shift?.lunch_minutes ?? 0,
+      window_start: null,
+      window_end: null,
+      tracking: 'punch',
+      paid: false,
+      over_deduction_mode:
+        Number(shift?.lunch_over_deduction_amount || 0) > 0 &&
+        Number(shift?.lunch_over_deduction_minutes || 0) > 0
+          ? 'per_day'
+          : 'none',
+      over_deduction_amount: shift?.lunch_over_deduction_amount ?? 0,
+      over_deduction_minutes: shift?.lunch_over_deduction_minutes ?? 0,
+    },
+  ];
+}
+
+function formatBreakDetailLine(b) {
+  const mins = Number(b.allotted_minutes ?? b.allottedMinutes ?? 0);
+  const start = b.window_start || b.windowStart;
+  const end = b.window_end || b.windowEnd;
+  const parts = [`${mins}m`];
+  if (start && end) {
+    parts.push(`${String(start).slice(0, 5)}–${String(end).slice(0, 5)}`);
+  }
+  if (String(b.tracking || 'punch') === 'scheduled') parts.push('scheduled');
+  if (b.paid === true) parts.push('paid');
+  const overMode = String(b.over_deduction_mode || b.overDeductionMode || 'none');
+  if (overMode === 'per_day' || overMode === 'per_minute') {
+    const amt = Number(b.over_deduction_amount ?? b.overDeductionAmount ?? 0);
+    parts.push(overMode === 'per_minute' ? `₹${amt}/min over` : `₹${amt}/day over`);
+  }
+  return parts.join(' · ');
+}
+
 function BreaksEditor({ form, setForm, disabled, compact }) {
   const breaks = Array.isArray(form.breaks) ? form.breaks : [];
   const updateBreak = (idx, patch) => {
@@ -145,7 +185,7 @@ function BreaksEditor({ form, setForm, disabled, compact }) {
         <div>
           <p className="text-[11px] font-medium text-slate-700">Breaks</p>
           <p className="text-[10px] text-slate-500">
-            Lunch, tea, prayer, dinner. Optional time window so an end-of-shift punch is not treated as a break.
+            Name the break and how long it is allowed. Set a time window so an OUT at shift end is checkout, not this break.
           </p>
         </div>
         <button
@@ -165,89 +205,113 @@ function BreaksEditor({ form, setForm, disabled, compact }) {
       {breaks.map((b, idx) => (
         <div key={idx} className="rounded-md border border-slate-100 bg-slate-50/70 p-2 space-y-2">
           <div className="grid grid-cols-2 gap-2">
-            <input
-              value={b.name}
-              disabled={disabled}
-              onChange={(e) => updateBreak(idx, { name: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-              placeholder="Name"
-            />
-            <input
-              type="number"
-              min={0}
-              value={b.allotted_minutes}
-              disabled={disabled}
-              onChange={(e) => updateBreak(idx, { allotted_minutes: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-              placeholder="Minutes"
-            />
+            <div>
+              <label className="text-[10px] font-medium text-slate-500">Name</label>
+              <input
+                value={b.name}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { name: e.target.value })}
+                className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                placeholder="Lunch, Tea, Prayer…"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium text-slate-500">Allotted minutes</label>
+              <input
+                type="number"
+                min={0}
+                value={b.allotted_minutes}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { allotted_minutes: e.target.value })}
+                className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                placeholder="Minutes allowed"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <input
-              type="time"
-              value={b.window_start || ''}
-              disabled={disabled}
-              onChange={(e) => updateBreak(idx, { window_start: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-            />
-            <input
-              type="time"
-              value={b.window_end || ''}
-              disabled={disabled}
-              onChange={(e) => updateBreak(idx, { window_end: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-            />
+            <div>
+              <label className="text-[10px] font-medium text-slate-500">Window start (optional)</label>
+              <input
+                type="time"
+                value={b.window_start || ''}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { window_start: e.target.value })}
+                className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-medium text-slate-500">Window end (optional)</label>
+              <input
+                type="time"
+                value={b.window_end || ''}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { window_end: e.target.value })}
+                className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <select
-              value={b.tracking || 'punch'}
-              disabled={disabled}
-              onChange={(e) => updateBreak(idx, { tracking: e.target.value })}
-              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-            >
-              <option value="punch">Punch tracked</option>
-              <option value="scheduled">Scheduled (no extra punch)</option>
-            </select>
-            <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-700">
+            <div>
+              <label className="text-[10px] font-medium text-slate-500">How it is tracked</label>
+              <select
+                value={b.tracking || 'punch'}
+                disabled={disabled}
+                onChange={(e) => updateBreak(idx, { tracking: e.target.value })}
+                className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+              >
+                <option value="punch">Punch tracked (OUT then IN)</option>
+                <option value="scheduled">Scheduled (no extra punch)</option>
+              </select>
+            </div>
+            <label className="mt-4 inline-flex items-center gap-1.5 text-[11px] text-slate-700">
               <input
                 type="checkbox"
                 checked={b.paid === true}
                 disabled={disabled}
                 onChange={(e) => updateBreak(idx, { paid: e.target.checked })}
               />
-              Paid
+              Paid (counts as work)
             </label>
           </div>
           {!compact && (
             <div className="grid grid-cols-3 gap-2">
-              <select
-                value={b.over_deduction_mode || 'none'}
-                disabled={disabled}
-                onChange={(e) => updateBreak(idx, { over_deduction_mode: e.target.value })}
-                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-              >
-                <option value="none">No overstay pay cut</option>
-                <option value="per_day">Fixed per day over</option>
-                <option value="per_minute">Per extra minute</option>
-              </select>
-              <input
-                type="number"
-                min={0}
-                value={b.over_deduction_minutes}
-                disabled={disabled}
-                onChange={(e) => updateBreak(idx, { over_deduction_minutes: e.target.value })}
-                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-                placeholder="Min over"
-              />
-              <input
-                type="number"
-                min={0}
-                value={b.over_deduction_amount}
-                disabled={disabled}
-                onChange={(e) => updateBreak(idx, { over_deduction_amount: e.target.value })}
-                className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
-                placeholder="Amount"
-              />
+              <div>
+                <label className="text-[10px] font-medium text-slate-500">If they stay longer</label>
+                <select
+                  value={b.over_deduction_mode || 'none'}
+                  disabled={disabled}
+                  onChange={(e) => updateBreak(idx, { over_deduction_mode: e.target.value })}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                >
+                  <option value="none">No overstay pay cut</option>
+                  <option value="per_day">Fixed amount that day</option>
+                  <option value="per_minute">Per extra minute</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-slate-500">Min extra minutes</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={b.over_deduction_minutes}
+                  disabled={disabled}
+                  onChange={(e) => updateBreak(idx, { over_deduction_minutes: e.target.value })}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                  placeholder="0 = any over"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-medium text-slate-500">Amount (₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={b.over_deduction_amount}
+                  disabled={disabled}
+                  onChange={(e) => updateBreak(idx, { over_deduction_amount: e.target.value })}
+                  className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                  placeholder="0"
+                />
+              </div>
             </div>
           )}
           {breaks.length > 1 && (
@@ -1331,12 +1395,14 @@ export default function ShiftsPage() {
                           {shift.grace_minutes != null ? shift.grace_minutes : 0} min
                         </dd>
                       </div>
-                      <div className="flex justify-between">
-                        <dt className="text-slate-500">Lunch allotted</dt>
-                        <dd className="font-medium text-slate-800">
-                          {shift.lunch_minutes != null ? shift.lunch_minutes : 0} min
-                        </dd>
-                      </div>
+                      {shiftBreaksForDisplay(shift).map((b, i) => (
+                        <div key={`${b.name || 'break'}-${i}`} className="flex justify-between gap-2">
+                          <dt className="text-slate-500">{b.name || 'Break'}</dt>
+                          <dd className="font-medium text-slate-800 text-right">
+                            {formatBreakDetailLine(b)}
+                          </dd>
+                        </div>
+                      ))}
                       {shift.attendance_mode === 'day_based' && (
                         <div className="flex justify-between gap-2">
                           <dt className="text-slate-500">Full-day worked min</dt>
@@ -1389,16 +1455,8 @@ export default function ShiftsPage() {
                             <div className="flex justify-between">
                               <dt className="text-slate-500">Late deduction</dt>
                               <dd className="font-medium text-slate-800">
+                                {shift.late_deduction_mode === 'per_minute' ? 'per min · ' : 'per day · '}
                                 {shift.late_deduction_minutes ?? 0} min → {shift.late_deduction_amount ?? 0}
-                              </dd>
-                            </div>
-                          ) : null}
-                          {(shift.lunch_over_deduction_minutes != null && shift.lunch_over_deduction_minutes > 0) ||
-                          (shift.lunch_over_deduction_amount != null && shift.lunch_over_deduction_amount > 0) ? (
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Lunch over deduction</dt>
-                              <dd className="font-medium text-slate-800">
-                                {shift.lunch_over_deduction_minutes ?? 0} min → {shift.lunch_over_deduction_amount ?? 0}
                               </dd>
                             </div>
                           ) : null}
@@ -1419,9 +1477,11 @@ export default function ShiftsPage() {
                         <dd className="font-medium text-slate-800">
                           {shift.allow_overtime === false
                             ? 'Disabled'
-                            : shift.overtime_rate_mode === 'auto'
-                              ? 'Auto'
-                              : `₹${shift.overtime_rate_per_hour ?? 0}/hr`}
+                            : `${
+                                shift.overtime_rate_mode === 'auto'
+                                  ? 'Auto'
+                                  : `₹${shift.overtime_rate_per_hour ?? 0}/hr`
+                              } · ${overtimeWindowLabel(shift.overtime_window)}`}
                         </dd>
                       </div>
                       )}

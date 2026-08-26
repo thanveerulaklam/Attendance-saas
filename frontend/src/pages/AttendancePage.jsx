@@ -64,6 +64,53 @@ function breakStatusLabel(row) {
   return 'On break';
 }
 
+function collectBreakColumnNames(rows) {
+  const names = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    const list = Array.isArray(row.breaks) ? row.breaks : [];
+    for (const b of list) {
+      const name = String(b?.name || '').trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+  }
+  if (!names.length) names.push('Lunch');
+  return names;
+}
+
+function formatBreakCell(row, breakName) {
+  const key = String(breakName || '').toLowerCase();
+  const list = Array.isArray(row.breaks) ? row.breaks : [];
+  const matched = list.find((x) => String(x?.name || '').toLowerCase() === key);
+  const openKey = String(row.open_break_name || '').toLowerCase();
+  if (matched?.open || openKey === key) {
+    return {
+      text: `On ${String(matched?.name || breakName).toLowerCase()}`,
+      cls: 'text-violet-600',
+    };
+  }
+  if (String(matched?.tracking || '') === 'scheduled' && (matched?.minutes == null || matched?.minutes === '')) {
+    const allotted = Number(matched.allottedMinutes ?? matched.allotted_minutes ?? 0);
+    return { text: allotted > 0 ? `${allotted}m sched.` : '—', cls: 'text-slate-500' };
+  }
+  const minutes = matched?.minutes ?? (key === 'lunch' ? row.lunch_minutes : null);
+  const over = Number(
+    matched?.overMinutes ??
+      matched?.over_minutes ??
+      (key === 'lunch' ? row.lunch_over_minutes : 0) ||
+      0
+  );
+  if (minutes != null && minutes !== '') {
+    if (over > 0) return { text: `${minutes}m (+${over} over)`, cls: 'text-amber-600' };
+    return { text: `${minutes}m`, cls: 'text-slate-600' };
+  }
+  return { text: '—', cls: 'text-slate-400' };
+}
+
 export default function AttendancePage() {
   const { user } = useAuth();
   const [monthYear, setMonthYear] = useState(() => getMonthYear(0));
@@ -441,6 +488,9 @@ export default function AttendancePage() {
       .map(([branchName, rows]) => ({ branchName, rows }));
   }, [dailyData]);
 
+  const breakColumns = useMemo(() => collectBreakColumnNames(dailyData), [dailyData]);
+  const punchTableColSpan = 6 + breakColumns.length;
+
   const calendarGrid = useMemo(() => {
     if (!monthlyData || !monthlyData.daysInMonth) return null;
     const { daysInMonth, employees: empList } = monthlyData;
@@ -807,7 +857,11 @@ export default function AttendancePage() {
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Code</th>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Timings</th>
                     <th className="text-left py-2 px-2 font-medium text-slate-600">Day status</th>
-                    <th className="text-left py-2 px-2 font-medium text-slate-600">Lunch</th>
+                    {breakColumns.map((name) => (
+                      <th key={name} className="text-left py-2 px-2 font-medium text-slate-600">
+                        {name}
+                      </th>
+                    ))}
                     <th className="text-right py-2 px-2 font-medium text-slate-600">Total hours</th>
                     <th className="text-right py-2 px-2 font-medium text-slate-600">Actions</th>
                   </tr>
@@ -817,7 +871,7 @@ export default function AttendancePage() {
                     <Fragment key={group.branchName}>
                       <tr className="border-t border-slate-200 bg-gradient-to-r from-blue-50 via-indigo-50 to-violet-50">
                         <td
-                          colSpan={7}
+                          colSpan={punchTableColSpan}
                           className="px-2 py-2.5 text-xs font-bold tracking-wide text-indigo-700"
                         >
                           {group.branchName}
@@ -880,7 +934,7 @@ export default function AttendancePage() {
                         ? 'text-violet-600'
                         : dayStatus.startsWith('Full day')
                         ? 'text-blue-600'
-                        : dayStatus.startsWith('On break')
+                        : dayStatus.startsWith('On break') || dayStatus.startsWith('On lunch')
                           ? 'text-violet-600'
                         : dayStatus.startsWith('Left')
                           ? 'text-rose-600'
@@ -916,18 +970,7 @@ export default function AttendancePage() {
                           : 'On time';
                       firstPunchLabel = `First punch: ${timeStr} — ${lateStr}`;
                     }
-                    const lunch =
-                      row.left_during_lunch
-                        ? '—'
-                        : row.lunch_minutes != null
-                          ? row.lunch_over_minutes != null && row.lunch_over_minutes > 0
-                            ? `${row.lunch_minutes}m (+${row.lunch_over_minutes} over)`
-                            : `${row.lunch_minutes}m`
-                          : '—';
-                    const lunchCls =
-                      row.lunch_over_minutes != null && row.lunch_over_minutes > 0
-                        ? 'text-amber-600'
-                        : 'text-slate-600';
+                    const breakCells = breakColumns.map((name) => formatBreakCell(row, name));
                     const totalHoursNum = Number(row.total_hours_from_shift_start ?? 0);
                     const totalHoursDisplay =
                       row.present || totalHoursNum > 0 ? formatWorkedHours(totalHoursNum) : '—';
@@ -958,7 +1001,11 @@ export default function AttendancePage() {
                             )}
                           </div>
                         </td>
-                        <td className={`py-1.5 px-2 ${lunchCls}`}>{lunch}</td>
+                        {breakCells.map((cell, i) => (
+                          <td key={breakColumns[i]} className={`py-1.5 px-2 ${cell.cls}`}>
+                            {cell.text}
+                          </td>
+                        ))}
                         <td className="py-1.5 px-2 text-right">{totalHoursDisplay}</td>
                         <td className="py-1.5 px-2 text-right">
                           {punches.length > 0 && punches.some((p) => p.id) ? (
