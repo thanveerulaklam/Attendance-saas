@@ -11,6 +11,7 @@ const {
 
 // Employee limits per plan (aligned with landing-page pricing). Null = no default cap.
 const PLAN_EMPLOYEE_LIMITS = {
+  base: 10, // Base (UAE micro tier)
   starter: 25, // Basic
   growth: 50, // Growth
   business: 100, // Business
@@ -378,6 +379,15 @@ async function createEmployee(companyId, data, branchContext = {}) {
  * Get paginated employees for a company with optional search.
  * @param {number[]|null} [allowedBranchIds] - null = all branches (admin)
  */
+function employeeListOrderSql(sortBy, sortDir) {
+  const dir = String(sortDir || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+  const key = String(sortBy || 'name').toLowerCase().replace(/-/g, '_');
+  if (key === 'employee_code' || key === 'code') {
+    return `ORDER BY LOWER(TRIM(e.employee_code)) ${dir} NULLS LAST, e.id ASC`;
+  }
+  return `ORDER BY LOWER(TRIM(e.name)) ${dir} NULLS LAST, e.id ASC`;
+}
+
 async function getEmployees(
   companyId,
   {
@@ -388,6 +398,8 @@ async function getEmployees(
     branch_id: branchId,
     department,
     gender,
+    sort_by: sortBy,
+    sort_dir: sortDir,
   } = {},
   allowedBranchIds = null
 ) {
@@ -472,7 +484,7 @@ async function getEmployees(
      FROM employees e
      LEFT JOIN branches b ON b.id = e.branch_id AND b.company_id = e.company_id
      ${whereClause}
-     ORDER BY e.name ASC
+     ${employeeListOrderSql(sortBy, sortDir)}
      LIMIT $${limitIndex}
      OFFSET $${offsetIndex}`,
     [...baseParams, pageSize, offset]

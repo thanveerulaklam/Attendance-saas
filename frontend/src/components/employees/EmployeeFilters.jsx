@@ -4,6 +4,7 @@ export default function EmployeeFilters({
   branchId,
   department,
   gender,
+  sortBy = 'name',
   branches = [],
   departments = [],
   onSearchChange,
@@ -11,6 +12,7 @@ export default function EmployeeFilters({
   onBranchChange,
   onDepartmentChange,
   onGenderChange,
+  onSortByChange,
 }) {
   return (
     <section className="space-y-3">
@@ -61,7 +63,7 @@ export default function EmployeeFilters({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <label className="mb-1 block text-[11px] font-medium text-slate-600">Branch</label>
           <select
@@ -100,6 +102,17 @@ export default function EmployeeFilters({
             <option value="female">Female</option>
             <option value="other">Other</option>
             <option value="unset">Not specified</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-medium text-slate-600">Sort by</label>
+          <select
+            value={sortBy}
+            onChange={(e) => onSortByChange?.(e.target.value)}
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+          >
+            <option value="name">Name</option>
+            <option value="employee_code">Employee code</option>
           </select>
         </div>
       </div>

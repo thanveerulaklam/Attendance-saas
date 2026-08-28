@@ -34,11 +34,11 @@ const createEmployee = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/employees
- * Query: { page?, limit?, search? }
+ * Query: { page?, limit?, search?, sort_by?, sort_dir? }
  */
 const getEmployees = asyncHandler(async (req, res) => {
   const companyId = req.companyId;
-  const { page, limit, search, status, branch_id: branchId, department, gender } = req.query || {};
+  const { page, limit, search, status, branch_id: branchId, department, gender, sort_by: sortBy, sort_dir: sortDir } = req.query || {};
 
   const result = await employeeService.getEmployees(
     companyId,
@@ -50,6 +50,8 @@ const getEmployees = asyncHandler(async (req, res) => {
       branch_id: branchId,
       department,
       gender,
+      sort_by: sortBy,
+      sort_dir: sortDir,
     },
     req.allowedBranchIds
   );

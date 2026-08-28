@@ -9,7 +9,27 @@ import {
   fetchAllEmployeesForExport,
 } from '../utils/employeeListPdf';
 
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 50;
+
+function SortableHeader({ label, column, sortBy, sortDir, onSort }) {
+  const active = sortBy === column;
+  return (
+    <th className="pb-3 pr-4 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`inline-flex items-center gap-1 hover:text-slate-800 ${
+          active ? 'text-slate-900' : 'text-slate-500'
+        }`}
+      >
+        {label}
+        <span className={`text-[9px] leading-none ${active ? 'text-primary-600' : 'text-slate-300'}`}>
+          {active && sortDir === 'desc' ? '▼' : '▲'}
+        </span>
+      </button>
+    </th>
+  );
+}
 
 function formatINR(num) {
   if (num == null || Number.isNaN(Number(num))) return '—';
@@ -34,6 +54,8 @@ export default function EmployeesPage() {
   const [branchFilter, setBranchFilter] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [genderFilter, setGenderFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('name');
+  const [sortDir, setSortDir] = useState('asc');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(openFromOnboarding);
@@ -65,9 +87,15 @@ export default function EmployeesPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const fetchEmployees = async () => {
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  const fetchEmployees = async ({ silent } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
       const params = new URLSearchParams();
@@ -78,6 +106,8 @@ export default function EmployeesPage() {
       if (branchFilter) params.set('branch_id', branchFilter);
       if (departmentFilter) params.set('department', departmentFilter);
       if (genderFilter !== 'all') params.set('gender', genderFilter);
+      params.set('sort_by', sortBy);
+      params.set('sort_dir', sortDir);
 
       const res = await authFetch(`/api/employees?${params.toString()}`, {
         headers: {
@@ -106,7 +136,7 @@ export default function EmployeesPage() {
   useEffect(() => {
     fetchEmployees();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, search, statusFilter, branchFilter, departmentFilter, genderFilter]);
+  }, [page, search, statusFilter, branchFilter, departmentFilter, genderFilter, sortBy, sortDir]);
 
   useEffect(() => {
     authFetch('/api/shifts?limit=500')
@@ -171,11 +201,31 @@ export default function EmployeesPage() {
     setGenderFilter(value);
   };
 
+  const handleSortByChange = (value) => {
+    setPage(1);
+    setSortBy(value);
+    setSortDir('asc');
+  };
+
+  const handleSortHeader = (column) => {
+    setPage(1);
+    if (sortBy === column) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(column);
+      setSortDir('asc');
+    }
+  };
+
   const handleEmployeeCreated = (employee) => {
+    const wasEditing = Boolean(editingEmployee?.id);
     setShowModal(false);
     setEditingEmployee(null);
-    setPage(1);
-    fetchEmployees();
+    if (!wasEditing && page !== 1) {
+      setPage(1);
+    } else {
+      fetchEmployees({ silent: true });
+    }
     setToast({
       type: 'success',
       message: employee?.name
@@ -209,8 +259,7 @@ export default function EmployeesPage() {
   const handleEmployeeDeleted = (employee) => {
     setShowModal(false);
     setEditingEmployee(null);
-    setPage(1);
-    fetchEmployees();
+    fetchEmployees({ silent: true });
     const wasDeactivated = employee?.deletionMode === 'deactivated';
     setToast({
       type: 'success',
@@ -278,6 +327,8 @@ export default function EmployeesPage() {
       if (branchFilter) query.branch_id = branchFilter;
       if (departmentFilter.trim()) query.department = departmentFilter.trim();
       if (genderFilter !== 'all') query.gender = genderFilter;
+      query.sort_by = sortBy;
+      query.sort_dir = sortDir;
 
       const [companyRes, allEmployees] = await Promise.all([
         authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
@@ -390,6 +441,7 @@ export default function EmployeesPage() {
         branchId={branchFilter}
         department={departmentFilter}
         gender={genderFilter}
+        sortBy={sortBy}
         branches={branches}
         departments={departmentSuggestions}
         onSearchChange={handleSearchChange}
@@ -397,6 +449,7 @@ export default function EmployeesPage() {
         onBranchChange={handleBranchFilterChange}
         onDepartmentChange={handleDepartmentFilterChange}
         onGenderChange={handleGenderFilterChange}
+        onSortByChange={handleSortByChange}
       />
 
       {/* Content */}
@@ -469,8 +522,20 @@ export default function EmployeesPage() {
               <table className="min-w-[900px] text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500">
-                    <th className="pb-3 pr-4 font-medium">Name</th>
-                    <th className="pb-3 pr-4 font-medium">Employee code</th>
+                    <SortableHeader
+                      label="Name"
+                      column="name"
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={handleSortHeader}
+                    />
+                    <SortableHeader
+                      label="Employee code"
+                      column="employee_code"
+                      sortBy={sortBy}
+                      sortDir={sortDir}
+                      onSort={handleSortHeader}
+                    />
                     <th className="pb-3 pr-4 font-medium">Branch</th>
                     <th className="pb-3 pr-4 font-medium">Basic salary</th>
                     <th className="pb-3 pr-4 font-medium">Join date</th>
