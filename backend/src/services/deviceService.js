@@ -5,6 +5,11 @@ const crypto = require('crypto');
 const { getCompanyById, isSubscriptionAllowed } = require('./companyService');
 const auditService = require('./auditService');
 const { recordAdmsRejections, getSyncIssuesByDeviceIds } = require('./admsRejectionService');
+const {
+  trimCode,
+  numericEmployeeCodeKey,
+  buildEmployeeMapForDeviceCodes,
+} = require('../utils/employeeCode');
 
 async function findActiveDeviceByApiKey(apiKey) {
   const result = await pool.query(
@@ -389,27 +394,85 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
     throw new AppError('Subscription has expired. Please renew to sync device logs.', 403);
   }
 
-  const uniqueCodes = [...new Set(logs.map((l) => l.employeeCode))];
+  const incomingLogs = logs.map((l) => ({
+    ...l,
+    employeeCode: trimCode(l.employeeCode),
+  }));
+
+  const storedRows = await pool.query(
+    `SELECT employee_code, punch_time, raw_line
+     FROM adms_punch_rejections
+     WHERE company_id = $1 AND device_id = $2
+       AND reason = 'unknown_code'
+       AND punch_time IS NOT NULL
+       AND created_at >= NOW() - INTERVAL '14 days'`,
+    [companyId, device.id]
+  );
+
+  const uniqueCodes = [
+    ...new Set([
+      ...incomingLogs.map((l) => l.employeeCode),
+      ...storedRows.rows.map((r) => trimCode(r.employee_code)),
+    ]),
+  ].filter(Boolean);
+  const numericKeys = [...new Set(uniqueCodes.map(numericEmployeeCodeKey).filter(Boolean))];
+
   const employeeResult = await pool.query(
     `SELECT id, employee_code, branch_id
      FROM employees
-     WHERE company_id = $1 AND employee_code = ANY($2::text[])`,
-    [companyId, uniqueCodes]
+     WHERE company_id = $1
+       AND (
+         employee_code = ANY($2::text[])
+         OR (
+           $3::text[] IS NOT NULL
+           AND cardinality($3::text[]) > 0
+           AND employee_code ~ '^[0-9]+$'
+           AND COALESCE(NULLIF(LTRIM(employee_code, '0'), ''), '0') = ANY($3::text[])
+         )
+       )`,
+    [companyId, uniqueCodes, numericKeys.length ? numericKeys : null]
   );
 
-  const employeeMap = Object.create(null);
-  for (const row of employeeResult.rows) {
-    employeeMap[row.employee_code] = { id: row.id, branch_id: Number(row.branch_id) };
+  const employeeMap = buildEmployeeMapForDeviceCodes(employeeResult.rows, uniqueCodes);
+
+  const seenPunchKeys = new Set();
+  const punchKey = (code, punchTime) => {
+    const ts = punchTime instanceof Date ? punchTime : new Date(punchTime);
+    return `${trimCode(code)}|${Number.isNaN(ts.getTime()) ? '' : ts.toISOString()}`;
+  };
+
+  const workLogs = [];
+  for (const log of incomingLogs) {
+    const key = punchKey(log.employeeCode, log.punchTime);
+    if (seenPunchKeys.has(key)) continue;
+    seenPunchKeys.add(key);
+    workLogs.push(log);
+  }
+  for (const row of storedRows.rows) {
+    const code = trimCode(row.employee_code);
+    const emp = employeeMap[code];
+    if (!emp || emp.branch_id !== deviceBranchId) continue;
+    const key = punchKey(code, row.punch_time);
+    if (seenPunchKeys.has(key)) continue;
+    seenPunchKeys.add(key);
+    workLogs.push({
+      employeeCode: code,
+      punchTime: row.punch_time,
+      punchType: null,
+      deviceId: String(device.id),
+      rawLine: row.raw_line || null,
+    });
   }
 
-  const unknownCodes = uniqueCodes.filter((code) => !employeeMap[code]);
-  const wrongBranchCodes = uniqueCodes.filter((code) => {
+  const incomingCodes = [...new Set(incomingLogs.map((l) => l.employeeCode).filter(Boolean))];
+  const unknownCodes = incomingCodes.filter((code) => !employeeMap[code]);
+  const wrongBranchCodes = incomingCodes.filter((code) => {
     const e = employeeMap[code];
     return e && e.branch_id !== deviceBranchId;
   });
 
   const rejections = [];
-  for (const log of logs) {
+  for (const log of incomingLogs) {
     const e = employeeMap[log.employeeCode];
     if (!e) {
       rejections.push({
@@ -436,7 +499,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
     }
   }
 
-  const validLogs = logs.filter((log) => {
+  const validLogs = workLogs.filter((log) => {
     const e = employeeMap[log.employeeCode];
     return e && e.branch_id === deviceBranchId;
   });
@@ -532,6 +595,46 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
   }
 }
 
+/**
+ * Re-import punches that were stored as unknown_code (e.g. after leading-zero matching).
+ */
+async function replayUnknownCodePunchesForDevice(deviceId) {
+  const deviceResult = await pool.query(
+    `SELECT id, api_key
+     FROM devices
+     WHERE id = $1 AND is_active = TRUE`,
+    [deviceId]
+  );
+  if (deviceResult.rowCount === 0) {
+    throw new AppError('Device not found or inactive', 404);
+  }
+
+  const stored = await pool.query(
+    `SELECT employee_code, punch_time, raw_line
+     FROM adms_punch_rejections
+     WHERE device_id = $1
+       AND reason = 'unknown_code'
+       AND punch_time IS NOT NULL
+       AND created_at >= NOW() - INTERVAL '14 days'
+     ORDER BY punch_time ASC`,
+    [deviceId]
+  );
+  if (stored.rowCount === 0) {
+    return { inserted: 0, valid_count: 0, duplicate_count: 0, replayed_from: 0 };
+  }
+
+  const logs = stored.rows.map((row) => ({
+    employeeCode: trimCode(row.employee_code),
+    punchTime: row.punch_time,
+    punchType: null,
+    deviceId: String(deviceId),
+    rawLine: row.raw_line || null,
+  }));
+
+  const result = await processDeviceLogs(deviceResult.rows[0].api_key, logs, 'api_key');
+  return { ...result, replayed_from: logs.length };
+}
+
 module.exports = {
   findActiveDeviceByApiKey,
   findActiveDeviceByCloudToken,
@@ -545,4 +648,5 @@ module.exports = {
   updateAdmsSerial,
   deleteDevice,
   processDeviceLogs,
+  replayUnknownCodePunchesForDevice,
 };

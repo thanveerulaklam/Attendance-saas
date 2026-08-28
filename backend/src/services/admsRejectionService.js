@@ -40,9 +40,17 @@ async function getSyncIssuesByDeviceIds(companyId, deviceIds) {
          AND EXISTS (
            SELECT 1 FROM employees e
            WHERE e.company_id = r.company_id
-             AND e.employee_code = r.employee_code
              AND e.status = 'active'
              AND e.branch_id = d.branch_id
+             AND (
+               e.employee_code = r.employee_code
+               OR (
+                 e.employee_code ~ '^[0-9]+$'
+                 AND r.employee_code ~ '^[0-9]+$'
+                 AND COALESCE(NULLIF(LTRIM(e.employee_code, '0'), ''), '0')
+                   = COALESCE(NULLIF(LTRIM(r.employee_code, '0'), ''), '0')
+               )
+             )
          )
        )
      GROUP BY r.device_id, r.employee_code, r.reason
