@@ -499,7 +499,7 @@ async function approveCompany(req, res, next) {
       });
     }
 
-    const allowedPlanCodes = ['starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
+    const allowedPlanCodes = ['base', 'starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
     const allowedPaymentStatuses = ['trial', 'paid', 'pending', 'overdue', 'unpaid'];
 
     const plan_code =

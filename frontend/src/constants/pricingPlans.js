@@ -5,6 +5,16 @@
  */
 export const PRICING_PLANS = [
   {
+    code: 'base',
+    name: 'Base',
+    emp: 'Up to 10',
+    price: '10,000',
+    amc: '3,000',
+    popular: false,
+    features: ['Attendance Tracking', 'Auto Payroll', 'WhatsApp Payslips', 'PDF Reports'],
+    dimFeatures: ['Multi-Branch', 'Priority Support'],
+  },
+  {
     code: 'starter',
     name: 'Basic',
     emp: 'Up to 25',
@@ -83,34 +93,45 @@ export const PRICING_PLANS = [
   },
 ];
 
-/** UAE yearly subscription only (excl. VAT). No one-time or separate AMC. */
+/**
+ * UAE yearly subscription only (excl. VAT). No one-time or separate AMC.
+ * Anchored at Base (AED 499 / up to 10). Higher tiers use volume discounts
+ * so AED-per-employee falls as headcount rises (~50 → ~46 → ~43 → ~38 → ~32).
+ */
 export const PRICING_PLANS_AE = [
+  {
+    code: 'base',
+    name: 'Base',
+    emp: 'Up to 10',
+    annual: '499',
+    currency: 'AED',
+  },
   {
     code: 'starter',
     name: 'Basic',
     emp: 'Up to 25',
-    annual: '2,250',
+    annual: '1,149',
     currency: 'AED',
   },
   {
     code: 'growth',
     name: 'Growth',
     emp: 'Up to 50',
-    annual: '3,950',
+    annual: '2,149',
     currency: 'AED',
   },
   {
     code: 'business',
     name: 'Business',
     emp: 'Up to 100',
-    annual: '6,250',
+    annual: '3,799',
     currency: 'AED',
   },
   {
     code: 'professional',
     name: 'Professional',
     emp: 'Up to 200',
-    annual: '9,950',
+    annual: '6,499',
     currency: 'AED',
   },
   {
@@ -162,7 +183,7 @@ export function tenantDisplayAmcAmount(planCode, countryCode = 'IN', storedAmcAm
 /** Parsed billing amounts for admin lead/convert forms. */
 export function planPricingForCountry(planCode, countryCode = 'IN') {
   const plans = pricingPlansForCountry(countryCode);
-  const plan = plans.find((p) => p.code === (planCode || 'starter')) || plans[0];
+  const plan = plans.find((p) => p.code === (planCode || 'base')) || plans[0];
   const currency = pricingCurrencyForCountry(countryCode);
 
   if (isAnnualOnlyBilling(countryCode)) {
@@ -185,6 +206,7 @@ export function planPricingForCountry(planCode, countryCode = 'IN') {
 
 /** Mirrors backend `PLAN_EMPLOYEE_LIMITS` for display. null = no default cap. */
 export const PLAN_EMPLOYEE_CAP = {
+  base: 10,
   starter: 25,
   growth: 50,
   business: 100,
@@ -195,6 +217,7 @@ export const PLAN_EMPLOYEE_CAP = {
 
 /** Default total branch locations (including Main) when no override — aligns with plan tiers. */
 export const PLAN_DEFAULT_BRANCH_TOTAL = {
+  base: 1,
   starter: 1,
   growth: 2,
   business: 3,
@@ -205,7 +228,7 @@ export const PLAN_DEFAULT_BRANCH_TOTAL = {
 
 /** Returns { staffCap, branchTotal } for Adjust limits hints (null = no default). */
 export function planDefaultLimits(planCode) {
-  const p = (planCode || 'starter').toLowerCase();
+  const p = (planCode || 'base').toLowerCase();
   return {
     staffCap: Object.prototype.hasOwnProperty.call(PLAN_EMPLOYEE_CAP, p) ? PLAN_EMPLOYEE_CAP[p] : PLAN_EMPLOYEE_CAP.starter,
     branchTotal: Object.prototype.hasOwnProperty.call(PLAN_DEFAULT_BRANCH_TOTAL, p)
@@ -215,6 +238,7 @@ export function planDefaultLimits(planCode) {
 }
 
 export const PLAN_DISPLAY_NAME = {
+  base: 'Base',
   starter: 'Basic',
   growth: 'Growth',
   business: 'Business',
@@ -222,6 +246,44 @@ export const PLAN_DISPLAY_NAME = {
   enterprise: 'Enterprise',
   custom: 'Custom',
 };
+
+/** Prefill SuperAdmin create / approve / convert forms from catalog. */
+export function adminPlanFormDefaults(planCode = 'base', countryCode = 'IN') {
+  const country = String(countryCode || 'IN').toUpperCase();
+  const plans = pricingPlansForCountry(country);
+  const requested = String(planCode || 'base').toLowerCase();
+  const resolved =
+    requested === 'custom' || plans.some((p) => p.code === requested)
+      ? requested
+      : plans[0]?.code || 'base';
+  const pricing = planPricingForCountry(resolved, country);
+  const limits = planDefaultLimits(resolved);
+  const annualOnly = isAnnualOnlyBilling(country);
+  return {
+    plan_code: resolved,
+    staffs_allowed: limits.staffCap,
+    branches_allowed: limits.branchTotal ?? 1,
+    onetime_fee_amount: annualOnly ? '' : pricing.onetime || '',
+    amc_amount: pricing.amc || '',
+    onetime_fee_paid: annualOnly,
+  };
+}
+
+/** Merge catalog pricing + limits into an admin form object (mutates and returns target). */
+export function applyAdminPlanFields(target, planCode, countryCode, { updateStaffCap = true } = {}) {
+  const defaults = adminPlanFormDefaults(planCode, countryCode);
+  target.plan_code = defaults.plan_code;
+  if (updateStaffCap && defaults.staffs_allowed != null) {
+    target.staffs_allowed = defaults.staffs_allowed;
+  }
+  if (defaults.branches_allowed != null) {
+    target.branches_allowed = defaults.branches_allowed;
+  }
+  target.onetime_fee_amount = defaults.onetime_fee_amount;
+  target.amc_amount = defaults.amc_amount;
+  target.onetime_fee_paid = defaults.onetime_fee_paid;
+  return target;
+}
 
 /** Labels for SuperAdmin <select>s — aligned with login pricing. */
 export function planOptionsForAdminSelect(countryCode = 'IN') {

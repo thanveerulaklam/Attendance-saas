@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PunchPay India — Product Catalogue 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black: #0A0A0A;
+    --gold: #D4A843;
+    --gold-light: #F0C96A;
+    --white: #F5F1EA;
+    --white-dim: #C8C0B0;
+    --card: #121212;
+    --border: rgba(212,168,67,0.22);
+    --ok: #3D9B6E;
+  }
+
+  html { background: #1a1a1a; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: #1a1a1a;
+    color: var(--white);
+    width: 794px;
+    margin: 0 auto;
+  }
+
+  .page {
+    width: 794px;
+    height: 1123px;
+    background: var(--black);
+    position: relative;
+    overflow: hidden;
+    page-break-after: always;
+    page-break-inside: avoid;
+  }
+
+  .page::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .inner {
+    position: relative;
+    z-index: 2;
+    padding: 36px 48px 28px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .logo-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  .logo-lockup {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-mark {
+    width: 36px;
+    height: 36px;
+    background: var(--gold);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .logo-mark svg { width: 20px; height: 20px; }
+
+  .logo-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.4px;
+  }
+
+  .logo-name span { color: var(--gold); }
+
+  .logo-meta {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gold);
+    text-align: right;
+    line-height: 1.5;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+    color: var(--gold);
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .page-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -1.2px;
+    line-height: 1.05;
+    margin-bottom: 10px;
+  }
+
+  .page-title .accent { color: var(--gold); }
+
+  .lede {
+    font-size: 13px;
+    color: var(--white-dim);
+    line-height: 1.55;
+    max-width: 620px;
+    font-weight: 300;
+    margin-bottom: 22px;
+  }
+
+  .footer-bar {
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--white-dim);
+    letter-spacing: 0.3px;
+  }
+
+  .footer-bar strong { color: var(--gold); font-weight: 600; }
+
+  .hero-h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 46px;
+    font-weight: 800;
+    letter-spacing: -1.8px;
+    line-height: 0.98;
+    margin-bottom: 14px;
+    max-width: 640px;
+  }
+
+  .hero-h1 .accent { color: var(--gold); }
+
+  .hero-sub {
+    font-size: 14px;
+    color: var(--white-dim);
+    line-height: 1.55;
+    max-width: 560px;
+    font-weight: 300;
+    margin-bottom: 22px;
+  }
+
+  .android-banner {
+    background: linear-gradient(135deg, rgba(212,168,67,0.14), rgba(212,168,67,0.04));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .android-banner h2 {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    margin-bottom: 6px;
+  }
+
+  .android-banner p {
+    font-size: 12px;
+    color: var(--white-dim);
+    line-height: 1.5;
+    max-width: 480px;
+  }
+
+  .android-pill {
+    background: var(--gold);
+    color: var(--black);
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    border-radius: 8px;
+    text-align: center;
+    line-height: 1.35;
+    white-space: nowrap;
+  }
+
+  .android-steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .step-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 14px 12px;
+  }
+
+  .step-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--gold);
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .step-card h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .step-card p {
+    font-size: 11px;
+    color: var(--white-dim);
+    line-height: 1.45;
+  }
+
+  .why-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 12px;
+    flex: 1;
+  }
+
+  .why-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+
+  .why-card h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+
+  .why-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .why-list li {
+    font-size: 11.5px;
+    color: var(--white-dim);
+    line-height: 1.4;
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .why-list li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--gold);
+  }
+
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+
+  .compare-table th,
+  .compare-table td {
+    text-align: left;
+    padding: 7px 6px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .compare-table th {
+    color: var(--gold);
+    font-weight: 600;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .compare-table td:first-child { color: var(--white-dim); width: 42%; }
+  .compare-table .yes { color: var(--ok); font-weight: 600; }
+  .compare-table .no { color: #8a6a6a; }
+  .compare-table .pp { color: var(--gold-light); font-weight: 600; }
+
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    flex: 1;
+  }
+
+  .feat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 13px 14px;
+  }
+
+  .feat-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: rgba(212,168,67,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+
+  .feat-icon svg {
+    width: 12px;
+    height: 12px;
+    stroke: var(--gold);
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .feat h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .feat p {
+    font-size: 11px;
+    color: var(--white-dim);
+    line-height: 1.45;
+  }
+
+  .feat ul {
+    list-style: none;
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .feat ul li {
+    font-size: 10.5px;
+    color: var(--white-dim);
+    padding-left: 12px;
+    position: relative;
+    line-height: 1.35;
+  }
+
+  .feat ul li::before {
+    content: '–';
+    position: absolute;
+    left: 0;
+    color: var(--gold);
+  }
+
+  .price-hero {
+    text-align: center;
+    margin-bottom: 14px;
+  }
+
+  .price-hero .from-label {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 4px;
+  }
+
+  .price-hero .from-price {
+    font-family: 'Syne', sans-serif;
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: -1.5px;
+    line-height: 1;
+  }
+
+  .price-hero .from-price small {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--white-dim);
+    letter-spacing: 0;
+  }
+
+  .price-hero .from-note {
+    font-size: 11px;
+    color: var(--white-dim);
+    margin-top: 6px;
+  }
+
+  .plans {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .plan {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 12px 10px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .plan.popular {
+    border-color: var(--gold);
+    background: linear-gradient(180deg, rgba(212,168,67,0.12), var(--card) 55%);
+    position: relative;
+  }
+
+  .plan.popular::after {
+    content: 'Popular';
+    position: absolute;
+    top: -8px;
+    right: 10px;
+    background: var(--gold);
+    color: var(--black);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  .plan-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 2px;
+  }
+
+  .plan-emp {
+    font-size: 10px;
+    color: var(--white-dim);
+    margin-bottom: 7px;
+  }
+
+  .plan-price {
+    font-family: 'Syne', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--gold-light);
+    margin-bottom: 1px;
+  }
+
+  .plan-price.custom { font-size: 17px; }
+
+  .plan-unit {
+    font-size: 10px;
+    color: var(--white-dim);
+    margin-bottom: 6px;
+  }
+
+  .plan-amc {
+    font-size: 10px;
+    color: rgba(212,168,67,0.9);
+    margin-top: auto;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .value-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .value-item {
+    background: rgba(212,168,67,0.06);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 10px;
+    text-align: center;
+  }
+
+  .value-item strong {
+    display: block;
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 3px;
+  }
+
+  .value-item span {
+    font-size: 10px;
+    color: var(--white-dim);
+    line-height: 1.35;
+  }
+
+  .cta-box {
+    background: linear-gradient(135deg, rgba(212,168,67,0.18), rgba(212,168,67,0.05));
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .cta-box h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .cta-box p {
+    font-size: 12px;
+    color: var(--white-dim);
+    line-height: 1.45;
+  }
+
+  .cta-contacts {
+    text-align: right;
+  }
+
+  .cta-contacts .phone {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--gold);
+    margin-bottom: 3px;
+    line-height: 1.35;
+  }
+
+  .cta-contacts .web {
+    font-size: 12px;
+    color: var(--white);
+  }
+
+  .cta-contacts .note {
+    font-size: 10px;
+    color: var(--white-dim);
+    margin-top: 4px;
+  }
+
+  .vat-note {
+    font-size: 10px;
+    color: var(--white-dim);
+    text-align: center;
+    margin: 10px 0 0;
+  }
+
+  @media print {
+    html, body {
+      background: white;
+      width: auto;
+      margin: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page {
+      margin: 0;
+      box-shadow: none;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: auto; }
+  }
+
+  @page {
+    size: A4;
+    margin: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="page">
+  <div class="inner">
+    <div class="logo-row">
+      <div class="logo-lockup">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0A0A0A" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0A0A0A" stroke-width="2.2"/></svg>
+        </div>
+        <div class="logo-name">Punch<span>Pay</span></div>
+      </div>
+      <div class="logo-meta">India Product Catalogue<br/>Attendance · Payroll · WhatsApp</div>
+    </div>
+
+    <h1 class="hero-h1">Attendance &amp; payroll<br/>built for <span class="accent">Indian business</span></h1>
+    <p class="hero-sub">
+      Track attendance, run INR payroll with ESI/PF support, and send WhatsApp payslips —
+      without buying an expensive biometric machine. One-time license + annual AMC. Live in days, not months.
+    </p>
+
+    <div class="android-banner">
+      <div>
+        <h2>No dedicated biometric device needed</h2>
+        <p>
+          An <strong style="color:var(--white)">old Android phone or tablet</strong> becomes your office face-attendance kiosk.
+          Employees look at the camera to punch IN/OUT. Same payroll path as a fingerprint machine —
+          at a fraction of the hardware cost.
+        </p>
+      </div>
+      <div class="android-pill">Any Android<br/>with a camera</div>
+    </div>
+
+    <div class="android-steps">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <h3>Install the kiosk app</h3>
+        <p>Download PunchPay Kiosk APK on a spare Android phone or tablet at reception.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <h3>Enroll faces once</h3>
+        <p>Take a clear front-facing photo per employee. Recognition works for daily punches.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <h3>Payroll is automatic</h3>
+        <p>Punches sync to the cloud. Month-end salary and WhatsApp payslips follow automatically.</p>
+      </div>
+    </div>
+
+    <div class="why-grid">
+      <div class="why-card">
+        <h3>Why Indian teams choose PunchPay</h3>
+        <ul class="why-list">
+          <li><strong style="color:var(--white)">Start from ₹10,000</strong> — new Base plan for teams under 10 employees.</li>
+          <li><strong style="color:var(--white)">Zero hardware lock-in</strong> — use Android face kiosk, or connect ZKTeco if you already own devices.</li>
+          <li><strong style="color:var(--white)">India-ready payroll</strong> — INR salaries, ESI, PF, travel allowance, late &amp; lunch rules.</li>
+          <li><strong style="color:var(--white)">WhatsApp payslips</strong> — PDF slips to every employee in one tap.</li>
+          <li><strong style="color:var(--white)">Cloud from day one</strong> — dashboard, reports, and payroll accessible anywhere.</li>
+        </ul>
+      </div>
+      <div class="why-card">
+        <h3>vs typical competitors</h3>
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Others</th>
+              <th>PunchPay</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Must buy biometric hardware</td>
+              <td class="no">Often yes</td>
+              <td class="pp">No — Android works</td>
+            </tr>
+            <tr>
+              <td>Entry for micro teams</td>
+              <td class="no">₹25k–50k+</td>
+              <td class="pp">₹10,000</td>
+            </tr>
+            <tr>
+              <td>Attendance + payroll together</td>
+              <td class="no">Often split tools</td>
+              <td class="yes">One system</td>
+            </tr>
+            <tr>
+              <td>WhatsApp payslips</td>
+              <td class="no">Rare / paid add-on</td>
+              <td class="yes">Included</td>
+            </tr>
+            <tr>
+              <td>ESI / PF fields</td>
+              <td class="no">Generic / missing</td>
+              <td class="pp">Built for India</td>
+            </tr>
+            <tr>
+              <td>Time to go live</td>
+              <td class="no">Weeks</td>
+              <td class="pp">Days</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footer-bar">
+      <span>punchpay.in · India</span>
+      <span>Page 1 of 3</span>
+      <span>Demo: <strong>+91 96008 44041</strong></span>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 2 -->
+<div class="page">
+  <div class="inner">
+    <div class="logo-row">
+      <div class="logo-lockup">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0A0A0A" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0A0A0A" stroke-width="2.2"/></svg>
+        </div>
+        <div class="logo-name">Punch<span>Pay</span></div>
+      </div>
+      <div class="logo-meta">Complete feature set<br/>Everything in one system</div>
+    </div>
+
+    <div class="eyebrow">Features &amp; functions</div>
+    <h2 class="page-title">Everything you need to run<br/><span class="accent">attendance and payroll</span></h2>
+    <p class="lede">
+      One cloud platform — from punch capture to WhatsApp payslip. Built for Indian SMEs, factories, multi-branch offices, and growing teams.
+    </p>
+
+    <div class="feat-grid">
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r="1"/></svg></div>
+        <h3>Android face attendance kiosk</h3>
+        <p>Turn any Android phone/tablet into a reception punch station. Face recognition IN/OUT — no fingerprint machine required.</p>
+        <ul>
+          <li>One-time face enrollment per employee</li>
+          <li>Branch kiosk code + settings PIN</li>
+          <li>Same punch → payroll path as biometrics</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h2a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2h2V7a5 5 0 015-5z"/><circle cx="12" cy="15" r="2"/></svg></div>
+        <h3>Optional biometric devices</h3>
+        <p>Already own ZKTeco (or compatible) machines? Connect via connector or ADMS — punches sync to PunchPay.</p>
+        <ul>
+          <li>Use existing fingerprint / face devices</li>
+          <li>Device register, activate, last-seen status</li>
+          <li>Mix Android kiosk + devices if needed</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+        <h3>Live attendance dashboard</h3>
+        <p>See who’s in, on break, or absent — in real time. Weekly presence trend at a glance.</p>
+        <ul>
+          <li>Today present / total headcount</li>
+          <li>Lunch break &amp; absent lists</li>
+          <li>7-day attendance chart</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
+        <h3>Attendance management</h3>
+        <p>Monthly and daily views with punch-level detail. Fix mistakes without spreadsheets.</p>
+        <ul>
+          <li>Present, absent, late, overtime</li>
+          <li>Manual / bulk punch entry</li>
+          <li>Edit punch time &amp; type</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
+        <h3>Shifts &amp; work rules</h3>
+        <p>Define timings once — the system applies them fairly across your team.</p>
+        <ul>
+          <li>Shift start/end, grace, lunch minutes</li>
+          <li>Weekly offs &amp; company holidays (paid)</li>
+          <li>Late &amp; lunch-over deductions</li>
+          <li>No-leave incentive option</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <h3>Employee directory</h3>
+        <p>One place for workforce records linked to salary, shift, and branch.</p>
+        <ul>
+          <li>Employee code, salary, join date, status</li>
+          <li>ESI, PF, Aadhaar, travel allowance</li>
+          <li>Search, filter, activate / deactivate</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div>
+        <h3>INR payroll engine</h3>
+        <p>One-click month-end payroll from attendance — transparent net salary every time.</p>
+        <ul>
+          <li>Gross, OT, deductions, advances, net</li>
+          <li>ESI amount &amp; PF support</li>
+          <li>Daily travel allowance handling</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg></div>
+        <h3>WhatsApp payslips &amp; PDF</h3>
+        <p>Professional INR payslips as PDF — shared on WhatsApp in one tap.</p>
+        <ul>
+          <li>Instant delivery to employees</li>
+          <li>No printing required</li>
+          <li>Attendance, payroll &amp; OT reports (CSV/PDF)</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+        <h3>Salary advances</h3>
+        <p>Track advances by employee and month — auto-deducted in payroll.</p>
+        <ul>
+          <li>Per-employee advance entry</li>
+          <li>Notes &amp; advance date</li>
+          <li>Reflected in net salary</li>
+        </ul>
+      </div>
+
+      <div class="feat">
+        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg></div>
+        <h3>Multi-branch support</h3>
+        <p>Run several locations under one company account with branch-scoped HR access.</p>
+        <ul>
+          <li>Branches with separate headcount</li>
+          <li>HR scoped by branch</li>
+          <li>Reports filterable by location</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bar">
+      <span>punchpay.in · India</span>
+      <span>Page 2 of 3</span>
+      <span>Demo: <strong>+91 96008 44041</strong></span>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 3 -->
+<div class="page">
+  <div class="inner">
+    <div class="logo-row">
+      <div class="logo-lockup">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0A0A0A" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0A0A0A" stroke-width="2.2"/></svg>
+        </div>
+        <div class="logo-name">Punch<span>Pay</span></div>
+      </div>
+      <div class="logo-meta">Transparent India pricing<br/>One-time + AMC · excl. GST</div>
+    </div>
+
+    <div class="eyebrow">Simple India pricing</div>
+    <h2 class="page-title">Start at <span class="accent">₹10,000.</span> Scale when ready.</h2>
+    <p class="lede" style="margin-bottom:12px;">
+      One-time license &amp; setup based on team size, plus annual AMC. New Base plan for micro teams — higher plans unchanged.
+    </p>
+
+    <div class="price-hero">
+      <div class="from-label">New · Base plan from</div>
+      <div class="from-price">₹10,000 <small>one-time</small></div>
+      <div class="from-note">Up to 10 employees · ₹3,000 AMC/year · Android kiosk included · excl. GST</div>
+    </div>
+
+    <div class="plans">
+      <div class="plan">
+        <div class="plan-name">Base</div>
+        <div class="plan-emp">Up to 10 employees</div>
+        <div class="plan-price">₹10,000</div>
+        <div class="plan-unit">one-time license</div>
+        <div class="plan-amc">AMC ₹3,000 / year</div>
+      </div>
+      <div class="plan">
+        <div class="plan-name">Basic</div>
+        <div class="plan-emp">Up to 25 employees</div>
+        <div class="plan-price">₹20,000</div>
+        <div class="plan-unit">one-time license</div>
+        <div class="plan-amc">AMC ₹5,000 / year</div>
+      </div>
+      <div class="plan popular">
+        <div class="plan-name">Growth</div>
+        <div class="plan-emp">Up to 50 employees</div>
+        <div class="plan-price">₹35,000</div>
+        <div class="plan-unit">one-time license</div>
+        <div class="plan-amc">AMC ₹8,000 / year</div>
+      </div>
+      <div class="plan">
+        <div class="plan-name">Business</div>
+        <div class="plan-emp">Up to 100 employees</div>
+        <div class="plan-price">₹60,000</div>
+        <div class="plan-unit">one-time license</div>
+        <div class="plan-amc">AMC ₹15,000 / year</div>
+      </div>
+      <div class="plan">
+        <div class="plan-name">Professional</div>
+        <div class="plan-emp">Up to 200 employees</div>
+        <div class="plan-price">₹1,00,000</div>
+        <div class="plan-unit">one-time license</div>
+        <div class="plan-amc">AMC ₹25,000 / year</div>
+      </div>
+      <div class="plan">
+        <div class="plan-name">Enterprise</div>
+        <div class="plan-emp">200+ employees</div>
+        <div class="plan-price custom">Custom</div>
+        <div class="plan-unit">license &amp; AMC</div>
+        <div class="plan-amc">Volume &amp; multi-site quote</div>
+      </div>
+    </div>
+
+    <div class="value-strip">
+      <div class="value-item">
+        <strong>No biometric buy</strong>
+        <span>Spare Android is enough</span>
+      </div>
+      <div class="value-item">
+        <strong>₹10k entry</strong>
+        <span>Base plan for &lt;10 staff</span>
+      </div>
+      <div class="value-item">
+        <strong>India payroll</strong>
+        <span>ESI · PF · travel allowance</span>
+      </div>
+      <div class="value-item">
+        <strong>WhatsApp slips</strong>
+        <span>PDF to staff in one tap</span>
+      </div>
+    </div>
+
+    <div class="cta-box">
+      <div>
+        <h3>Book an India demo</h3>
+        <p>
+          We’ll walk through Android kiosk setup, INR payroll, and WhatsApp payslips on your sample headcount —
+          usually under 30 minutes.
+        </p>
+      </div>
+      <div class="cta-contacts">
+        <div class="phone">Anish: +91 98424 81388</div>
+        <div class="phone">Thanveer: +91 96008 44041</div>
+        <div class="web">punchpay.in</div>
+        <div class="note">PunchPay India</div>
+      </div>
+    </div>
+
+    <p class="vat-note">
+      All prices exclusive of 18% GST. Multi-branch pricing may vary. Optional ZKTeco devices supported if you already own hardware.
+    </p>
+
+    <div class="footer-bar">
+      <span>punchpay.in · India Product Catalogue 2026</span>
+      <span>Page 3 of 3</span>
+      <span>Print · Share · Close the deal</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

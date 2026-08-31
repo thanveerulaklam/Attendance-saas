@@ -8,9 +8,9 @@ import {
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
 } from '../constants/demoEnquiryStatus';
 import {
-  planDefaultLimits,
+  adminPlanFormDefaults,
+  applyAdminPlanFields,
   planOptionsForAdminSelect,
-  planPricingForCountry,
   pricingSymbolForCountry,
   isAnnualOnlyBilling,
 } from '../constants/pricingPlans';
@@ -61,16 +61,15 @@ function emptyAddForm() {
     email: '',
     employees_range: '',
     source: '',
-    expected_plan: 'starter',
+    expected_plan: 'base',
     notes: '',
   };
 }
 
 function convertFormFromLead(lead) {
-  const plan = lead?.expected_plan || 'starter';
+  const plan = lead?.expected_plan || 'base';
   const countryCode = DEFAULT_COUNTRY_CODE;
-  const pricing = planPricingForCountry(plan, countryCode);
-  const limits = planDefaultLimits(plan);
+  const planDefaults = adminPlanFormDefaults(plan, countryCode);
   const today = new Date().toISOString().slice(0, 10);
   const end = new Date(today);
   end.setFullYear(end.getFullYear() + 1);
@@ -89,14 +88,14 @@ function convertFormFromLead(lead) {
     admin_name: lead?.full_name || '',
     admin_email: adminEmail,
     admin_password: '',
-    plan_code: plan,
+    plan_code: planDefaults.plan_code,
     subscription_start_date: today,
     subscription_end_date: end.toISOString().slice(0, 10),
-    branches_allowed: limits.branchTotal ?? 1,
-    staffs_allowed: limits.staffCap ?? 25,
-    onetime_fee_amount: isAnnualOnlyBilling(countryCode) ? '' : pricing.onetime,
-    amc_amount: pricing.amc,
-    onetime_fee_paid: isAnnualOnlyBilling(countryCode),
+    branches_allowed: planDefaults.branches_allowed,
+    staffs_allowed: planDefaults.staffs_allowed ?? 10,
+    onetime_fee_amount: planDefaults.onetime_fee_amount,
+    amc_amount: planDefaults.amc_amount,
+    onetime_fee_paid: planDefaults.onetime_fee_paid,
     last_amc_payment_date: '',
     country_code: DEFAULT_COUNTRY_CODE,
   };
@@ -336,20 +335,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       const countryCode = name === 'country_code' ? value : prev.country_code || DEFAULT_COUNTRY_CODE;
       if (name === 'plan_code' || name === 'country_code') {
         const plan = name === 'plan_code' ? value : prev.plan_code;
-        const pricing = planPricingForCountry(plan, countryCode);
-        if (isAnnualOnlyBilling(countryCode)) {
-          next.onetime_fee_amount = '';
-          next.onetime_fee_paid = true;
-          next.amc_amount = pricing.amc || '';
-        } else {
-          next.onetime_fee_amount = pricing.onetime;
-          next.amc_amount = pricing.amc;
-        }
-        if (name === 'plan_code') {
-          const limits = planDefaultLimits(value);
-          if (limits.staffCap != null) next.staffs_allowed = limits.staffCap;
-          if (limits.branchTotal != null) next.branches_allowed = limits.branchTotal;
-        }
+        applyAdminPlanFields(next, plan, countryCode);
       }
       if (name === 'subscription_start_date' && value) {
         const d = new Date(value);

@@ -11,7 +11,7 @@ const {
 
 // Employee limits per plan (aligned with landing-page pricing). Null = no default cap.
 const PLAN_EMPLOYEE_LIMITS = {
-  base: 10, // Base (UAE micro tier)
+  base: 10, // Base (micro tier, up to 10)
   starter: 25, // Basic
   growth: 50, // Growth
   business: 100, // Business

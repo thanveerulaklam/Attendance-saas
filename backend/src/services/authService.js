@@ -98,7 +98,7 @@ async function createCompanyProvisionedBySuperadmin(payload) {
   }
 
   const plan_code = typeof payload.plan_code === 'string' ? payload.plan_code.trim().toLowerCase() : 'starter';
-  const allowedPlans = ['starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
+  const allowedPlans = ['base', 'starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
   if (!allowedPlans.includes(plan_code)) {
     throw new AppError(`plan_code must be one of: ${allowedPlans.join(', ')}`, 400);
   }

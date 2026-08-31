@@ -8,7 +8,16 @@
 | Recurring | Annual AMC | **Annual subscription only** |
 | Tax note | excl. GST | excl. VAT (5%) |
 
-UAE plan tiers match India (same `plan_code` and employee caps). Amounts are in **AED/year** — see `frontend/src/constants/pricingPlans.js` → `PRICING_PLANS_AE`.
+UAE plan tiers share most India `plan_code` values, plus an AE-only **Base** tier (up to 10 employees). Amounts are in **AED/year** — see `frontend/src/constants/pricingPlans.js` → `PRICING_PLANS_AE`.
+
+| Plan | Employees | AED / year (excl. VAT) | ~AED / employee |
+|------|-----------|------------------------|-----------------|
+| Base | Up to 10 | 499 | ~50 |
+| Basic | Up to 25 | 1,149 | ~46 |
+| Growth | Up to 50 | 2,149 | ~43 |
+| Business | Up to 100 | 3,799 | ~38 |
+| Professional | Up to 200 | 6,499 | ~32 |
+| Enterprise | 200+ | Custom | — |
 
 ## SuperAdmin setup
 
