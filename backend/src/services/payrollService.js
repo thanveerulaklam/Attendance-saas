@@ -43,6 +43,12 @@ const {
   normalizeOvertimeWindow,
   isLateDayEligible,
 } = require('../utils/shiftRules');
+const {
+  getAdjacentHolidayAbsentKeys,
+  getWorkedHalfPresence,
+  addDayHalfPresence,
+  markAdjacentWeeklyOffsAbsent,
+} = require('../utils/holidayAdjacentAbsence');
 
 async function withCompanyIdTimezone(companyId, fn) {
   const tz = await getCompanyTimezone(companyId);
@@ -597,24 +603,6 @@ function addDays(isoDateStr, delta) {
   return addDaysYmd(isoDateStr, delta);
 }
 
-/** Holidays/weekly-offs adjacent to an absent day (for treatHolidayAdjacentAbsenceAsWorking). */
-function getAdjacentHolidayAbsentKeys(holidaySet, presentDayKeys, rangeStart, rangeEnd) {
-  const keys = new Set();
-  for (const holidayKey of holidaySet) {
-    if (holidayKey > rangeEnd) continue;
-    const prevKey = addDays(holidayKey, -1);
-    const nextKey = addDays(holidayKey, 1);
-    const absentPrev =
-      prevKey >= rangeStart && prevKey <= rangeEnd && !presentDayKeys.has(prevKey);
-    const absentNext =
-      nextKey >= rangeStart && nextKey <= rangeEnd && !presentDayKeys.has(nextKey);
-    if (absentPrev || absentNext) {
-      keys.add(holidayKey);
-    }
-  }
-  return keys;
-}
-
 /**
  * For incomplete months (current month viewed before month-end), only count working days
  * and absence for dates that have already occurred. Avoids penalizing staff for future days.
@@ -729,6 +717,8 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
 
     /** Days where employee actually worked (workedMs > 0 or hoursInside > 0). */
     const presentDayKeys = new Set();
+    const firstHalfPresentKeys = new Set();
+    const secondHalfPresentKeys = new Set();
     let presentDays = 0;
     let presentWorkingDays = 0;
     let totalOvertimeMs = 0;
@@ -864,6 +854,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         if (!flexibleHoursMode) {
           if (presentFraction > 0) {
             presentDayKeys.add(dayKey);
+            addDayHalfPresence(firstHalfPresentKeys, secondHalfPresentKeys, dayKey, {
+              present: true,
+              halfDay: presentFraction > 0 && presentFraction < 1,
+              sortedLogs: sorted,
+              shift: dayShift,
+            });
             presentDays += presentFraction;
             if (!isHoliday) {
               presentWorkingDays += presentFraction;
@@ -879,6 +875,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
           }
         } else if (presentFraction > 0) {
           presentDayKeys.add(dayKey);
+          addDayHalfPresence(firstHalfPresentKeys, secondHalfPresentKeys, dayKey, {
+            present: true,
+            halfDay: presentFraction > 0 && presentFraction < 1,
+            sortedLogs: sorted,
+            shift: dayShift,
+          });
           if (presentFraction > 0 && presentFraction < 1) {
             halfDayDays += 1;
           }
@@ -921,26 +923,19 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
         overtimeHours = Math.max(0, monthlyWorkedHours - monthlyRequiredHours);
       }
 
+      const adjacentHolidayAbsentKeys =
+        treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0
+          ? getAdjacentHolidayAbsentKeys(
+              holidaySet,
+              { firstHalfPresentKeys, secondHalfPresentKeys },
+              firstDayStr,
+              lastDateToConsider
+            )
+          : new Set();
       let effectiveWorkingDays = workingDays;
-      if (treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0) {
-        let holidaysCountedAsWorking = 0;
-        for (const holidayKey of holidaySet) {
-          if (holidayKey > lastDateToConsider) continue;
-          const prevKey = addDays(holidayKey, -1);
-          const nextKey = addDays(holidayKey, 1);
-          const absentPrev =
-            prevKey >= firstDayStr &&
-            prevKey <= lastDateToConsider &&
-            !presentDayKeys.has(prevKey);
-          const absentNext =
-            nextKey >= firstDayStr &&
-            nextKey <= lastDateToConsider &&
-            !presentDayKeys.has(nextKey);
-          if (absentPrev || absentNext) {
-            holidaysCountedAsWorking += 1;
-          }
-        }
-        effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
+      if (adjacentHolidayAbsentKeys.size > 0) {
+        effectiveWorkingDays = workingDays + adjacentHolidayAbsentKeys.size;
+        markAdjacentWeeklyOffsAbsent(dayDetails, adjacentHolidayAbsentKeys);
       }
 
       let paidLeaveDaysAllowed = effectivePaidLeaveDaysAllowed(
@@ -1055,6 +1050,12 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       }
 
       presentDayKeys.add(dayKey);
+      addDayHalfPresence(firstHalfPresentKeys, secondHalfPresentKeys, dayKey, {
+        present: true,
+        halfDay: Boolean(status.halfDay),
+        sortedLogs: sorted,
+        shift: dayShift,
+      });
       const isHoliday = holidaySet.has(dayKey);
 
       const presentFraction = status.halfDay ? 0.5 : 1;
@@ -1103,7 +1104,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0
         ? getAdjacentHolidayAbsentKeys(
             holidaySet,
-            presentDayKeys,
+            { firstHalfPresentKeys, secondHalfPresentKeys },
             firstDayStr,
             lastDateToConsider
           )
@@ -1199,11 +1200,7 @@ async function getAttendanceSummary(companyId, employeeId, year, month, options 
       );
     }
 
-    for (const detail of dayDetails) {
-      if (adjacentHolidayAbsentKeys.has(detail.date) && detail.status === 'weekly_off') {
-        detail.status = 'absent';
-      }
-    }
+    markAdjacentWeeklyOffsAbsent(dayDetails, adjacentHolidayAbsentKeys);
 
     const shiftBasedSummary = withPayRuleSummaryFields({
       daysInMonth,
@@ -1395,6 +1392,8 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
     let rawAbsenceHours = 0;
 
     const presentDayKeys = new Set();
+    const firstHalfPresentKeys = new Set();
+    const secondHalfPresentKeys = new Set();
     const dayDetails = [];
 
     // Iterate day-by-day across the range (inclusive)
@@ -1411,6 +1410,8 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
         // Holiday/weekly-off is paid: count as full-day present.
         if (holidayCountAsPresent && isHoliday) {
           presentDayKeys.add(dayKey);
+          firstHalfPresentKeys.add(dayKey);
+          secondHalfPresentKeys.add(dayKey);
           presentDays += 1;
           dayDetails.push(
             buildDayDetailRecord({
@@ -1478,6 +1479,12 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         if (presentFraction > 0) {
           presentDayKeys.add(dayKey);
+          addDayHalfPresence(firstHalfPresentKeys, secondHalfPresentKeys, dayKey, {
+            present: true,
+            halfDay: presentFraction > 0 && presentFraction < 1,
+            sortedLogs: sorted,
+            shift,
+          });
           presentDays += presentFraction;
           if (!isHoliday) {
             presentWorkingDays += presentFraction;
@@ -1512,6 +1519,8 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         if (holidayCountAsPresent && isHoliday && dayLogs.length === 0) {
           presentDayKeys.add(dayKey);
+          firstHalfPresentKeys.add(dayKey);
+          secondHalfPresentKeys.add(dayKey);
           presentDays += 1;
           dayDetails.push(
             buildDayDetailRecord({
@@ -1560,6 +1569,12 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
 
         const presentFraction = isHoliday ? 1 : status.halfDay ? 0.5 : 1;
         presentDayKeys.add(dayKey);
+        addDayHalfPresence(firstHalfPresentKeys, secondHalfPresentKeys, dayKey, {
+          present: true,
+          halfDay: !isHoliday && Boolean(status.halfDay),
+          sortedLogs: sorted,
+          shift,
+        });
         presentDays += presentFraction;
         if (!isHoliday) {
           presentWorkingDays += presentFraction;
@@ -1616,22 +1631,19 @@ async function getAttendanceSummaryForRange(companyId, employeeId, startDateStr,
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
 
+    const adjacentHolidayAbsentKeys =
+      treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0
+        ? getAdjacentHolidayAbsentKeys(
+            holidaySet,
+            { firstHalfPresentKeys, secondHalfPresentKeys },
+            startStr,
+            lastDateToConsider
+          )
+        : new Set();
     let effectiveWorkingDays = workingDays;
-    if (treatHolidayAdjacentAbsenceAsWorking && holidaySet.size > 0) {
-      let holidaysCountedAsWorking = 0;
-      for (const holidayKey of holidaySet) {
-        if (holidayKey > lastDateToConsider) continue;
-        const prevKey = addDays(holidayKey, -1);
-        const nextKey = addDays(holidayKey, 1);
-        const absentPrev =
-          prevKey >= startStr && prevKey <= lastDateToConsider && !presentDayKeys.has(prevKey);
-        const absentNext =
-          nextKey >= startStr && nextKey <= lastDateToConsider && !presentDayKeys.has(nextKey);
-        if (absentPrev || absentNext) {
-          holidaysCountedAsWorking += 1;
-        }
-      }
-      effectiveWorkingDays = workingDays + holidaysCountedAsWorking;
+    if (adjacentHolidayAbsentKeys.size > 0) {
+      effectiveWorkingDays = workingDays + adjacentHolidayAbsentKeys.size;
+      markAdjacentWeeklyOffsAbsent(dayDetails, adjacentHolidayAbsentKeys);
     }
 
     let rawAbsenceDays = Math.max(0, effectiveWorkingDays - presentWorkingDays);
@@ -4189,6 +4201,7 @@ async function recalculateWeeklyPayrollFromAttendance(companyId, payrollId, opti
 
 module.exports = {
   getAdjacentHolidayAbsentKeys,
+  getWorkedHalfPresence,
   getAttendanceSummary,
   getPayrollBreakdown,
   getAttendanceSummaryForRange,

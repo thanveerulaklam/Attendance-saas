@@ -3151,7 +3151,7 @@ export default function PayrollPage() {
                   <span className="text-[11px] text-slate-700">Treat holiday as working day when adjacent day is absent</span>
                 </label>
                 <p className="text-[10px] text-slate-500">
-                  If enabled, e.g. Sunday is holiday and staff is absent Monday, both Sunday and Monday count as absent (2 days).
+                  If enabled, e.g. Sunday is holiday and staff is absent Monday, both Sunday and Monday count as absent (2 days). Also applies when the second half of the previous day or the first half of the next day is missed (weekly off + that half day count as absent).
                 </p>
               </div>
               {payrollMode === 'monthly' ? (
