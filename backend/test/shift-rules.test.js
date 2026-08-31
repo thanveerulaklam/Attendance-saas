@@ -52,7 +52,33 @@ test('2-punch IN+OUT at shift bounds is checkout, not lunch', () => {
   assert.equal(status.fullDay, true);
 });
 
-test('2-punch OUT inside lunch window is an open lunch break', () => {
+test('2-punch OUT inside lunch window is an open lunch break while the shift is live', () => {
+  const shift = dayShift({
+    breaks: [
+      {
+        name: 'Lunch',
+        allotted_minutes: 60,
+        window_start: '12:00',
+        window_end: '14:00',
+        tracking: 'punch',
+        paid: false,
+      },
+    ],
+  });
+  const nowMs = new Date(`${day}T13:30:00+05:30`).getTime();
+  const status = computeDayStatus(
+    [punch('09:00', 'in'), punch('13:00', 'out')],
+    shift,
+    day,
+    true,
+    nowMs
+  );
+  assert.equal(status.leftDuringLunch, true);
+  assert.equal(status.openBreakName, 'Lunch');
+  assert.equal(status.fullDay, false);
+});
+
+test('2-punch OUT inside lunch window on a past date is not still on break', () => {
   const shift = dayShift({
     breaks: [
       {
@@ -68,11 +94,96 @@ test('2-punch OUT inside lunch window is an open lunch break', () => {
   const status = computeDayStatus(
     [punch('09:00', 'in'), punch('13:00', 'out')],
     shift,
-    day
+    day,
+    false
   );
-  assert.equal(status.leftDuringLunch, true);
-  assert.equal(status.openBreakName, 'Lunch');
-  assert.equal(status.fullDay, false);
+  assert.equal(status.openBreakName, null);
+  assert.equal(status.leftDuringLunch, false);
+  const lunch = status.breaks.find((b) => b.name === 'Lunch');
+  assert.equal(lunch?.open, false);
+});
+
+test('2-punch OUT inside lunch window after shift end today is not still on break', () => {
+  const shift = dayShift({
+    breaks: [
+      {
+        name: 'Lunch',
+        allotted_minutes: 60,
+        window_start: '12:00',
+        window_end: '14:00',
+        tracking: 'punch',
+        paid: false,
+      },
+    ],
+  });
+  const nowMs = new Date(`${day}T19:00:00+05:30`).getTime();
+  const status = computeDayStatus(
+    [punch('09:00', 'in'), punch('13:00', 'out')],
+    shift,
+    day,
+    true,
+    nowMs
+  );
+  assert.equal(status.openBreakName, null);
+  assert.equal(status.leftDuringLunch, false);
+});
+
+test('4-punch full day with last OUT well before shift end is not an open lunch', () => {
+  const shift = dayShift({
+    startHour: 9,
+    startMinute: 30,
+    endHour: 22,
+    endMinute: 0,
+    shiftMs: 12.5 * 60 * 60 * 1000,
+    lunchMinutesAllotted: 60,
+    fullDayHours: 8,
+    halfDayHours: 4,
+    breaks: [
+      {
+        name: 'Tea Morning',
+        allotted_minutes: 15,
+        window_start: '10:30',
+        window_end: '11:30',
+        tracking: 'punch',
+        sort_order: 0,
+      },
+      {
+        name: 'Lunch',
+        allotted_minutes: 60,
+        window_start: '12:30',
+        window_end: '15:00',
+        tracking: 'punch',
+        sort_order: 1,
+      },
+      {
+        name: 'Tea Eve',
+        allotted_minutes: 15,
+        window_start: '16:00',
+        window_end: '17:00',
+        tracking: 'punch',
+        sort_order: 2,
+      },
+    ],
+  });
+  const logs = [
+    punch('09:25', 'in'),
+    punch('13:39', 'out'),
+    punch('14:17', 'in'),
+    punch('19:56', 'out'),
+  ];
+  const past = computeDayStatus(logs, shift, day, false);
+  assert.equal(past.openBreakName, null);
+  assert.equal(past.leftDuringLunch, false);
+  assert.equal(past.fullDay, true);
+  assert.equal(past.lunchMinutes, 38);
+  assert.equal(past.breaks.find((b) => b.name === 'Lunch')?.open, false);
+
+  const nowMs = new Date(`${day}T20:30:00+05:30`).getTime();
+  const live = computeDayStatus(logs, shift, day, true, nowMs);
+  assert.equal(live.openBreakName, null);
+  assert.equal(live.leftDuringLunch, false);
+  assert.equal(live.lunchMinutes, 38);
+  assert.equal(live.breaks.find((b) => b.name === 'Lunch')?.open, false);
 });
 
 test('4-punch lunch duration is the OUT→IN gap', () => {

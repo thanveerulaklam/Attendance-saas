@@ -122,6 +122,13 @@ function isCheckoutOut(outMs, shiftEndMs) {
   return outMs >= shiftEndMs - bufferMs;
 }
 
+/** Live "currently on break" only while viewing today and the shift has not ended. */
+function isLiveOpenBreakWindow(isCurrentDate, nowMs, shiftEndMs) {
+  if (!isCurrentDate) return false;
+  if (!Number.isFinite(nowMs) || !Number.isFinite(shiftEndMs)) return true;
+  return nowMs < shiftEndMs;
+}
+
 function shortestPunchBreakMinutes(breaks) {
   const punch = (breaks || []).filter(
     (b) => b.tracking === 'punch' && Number(b.allottedMinutes) > 0
@@ -230,7 +237,8 @@ function classifyBreaks({
   if (lastOut != null && currentIn == null) {
     const outMs = lastOut.getTime();
     const checkout = isCheckoutOut(outMs, shiftEndMs);
-    if (!checkout) {
+    // Past dates and after shift end: last unpaired OUT is leaving, not still on a break.
+    if (!checkout && isLiveOpenBreakWindow(isCurrentDate, nowMs, shiftEndMs)) {
       openBreak = {
         start: lastOut,
         end: null,
@@ -274,12 +282,18 @@ function classifyBreaks({
   if (openBreak) {
     const fakeGap = { startMs: openBreak.startMs };
     const matched = matchGapToBreak(fakeGap, breaks, shiftStartMs, used);
-    const row = matched
-      ? byKey(matched) || breakResults.find((r) => r.name === matched.name)
-      : breakResults.find((r) => r.tracking === 'punch') || breakResults[0];
-    if (row) {
-      row.open = true;
-      row.matched = true;
+    // Only mark an open break when the OUT matches a remaining punch window.
+    // An unmatched last OUT is checkout / left early — do not fall back to Lunch.
+    if (matched) {
+      const row = byKey(matched) || breakResults.find((r) => r.name === matched.name);
+      if (row) {
+        row.open = true;
+        row.matched = true;
+      } else {
+        openBreak = null;
+      }
+    } else {
+      openBreak = null;
     }
   }
 
@@ -294,9 +308,9 @@ function classifyBreaks({
   const lunchRow =
     breakResults.find((r) => String(r.name).toLowerCase() === 'lunch') || breakResults[0] || null;
   const openBreakName = breakResults.find((r) => r.open)?.name || null;
-  const leftDuringLunch =
-    Boolean(openBreakName && String(openBreakName).toLowerCase() === 'lunch') ||
-    (Boolean(openBreak) && !openBreakName);
+  const leftDuringLunch = Boolean(
+    openBreakName && String(openBreakName).toLowerCase() === 'lunch'
+  );
 
   return {
     breaks: breakResults.map(({ matched, ...rest }) => rest),

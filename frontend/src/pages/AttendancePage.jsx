@@ -52,7 +52,8 @@ function isLeftAtLunchStatus(row) {
   return Boolean(row?.present && row?.left_during_lunch && !row?.full_day);
 }
 
-function isOnBreakStatus(row) {
+function isOnBreakStatus(row, live = true) {
+  if (!live) return false;
   if (row?.open_break_name) return true;
   return isLeftAtLunchStatus(row);
 }
@@ -82,12 +83,12 @@ function collectBreakColumnNames(rows) {
   return names;
 }
 
-function formatBreakCell(row, breakName) {
+function formatBreakCell(row, breakName, live = true) {
   const key = String(breakName || '').toLowerCase();
   const list = Array.isArray(row.breaks) ? row.breaks : [];
   const matched = list.find((x) => String(x?.name || '').toLowerCase() === key);
   const openKey = String(row.open_break_name || '').toLowerCase();
-  if (matched?.open || openKey === key) {
+  if (live && (matched?.open || openKey === key)) {
     return {
       text: `On ${String(matched?.name || breakName).toLowerCase()}`,
       cls: 'text-violet-600',
@@ -455,10 +456,12 @@ export default function AttendancePage() {
     const shiftPending = dailyData.filter((r) => r.shift_pending).length;
     const late = dailyData.filter((r) => r.late).length;
     const fullDay = dailyData.filter((r) => r.full_day).length;
-    const leftDuringLunch = dailyData.filter((r) => isLeftAtLunchStatus(r)).length;
-    const onBreak = dailyData.filter(
-      (r) => isOnBreakStatus(r) || isLeftAtLunchStatus(r)
-    ).length;
+    const leftDuringLunch = isTodaySelected
+      ? dailyData.filter((r) => isLeftAtLunchStatus(r)).length
+      : 0;
+    const onBreak = isTodaySelected
+      ? dailyData.filter((r) => isOnBreakStatus(r, true) || isLeftAtLunchStatus(r)).length
+      : 0;
     return {
       present,
       shiftPending,
@@ -913,13 +916,13 @@ export default function AttendancePage() {
                         })
                       : '—';
                     const isHoursBased = row.attendance_mode === 'hours_based';
-                    const onBreakNow = isOnBreakStatus(row);
+                    const onBreakNow = isOnBreakStatus(row, isTodaySelected);
                     let dayStatus = 'Absent';
                     if (row.shift_pending) dayStatus = 'Shift not started';
                     else if (row.present) {
                       if (row.full_day) dayStatus = 'Full day';
                       else if (onBreakNow) dayStatus = breakStatusLabel(row);
-                      else if (isLeftAtLunchStatus(row)) dayStatus = breakStatusLabel(row);
+                      else if (isTodaySelected && isLeftAtLunchStatus(row)) dayStatus = breakStatusLabel(row);
                       else dayStatus = 'Present';
                     }
                     if (row.late && (dayStatus === 'Present' || dayStatus === 'Full day')) {
@@ -966,7 +969,9 @@ export default function AttendancePage() {
                           : 'On time';
                       firstPunchLabel = `First punch: ${timeStr} — ${lateStr}`;
                     }
-                    const breakCells = breakColumns.map((name) => formatBreakCell(row, name));
+                    const breakCells = breakColumns.map((name) =>
+                      formatBreakCell(row, name, isTodaySelected)
+                    );
                     const totalHoursNum = Number(row.total_hours_from_shift_start ?? 0);
                     const totalHoursDisplay =
                       row.present || totalHoursNum > 0 ? formatWorkedHours(totalHoursNum) : '—';
@@ -1347,10 +1352,10 @@ export default function AttendancePage() {
                 {(dailyData || [])
                   .filter((r) => r.present)
                   .map((row) => {
-                    const onBreakNow = isOnBreakStatus(row);
+                    const onBreakNow = isOnBreakStatus(row, isTodaySelected);
                     const status = row.full_day
                       ? 'Full day'
-                      : onBreakNow || row.left_during_lunch || row.open_break_name
+                      : onBreakNow
                         ? breakStatusLabel(row)
                         : 'Present';
                     const statusWithLate = row.late ? `${status} (late)` : status;
@@ -1466,7 +1471,7 @@ export default function AttendancePage() {
             <div className="flex-1 overflow-y-auto px-5 py-4 max-h-64">
               <ul className="space-y-2">
                 {(dailyData || [])
-                  .filter((r) => isOnBreakStatus(r) || isLeftAtLunchStatus(r))
+                  .filter((r) => isOnBreakStatus(r, isTodaySelected))
                   .map((row) => {
                     const punches = row.punches || [];
                     const firstIn = punches
