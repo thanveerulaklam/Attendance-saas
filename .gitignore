@@ -6,6 +6,7 @@ node_modules/
 .env.local
 .env.*.local
 employee-mobile/.env
+admin-mobile/.env
 
 # Build output
 frontend/dist/
@@ -13,11 +14,16 @@ dist/
 employee-mobile/android/
 employee-mobile/ios/
 employee-mobile/.expo/
+admin-mobile/android/
+admin-mobile/ios/
+admin-mobile/.expo/
 
 # Kiosk APK binary (place after EAS build; do not commit large binaries)
 backend/downloads/*.apk
 employee-mobile/credentials/*.keystore
 employee-mobile/credentials/*.jks
+admin-mobile/credentials/*.keystore
+admin-mobile/credentials/*.jks
 
 # Logs and temp
 *.log
@@ -35,3 +41,4 @@ backups/
 *.local
 terminal_logs.txt
 employee-mobile/.claude/
+admin-mobile/.claude/

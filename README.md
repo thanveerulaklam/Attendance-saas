@@ -44,19 +44,13 @@ Set `ADMIN_APPROVAL_SECRET` in `backend/.env` (see `.env.example`). Keep it secr
 ```
 attendance-saas/
 ├── backend/
-│   ├── src/
-│   │   ├── config/      # DB and app config
-│   │   ├── controllers/
-│   │   ├── middleware/
-│   │   ├── routes/
-│   │   ├── services/
-│   │   ├── utils/
-│   │   └── app.js
-│   ├── server.js
-│   └── package.json
 ├── frontend/
+├── employee-mobile/   # PunchPay Kiosk (office tablet)
+├── admin-mobile/      # PunchPay Admin (iOS + Android)
 └── README.md
 ```
+
+Admin phone app: `cd admin-mobile && npm start` — see [admin-mobile/README.md](admin-mobile/README.md).
 
 ## Backend setup
 

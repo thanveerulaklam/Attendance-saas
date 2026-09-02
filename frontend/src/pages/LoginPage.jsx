@@ -1800,6 +1800,7 @@ export default function LoginPage() {
         </div>
         <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', paddingTop:20, textAlign:'center', fontSize:11, color:'rgba(255,255,255,0.2)' }}>
           Made with ❤️ in Tamil Nadu 🇮🇳 &nbsp;·&nbsp; Punch பண்ணு. Salary பாரு.
+          &nbsp;·&nbsp; <a href="/privacy" style={{ color:'rgba(255,255,255,0.45)' }}>Privacy Policy</a>
         </div>
       </footer>
 

@@ -75,7 +75,10 @@ export default function ToolPageLayout({
 
       <footer className="border-t border-slate-200 bg-white">
         <div className="mx-auto w-full max-w-6xl px-4 py-4 text-center text-xs text-slate-500">
-          © 2025 PunchPay | punchpay.in | Free HR Tools for Indian Businesses
+          © 2025 PunchPay | punchpay.in |{' '}
+          <Link to="/privacy" className="underline hover:text-slate-700">
+            Privacy Policy
+          </Link>
         </div>
       </footer>
     </div>

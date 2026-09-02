@@ -24,6 +24,7 @@ import PayslipGenerator from './pages/tools/PayslipGenerator';
 import PayrollCostCalculator from './pages/tools/PayrollCostCalculator';
 import MobileQrDisplayPage from './pages/MobileQrDisplayPage';
 import MobilePunchAttemptsPage from './pages/MobilePunchAttemptsPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 
 function RootRedirect() {
   const { isAuthenticated, loading } = useAuth();
@@ -38,6 +39,7 @@ function App() {
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/tools" element={<ToolsHomePage />} />
