@@ -20,6 +20,10 @@ const {
   classifyBreaks,
   computeWindowOvertimeMs,
   normalizeOvertimeWindow,
+  parseDayTimeOverrides,
+  applyShiftConfigForDate,
+  shiftConfigHasOvernight,
+  shiftClockDuration,
 } = require('../utils/shiftRules');
 
 async function withCompanyIdTimezone(companyId, fn) {
@@ -94,14 +98,9 @@ function parseAttendanceMode(row) {
 }
 
 function rowToShiftConfig(row) {
-  const [startHour, startMinute] = row.start_time.split(':').map(Number);
-  const [endHour, endMinute] = row.end_time.split(':').map(Number);
-  const startMin = startHour * 60 + startMinute;
-  const endMin = endHour * 60 + endMinute;
-  const isOvernightClock = endMin < startMin;
-  const shiftMinutes =
-    endMin >= startMin ? endMin - startMin : 24 * 60 + endMin - startMin;
-  const shiftMs = shiftMinutes * 60 * 1000;
+  const [startHour, startMinute] = String(row.start_time).split(':').map(Number);
+  const [endHour, endMinute] = String(row.end_time).split(':').map(Number);
+  const { isOvernightClock, shiftMs } = shiftClockDuration(startHour, startMinute, endHour, endMinute);
   const graceMs = Number(row.grace_minutes || 0) * 60 * 1000;
   const lunchMinutesAllotted = Number(row.lunch_minutes) >= 0 ? Number(row.lunch_minutes) : 60;
   const attendanceMode = parseAttendanceMode(row);
@@ -142,6 +141,11 @@ function rowToShiftConfig(row) {
       : 'per_hour',
     overtimeWindow: normalizeOvertimeWindow(row.overtime_window),
     breaks: Array.isArray(row.breaks) ? row.breaks : [],
+    dayTimeOverrides: parseDayTimeOverrides(row.day_time_overrides),
+    defaultStartHour: startHour,
+    defaultStartMinute: startMinute,
+    defaultEndHour: endHour,
+    defaultEndMinute: endMinute,
   };
 }
 
@@ -168,13 +172,14 @@ function getFullDayMinimumWorkMs(shiftConfig) {
  */
 function isShiftNotStartedYet(shiftConfig, calendarDateStr, nowMs = Date.now()) {
   if (!shiftConfig || shiftConfig.startHour == null) return false;
+  const dayShift = applyShiftConfigForDate(shiftConfig, calendarDateStr);
   const [y, mo, dd] = calendarDateStr.split('-').map(Number);
   const shiftStartMs = getShiftStartMsForDate(
     y,
     mo,
     dd,
-    shiftConfig.startHour,
-    shiftConfig.startMinute
+    dayShift.startHour,
+    dayShift.startMinute
   );
   return nowMs < shiftStartMs;
 }
@@ -185,16 +190,17 @@ function isShiftNotStartedYet(shiftConfig, calendarDateStr, nowMs = Date.now()) 
  */
 function attributedShiftStartDateStr(punchTime, shiftConfig) {
   const istYmd = ymdFromDate(punchTime);
-  const mode = String(shiftConfig.attendanceMode || '').toLowerCase();
+  const dayShift = applyShiftConfigForDate(shiftConfig, istYmd);
+  const mode = String(dayShift.attendanceMode || '').toLowerCase();
   if (
-    !shiftConfig.isOvernightClock ||
+    !dayShift.isOvernightClock ||
     (mode !== 'shift_based' && mode !== 'hours_based')
   ) {
     return istYmd;
   }
   const mins = companyMinutesFromMidnight(punchTime);
-  const startMin = shiftConfig.startHour * 60 + shiftConfig.startMinute;
-  const endMin = shiftConfig.endHour * 60 + shiftConfig.endMinute;
+  const startMin = dayShift.startHour * 60 + dayShift.startMinute;
+  const endMin = dayShift.endHour * 60 + dayShift.endMinute;
   if (mins >= startMin) {
     return istYmd;
   }
@@ -212,7 +218,7 @@ function attributedShiftStartDateStr(punchTime, shiftConfig) {
 async function getShiftConfig(companyId) {
   const result = await pool.query(
     `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime,
-            late_deduction_mode, overtime_pay_mode, overtime_window
+            late_deduction_mode, overtime_pay_mode, overtime_window, day_time_overrides
      FROM shifts
      WHERE company_id = $1
      ORDER BY id
@@ -234,7 +240,7 @@ async function getShiftConfigById(shiftId) {
   if (!shiftId) return null;
   const result = await pool.query(
     `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours, allow_overtime,
-            late_deduction_mode, overtime_pay_mode, overtime_window
+            late_deduction_mode, overtime_pay_mode, overtime_window, day_time_overrides
      FROM shifts WHERE id = $1`,
     [shiftId]
   );
@@ -254,7 +260,7 @@ async function getShiftConfigMap(companyId, shiftIds) {
   if (uniqueIds.length === 0) return map;
   const result = await pool.query(
     `SELECT id, start_time, end_time, grace_minutes, lunch_minutes, attendance_mode, required_hours_per_day, half_day_hours, full_day_hours,
-            allow_overtime, late_deduction_mode, overtime_pay_mode, overtime_window
+            allow_overtime, late_deduction_mode, overtime_pay_mode, overtime_window, day_time_overrides
      FROM shifts WHERE id = ANY($1::bigint[])`,
     [uniqueIds]
   );
@@ -313,6 +319,7 @@ function computeWorkedMsFromShiftStartToNow(
 ) {
   if (!Array.isArray(dayLogs) || dayLogs.length === 0) return 0;
 
+  shiftConfig = applyShiftConfigForDate(shiftConfig, calendarDateStr);
   const [y, mo, dd] = calendarDateStr.split('-').map(Number);
   const shiftStartMs = getShiftStartMsForDate(
     y,
@@ -626,6 +633,7 @@ function computeDayStatus(
   isCurrentDate = false,
   nowMs = Date.now()
 ) {
+  shiftConfig = applyShiftConfigForDate(shiftConfig, calendarDateStr);
   const empty = emptyDayStatus(shiftConfig);
 
   if (!dayLogs.length) {
@@ -790,6 +798,7 @@ function computeHoursBasedDayStatus(
   isCurrentDate,
   nowMs
 ) {
+  shiftConfig = applyShiftConfigForDate(shiftConfig, calendarDateStr);
   const empty = {
     ...emptyDayStatus({ ...shiftConfig, lunchMinutesAllotted: 0 }),
     lunchMinutesAllotted: 0,
@@ -994,7 +1003,7 @@ async function getDailyAttendance(
     const needOvernightNextDay = Array.from(shiftConfigMap.values()).some(
       (c) =>
         c &&
-        c.isOvernightClock &&
+        shiftConfigHasOvernight(c) &&
         (c.attendanceMode === 'shift_based' || c.attendanceMode === 'hours_based')
     );
     const nextDayStr = addDaysYmd(dateStr, 1);
@@ -1042,8 +1051,10 @@ async function getDailyAttendance(
     return employees.map((emp) => {
       const effectiveShiftId = effectiveShiftIds.get(Number(emp.id)) ?? emp.shift_id;
       const shiftIdKey = effectiveShiftId != null ? Number(effectiveShiftId) : null;
-      const shiftConfig =
-        shiftConfigMap.get(shiftIdKey) || shiftConfigMap.get(null);
+      const shiftConfig = applyShiftConfigForDate(
+        shiftConfigMap.get(shiftIdKey) || shiftConfigMap.get(null),
+        dateStr
+      );
       let rawDayLogs = logsByEmployee.get(emp.id) || [];
       if (
         shiftConfig.isOvernightClock &&
@@ -1224,7 +1235,7 @@ async function getMonthlyAttendance(
     const needOvernightExtension = Array.from(shiftConfigMap.values()).some(
       (c) =>
         c &&
-        c.isOvernightClock &&
+        shiftConfigHasOvernight(c) &&
         (c.attendanceMode === 'shift_based' || c.attendanceMode === 'hours_based')
     );
     const rangeStart = needOvernightExtension
@@ -1529,7 +1540,10 @@ async function addManualFullDay(companyId, { employeeId, date }, allowedBranchId
     const branchId = Number(empCheck.rows[0].branch_id);
     const employeeShiftId = empCheck.rows[0].shift_id;
     // Use employee's assigned shift timings; fallback to company default shift.
-    const shiftConfig = (await getShiftConfigById(employeeShiftId)) || (await getShiftConfig(companyId));
+    const shiftConfig = applyShiftConfigForDate(
+      (await getShiftConfigById(employeeShiftId)) || (await getShiftConfig(companyId)),
+      `${y}-${String(month).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`
+    );
 
     // Use local time (not UTC) so 9 AM stays 9 AM in display when server is in company timezone.
     const inTime = new Date(year, month - 1, dayNum, shiftConfig.startHour, shiftConfig.startMinute, 0);

@@ -1,6 +1,8 @@
 const { pool } = require('../config/database');
 const {
   parseBreaksInput,
+  parseDayTimeOverridesInput,
+  parseTimeToMinutes,
   normalizeLateMode,
   normalizeOvertimePayMode,
   normalizeOvertimeWindow,
@@ -148,6 +150,7 @@ const SHIFT_COLUMNS = `
        overtime_rate_mode,
        overtime_pay_mode,
        overtime_window,
+       day_time_overrides,
        created_at`;
 
 async function fetchCompanyShiftPolicy(companyId) {
@@ -273,9 +276,10 @@ async function createShift(companyId, data) {
          overtime_rate_per_hour,
          overtime_rate_mode,
          overtime_pay_mode,
-         overtime_window
+         overtime_window,
+         day_time_overrides
        )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
        RETURNING ${SHIFT_COLUMNS}`,
       [
         companyId,
@@ -302,6 +306,7 @@ async function createShift(companyId, data) {
         parsedForDb.overtimeRateMode,
         parsedForDb.overtimePayMode,
         parsedForDb.overtimeWindow,
+        parsedForDb.dayTimeOverrides || {},
       ]
     );
     const created = result.rows[0];
@@ -318,9 +323,22 @@ async function createShift(companyId, data) {
 }
 
 function resolveBreaksForSave(parsed) {
-  if (Array.isArray(parsed.breaks) && parsed.breaks.length > 0) {
+  if (parsed.breaksProvided === true) {
     const lunch = lunchFieldsFromBreaks(parsed.breaks);
-    return { breaks: parsed.breaks, ...lunch };
+    return {
+      breaks: parsed.breaks || [],
+      lunchMinutes: parsed.noLunch ? 0 : lunch.lunchMinutes,
+      lunchOverDeductionMinutes: parsed.noLunch ? 0 : lunch.lunchOverDeductionMinutes,
+      lunchOverDeductionAmount: parsed.noLunch ? 0 : lunch.lunchOverDeductionAmount,
+    };
+  }
+  if (parsed.noLunch || Number(parsed.lunchMinutes) === 0) {
+    return {
+      breaks: [],
+      lunchMinutes: 0,
+      lunchOverDeductionMinutes: 0,
+      lunchOverDeductionAmount: 0,
+    };
   }
   const breaks = defaultBreaksFromLunchFields(parsed);
   return {
@@ -395,19 +413,25 @@ function parseShiftData(data) {
     ? data.weekly_off_days.map((d) => Number(d)).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
     : [];
   const uniqueWeeklyOff = [...new Set(weeklyOffDays)];
-  const breaks = parseBreaksInput(data.breaks);
+  const breaksProvided = Array.isArray(data.breaks);
+  const noLunch = data.has_lunch === false || data.no_lunch === true;
+  let breaks = parseBreaksInput(data.breaks);
+  if (noLunch) {
+    breaks = breaks.filter((b) => String(b.name || '').toLowerCase() !== 'lunch');
+  }
+  const dayTimeOverrides = parseDayTimeOverridesInput(data.day_time_overrides);
   return {
     name,
     startTime,
     endTime,
     graceMinutes,
-    lunchMinutes,
+    lunchMinutes: noLunch ? 0 : lunchMinutes,
     uniqueWeeklyOff,
     lateDeductionMinutes,
     lateDeductionAmount,
     lateDeductionMode,
-    lunchOverDeductionMinutes,
-    lunchOverDeductionAmount,
+    lunchOverDeductionMinutes: noLunch ? 0 : lunchOverDeductionMinutes,
+    lunchOverDeductionAmount: noLunch ? 0 : lunchOverDeductionAmount,
     noLeaveIncentive,
     paidLeaveDays,
     attendanceMode,
@@ -421,7 +445,25 @@ function parseShiftData(data) {
     overtimePayMode,
     overtimeWindow,
     breaks,
+    breaksProvided,
+    noLunch,
+    dayTimeOverrides,
   };
+}
+
+function assertDayBasedSameCalendarDay(startTime, endTime, label) {
+  const startMin = parseTimeToMinutes(startTime);
+  const endMin = parseTimeToMinutes(endTime);
+  if (startMin == null || endMin == null) return;
+  if (endMin < startMin) {
+    const err = new Error(
+      label
+        ? `${label}: day-based shift must end on the same calendar day after start time.`
+        : 'Day-based shift must end on the same calendar day after start time.'
+    );
+    err.statusCode = 400;
+    throw err;
+  }
 }
 
 function validateShiftTimes(parsed) {
@@ -437,6 +479,14 @@ function validateShiftTimes(parsed) {
     );
     err.statusCode = 400;
     throw err;
+  }
+  if (attendanceMode === 'day_based' && parsed.dayTimeOverrides) {
+    const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    for (const [key, ov] of Object.entries(parsed.dayTimeOverrides)) {
+      const start = ov.start_time || parsed.startTime;
+      const end = ov.end_time || parsed.endTime;
+      assertDayBasedSameCalendarDay(start, end, weekdayNames[Number(key)] || `Weekday ${key}`);
+    }
   }
   if (attendanceMode === 'day_based') {
     const half = Number(parsed.halfDayHours);
@@ -507,8 +557,9 @@ async function updateShift(companyId, shiftId, data) {
          overtime_rate_per_hour = $21,
          overtime_rate_mode = $22,
          overtime_pay_mode = $23,
-         overtime_window = $24
-       WHERE company_id = $1 AND id = $25
+         overtime_window = $24,
+         day_time_overrides = $25
+       WHERE company_id = $1 AND id = $26
        RETURNING ${SHIFT_COLUMNS}`,
       [
         companyId,
@@ -535,6 +586,7 @@ async function updateShift(companyId, shiftId, data) {
         parsedForDb.overtimeRateMode,
         parsedForDb.overtimePayMode,
         parsedForDb.overtimeWindow,
+        parsedForDb.dayTimeOverrides || {},
         shiftId,
       ]
     );

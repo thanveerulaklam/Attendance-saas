@@ -1,4 +1,5 @@
 const { addDaysYmd, getShiftStartMsForDate } = require('./companyDate');
+const { applyShiftConfigForDate } = require('./shiftRules');
 
 /** Minimum worked time inside a shift half to count that half as present. */
 const MIN_HALF_PRESENCE_MS = 15 * 60 * 1000;
@@ -24,17 +25,18 @@ function overlapMs(segStart, segEnd, winStart, winEnd) {
  * e.g. 09:30–18:30 with 60 min lunch → first half 09:30–13:30, second half 14:30–18:30.
  */
 function getShiftHalfBoundsMs(shiftConfig, dayKey) {
+  const dayShift = applyShiftConfigForDate(shiftConfig, dayKey);
   const { y, m, d } = parseYmd(dayKey);
   const shiftStartMs = getShiftStartMsForDate(
     y,
     m,
     d,
-    shiftConfig?.startHour,
-    shiftConfig?.startMinute
+    dayShift?.startHour,
+    dayShift?.startMinute
   );
-  const shiftMs = Number(shiftConfig?.shiftMs || 0);
+  const shiftMs = Number(dayShift?.shiftMs || 0);
   const shiftEndMs = shiftStartMs + shiftMs;
-  const lunchMs = Math.max(0, Number(shiftConfig?.lunchMinutesAllotted || 0) * 60 * 1000);
+  const lunchMs = Math.max(0, Number(dayShift?.lunchMinutesAllotted || 0) * 60 * 1000);
   const netWorkMs = Math.max(0, shiftMs - lunchMs);
   const firstHalfEndMs = shiftStartMs + netWorkMs / 2;
   const secondHalfStartMs = firstHalfEndMs + lunchMs;

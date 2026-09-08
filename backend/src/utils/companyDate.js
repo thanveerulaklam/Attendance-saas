@@ -146,6 +146,13 @@ function minutesFromMidnight(d, timezone = getActiveCompanyTimezone()) {
   return hour * 60 + minute;
 }
 
+/** Weekday 0=Sunday..6=Saturday for a YYYY-MM-DD calendar date (UTC date parts). */
+function weekdayFromYmd(ymd) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '').trim());
+  if (!m) return null;
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+}
+
 function getShiftStartMsForDate(year, month, day, startHour, startMinute, timezone = getActiveCompanyTimezone()) {
   const ymd = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   const offset = formatOffsetForInstant(timezone, new Date(`${ymd}T12:00:00Z`));
@@ -172,4 +179,5 @@ module.exports = {
   formatAdmsStamp,
   minutesFromMidnight,
   getShiftStartMsForDate,
+  weekdayFromYmd,
 };

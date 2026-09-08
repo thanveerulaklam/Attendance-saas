@@ -8,6 +8,8 @@ const {
   computeOverstayDeduction,
   computeWindowOvertimeMs,
   isLateDayEligible,
+  resolveBreaks,
+  applyShiftConfigForDate,
 } = require('../src/utils/shiftRules');
 const { computeDayStatus } = require('../src/services/attendanceService');
 
@@ -406,4 +408,27 @@ test('computeWindowOvertimeMs returns null for total_extra so callers keep the l
     ),
     null
   );
+});
+
+test('no lunch: allotted 0 and empty breaks do not invent a Lunch break', () => {
+  const breaks = resolveBreaks({ lunchMinutesAllotted: 0, breaks: [] });
+  assert.deepEqual(breaks, []);
+});
+
+test('no lunch: an OUT→IN gap is not classified as lunch', () => {
+  const shift = dayShift({ lunchMinutesAllotted: 0, breaks: [] });
+  const status = computeDayStatus(
+    [
+      punch('09:00', 'in'),
+      punch('13:00', 'out'),
+      punch('14:00', 'in'),
+      punch('18:00', 'out'),
+    ],
+    shift,
+    day
+  );
+  assert.equal(status.lunchMinutesAllotted, 0);
+  assert.equal(status.lunchMinutes, null);
+  assert.equal(status.leftDuringLunch, false);
+  assert.equal((status.breaks || []).length, 0);
 });

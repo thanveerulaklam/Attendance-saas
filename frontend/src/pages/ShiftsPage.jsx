@@ -46,6 +46,13 @@ function sanitizeShiftBody(form, shiftPayloadCompact) {
   body.full_day_hours = Number.isFinite(fullDayNum) ? fullDayNum : 0;
   const halfDayNum = Number(body.half_day_hours);
   body.half_day_hours = Number.isFinite(halfDayNum) ? halfDayNum : 0;
+  const hasLunch = body.has_lunch !== false;
+  body.has_lunch = hasLunch;
+  if (!hasLunch) {
+    body.lunch_minutes = 0;
+    body.lunch_over_deduction_minutes = 0;
+    body.lunch_over_deduction_amount = 0;
+  }
   if (shiftPayloadCompact) {
     // Compact (hours-based focused) companies should not silently inherit a 60-minute lunch default.
     if (body.attendance_mode === 'hours_based' && !Number.isFinite(Number(body.lunch_minutes))) {
@@ -65,19 +72,37 @@ function sanitizeShiftBody(form, shiftPayloadCompact) {
     body.overtime_window = 'total_extra';
   }
   if (Array.isArray(body.breaks)) {
-    body.breaks = body.breaks.map((b, i) => ({
-      name: b.name,
-      allotted_minutes: Number(b.allotted_minutes || 0),
-      window_start: b.window_start || null,
-      window_end: b.window_end || null,
-      tracking: b.tracking || 'punch',
-      paid: b.paid === true,
-      over_deduction_mode: shiftPayloadCompact ? 'none' : (b.over_deduction_mode || 'none'),
-      over_deduction_amount: shiftPayloadCompact ? 0 : Number(b.over_deduction_amount || 0),
-      over_deduction_minutes: shiftPayloadCompact ? 0 : Number(b.over_deduction_minutes || 0),
-      sort_order: i,
-    }));
+    body.breaks = body.breaks
+      .filter((b) => hasLunch || String(b.name || '').toLowerCase() !== 'lunch')
+      .map((b, i) => ({
+        name: b.name,
+        allotted_minutes: Number(b.allotted_minutes || 0),
+        window_start: b.window_start || null,
+        window_end: b.window_end || null,
+        tracking: b.tracking || 'punch',
+        paid: b.paid === true,
+        over_deduction_mode: shiftPayloadCompact ? 'none' : (b.over_deduction_mode || 'none'),
+        over_deduction_amount: shiftPayloadCompact ? 0 : Number(b.over_deduction_amount || 0),
+        over_deduction_minutes: shiftPayloadCompact ? 0 : Number(b.over_deduction_minutes || 0),
+        sort_order: i,
+      }));
   }
+  const overrides = body.day_time_overrides && typeof body.day_time_overrides === 'object' ? body.day_time_overrides : {};
+  body.day_time_overrides = Object.fromEntries(
+    Object.entries(overrides)
+      .filter(([k, v]) => {
+        const day = Number(k);
+        return Number.isInteger(day) && day >= 0 && day <= 6 && v && typeof v === 'object';
+      })
+      .map(([k, v]) => [
+        String(Number(k)),
+        {
+          start_time: v.start_time || null,
+          end_time: v.end_time || null,
+        },
+      ])
+      .filter(([, v]) => v.start_time || v.end_time)
+  );
   return body;
 }
 
@@ -124,8 +149,220 @@ function breaksFromShift(shift, compact) {
   ];
 }
 
+function shiftHasLunch(shift) {
+  const breaks = Array.isArray(shift?.breaks) ? shift.breaks : [];
+  const lunch = breaks.find((b) => String(b.name || '').toLowerCase() === 'lunch');
+  if (lunch) return Number(lunch.allotted_minutes || 0) > 0;
+  if (breaks.length > 0) return false;
+  return Number(shift?.lunch_minutes || 0) > 0;
+}
+
+function normalizeDayTimeOverrides(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const day = Number(key);
+    if (!Number.isInteger(day) || day < 0 || day > 6 || !value || typeof value !== 'object') continue;
+    out[String(day)] = {
+      start_time: value.start_time ? String(value.start_time).slice(0, 5) : '',
+      end_time: value.end_time ? String(value.end_time).slice(0, 5) : '',
+    };
+  }
+  return out;
+}
+
+function formatDayTimeOverrideLines(shift) {
+  const ov = normalizeDayTimeOverrides(shift?.day_time_overrides);
+  return Object.entries(ov)
+    .map(([key, value]) => {
+      const d = Number(key);
+      const start = (value.start_time || String(shift.start_time || '').slice(0, 5));
+      const end = (value.end_time || String(shift.end_time || '').slice(0, 5));
+      return `${WEEKDAY_LABELS[d].slice(0, 3)} ${start}–${end}`;
+    });
+}
+
+function setHasLunch(setForm, enabled, compact) {
+  setForm((prev) => {
+    if (enabled) {
+      const breaks = [...(prev.breaks || [])];
+      const hasLunchNamed = breaks.some((b) => String(b.name || '').toLowerCase() === 'lunch');
+      const allotted = compact ? Number(prev.lunch_minutes || 0) || 60 : 60;
+      if (!hasLunchNamed) {
+        breaks.unshift(emptyBreak({ allotted_minutes: allotted }));
+      }
+      const lunch = breaks.find((b) => String(b.name || '').toLowerCase() === 'lunch');
+      const next = {
+        ...prev,
+        has_lunch: true,
+        breaks,
+        lunch_minutes: Number(lunch?.allotted_minutes || allotted),
+      };
+      if (compact && next.attendance_mode === 'hours_based') {
+        const spanMinutes = getShiftSpanMinutes(next.start_time, next.end_time, next.attendance_mode);
+        if (Number.isFinite(spanMinutes)) {
+          const lunchMin = clampNumber(Number(next.lunch_minutes) || 0, 0, spanMinutes);
+          next.lunch_minutes = lunchMin;
+          next.required_hours_per_day = Number(((spanMinutes - lunchMin) / 60).toFixed(2));
+          syncLunchMinutesIntoBreaks(next);
+        }
+      }
+      return next;
+    }
+    const breaks = (prev.breaks || []).filter((b) => String(b.name || '').toLowerCase() !== 'lunch');
+    const next = {
+      ...prev,
+      has_lunch: false,
+      lunch_minutes: 0,
+      lunch_over_deduction_minutes: 0,
+      lunch_over_deduction_amount: 0,
+      breaks,
+    };
+    if (compact && next.attendance_mode === 'hours_based') {
+      const spanMinutes = getShiftSpanMinutes(next.start_time, next.end_time, next.attendance_mode);
+      if (Number.isFinite(spanMinutes)) {
+        next.required_hours_per_day = Number((spanMinutes / 60).toFixed(2));
+      }
+    }
+    return next;
+  });
+}
+
+function LunchOption({ form, setForm, compact, disabled }) {
+  const hasLunch = form.has_lunch !== false;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+      <p className="text-[11px] font-medium text-slate-700">Lunch break</p>
+      <p className="text-[10px] text-slate-500">
+        Choose no lunch if this company does not give a meal break.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        <label className="inline-flex items-start gap-2 cursor-pointer">
+          <input
+            type="radio"
+            checked={hasLunch}
+            disabled={disabled}
+            onChange={() => setHasLunch(setForm, true, compact)}
+            className="mt-0.5 text-primary-600"
+          />
+          <span className="text-[11px] text-slate-700">
+            <span className="font-medium">Has lunch</span>
+            <span className="block text-[10px] text-slate-500">Allotted minutes are deducted from worked hours.</span>
+          </span>
+        </label>
+        <label className="inline-flex items-start gap-2 cursor-pointer">
+          <input
+            type="radio"
+            checked={!hasLunch}
+            disabled={disabled}
+            onChange={() => setHasLunch(setForm, false, compact)}
+            className="mt-0.5 text-primary-600"
+          />
+          <span className="text-[11px] text-slate-700">
+            <span className="font-medium">No lunch</span>
+            <span className="block text-[10px] text-slate-500">No meal break. Tea or other short breaks can still be added.</span>
+          </span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function DayTimeOverridesEditor({ form, setForm, disabled }) {
+  const overrides = form.day_time_overrides && typeof form.day_time_overrides === 'object' ? form.day_time_overrides : {};
+  const weeklyOff = new Set(form.weekly_off_days || []);
+  const toggleDay = (dayNum, enabled) => {
+    setForm((prev) => {
+      const next = { ...(prev.day_time_overrides || {}) };
+      if (enabled) {
+        next[String(dayNum)] = {
+          start_time: prev.start_time,
+          end_time: prev.end_time,
+        };
+      } else {
+        delete next[String(dayNum)];
+      }
+      return { ...prev, day_time_overrides: next };
+    });
+  };
+  const updateDay = (dayNum, field, value) => {
+    setForm((prev) => {
+      const next = { ...(prev.day_time_overrides || {}) };
+      const cur = {
+        start_time: prev.start_time,
+        end_time: prev.end_time,
+        ...(next[String(dayNum)] || {}),
+      };
+      cur[field] = value;
+      next[String(dayNum)] = cur;
+      return { ...prev, day_time_overrides: next };
+    });
+  };
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
+      <p className="text-[11px] font-medium text-slate-700">Different hours on some weekdays</p>
+      <p className="text-[10px] text-slate-500">
+        Example: a shop that opens 11:00 on Sunday and 09:30 the rest of the week.
+      </p>
+      <div className="space-y-1.5">
+        {WEEKDAY_LABELS.map((label, dayNum) => {
+          const key = String(dayNum);
+          const enabled = Boolean(overrides[key]);
+          const row = overrides[key] || {};
+          const isOff = weeklyOff.has(dayNum);
+          return (
+            <div
+              key={dayNum}
+              className={`rounded-md border px-2 py-1.5 ${
+                enabled ? 'border-primary-200 bg-primary-50/40' : 'border-slate-100 bg-slate-50/50'
+              }`}
+            >
+              <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enabled}
+                  disabled={disabled}
+                  onChange={(e) => toggleDay(dayNum, e.target.checked)}
+                  className="rounded border-slate-300 text-primary-600"
+                />
+                <span className="text-[11px] font-medium text-slate-700">{label}</span>
+                {isOff && <span className="text-[10px] text-slate-400">(weekly off)</span>}
+              </label>
+              {enabled && (
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-slate-500">Start</label>
+                    <input
+                      type="time"
+                      value={row.start_time || form.start_time}
+                      disabled={disabled}
+                      onChange={(e) => updateDay(dayNum, 'start_time', e.target.value)}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500">End</label>
+                    <input
+                      type="time"
+                      value={row.end_time || form.end_time}
+                      disabled={disabled}
+                      onChange={(e) => updateDay(dayNum, 'end_time', e.target.value)}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function shiftBreaksForDisplay(shift) {
   if (Array.isArray(shift?.breaks) && shift.breaks.length) return shift.breaks;
+  if (!shiftHasLunch(shift)) return [];
   return [
     {
       name: 'Lunch',
@@ -169,13 +406,14 @@ function BreaksEditor({ form, setForm, disabled, compact }) {
     setForm((prev) => {
       const next = [...(prev.breaks || [])];
       next[idx] = { ...next[idx], ...patch };
-      const lunch = next.find((b) => String(b.name).toLowerCase() === 'lunch') || next[0];
+      const lunch = next.find((b) => String(b.name).toLowerCase() === 'lunch');
+      const noLunch = prev.has_lunch === false;
       return {
         ...prev,
         breaks: next,
-        lunch_minutes: lunch ? Number(lunch.allotted_minutes || 0) : prev.lunch_minutes,
-        lunch_over_deduction_minutes: lunch ? Number(lunch.over_deduction_minutes || 0) : prev.lunch_over_deduction_minutes,
-        lunch_over_deduction_amount: lunch ? Number(lunch.over_deduction_amount || 0) : prev.lunch_over_deduction_amount,
+        lunch_minutes: noLunch ? 0 : lunch ? Number(lunch.allotted_minutes || 0) : prev.lunch_minutes,
+        lunch_over_deduction_minutes: noLunch ? 0 : lunch ? Number(lunch.over_deduction_minutes || 0) : prev.lunch_over_deduction_minutes,
+        lunch_over_deduction_amount: noLunch ? 0 : lunch ? Number(lunch.over_deduction_amount || 0) : prev.lunch_over_deduction_amount,
       };
     });
   };
@@ -185,7 +423,9 @@ function BreaksEditor({ form, setForm, disabled, compact }) {
         <div>
           <p className="text-[11px] font-medium text-slate-700">Breaks</p>
           <p className="text-[10px] text-slate-500">
-            Name the break and how long it is allowed. Set a time window so an OUT at shift end is checkout, not this break.
+            {form.has_lunch === false
+              ? 'Optional short breaks (tea, prayer). This shift has no lunch.'
+              : 'Name the break and how long it is allowed. Set a time window so an OUT at shift end is checkout, not this break.'}
           </p>
         </div>
         <button
@@ -314,7 +554,11 @@ function BreaksEditor({ form, setForm, disabled, compact }) {
               </div>
             </div>
           )}
-          {breaks.length > 1 && (
+          {(() => {
+            const isLunchRow = String(b.name || '').toLowerCase() === 'lunch';
+            const canRemove = form.has_lunch === false ? true : !isLunchRow;
+            if (!canRemove) return null;
+            return (
             <button
               type="button"
               disabled={disabled}
@@ -328,7 +572,8 @@ function BreaksEditor({ form, setForm, disabled, compact }) {
             >
               Remove
             </button>
-          )}
+            );
+          })()}
         </div>
       ))}
     </div>
@@ -366,6 +611,8 @@ function getEmptyForm(compact) {
     grace_minutes: 0,
     lunch_minutes: compact ? 0 : 60,
     weekly_off_days: [],
+    has_lunch: !compact,
+    day_time_overrides: {},
     late_deduction_minutes: 0,
     late_deduction_amount: 0,
     late_deduction_mode: 'per_day',
@@ -383,7 +630,7 @@ function getEmptyForm(compact) {
     overtime_rate_mode: 'fixed',
     overtime_pay_mode: 'per_hour',
     overtime_window: 'total_extra',
-    breaks: [emptyBreak({ allotted_minutes: compact ? 0 : 60 })],
+    breaks: compact ? [] : [emptyBreak({ allotted_minutes: 60 })],
   };
 }
 
@@ -583,8 +830,10 @@ export default function ShiftsPage() {
       start_time: (shift.start_time || '09:00').slice(0, 5),
       end_time: (shift.end_time || '18:00').slice(0, 5),
       grace_minutes: shift.grace_minutes ?? 0,
-      lunch_minutes: shift.lunch_minutes ?? (shiftsCompactUi ? 0 : 60),
+      lunch_minutes: shiftHasLunch(shift) ? (shift.lunch_minutes ?? (shiftsCompactUi ? 0 : 60)) : 0,
       weekly_off_days: Array.isArray(shift.weekly_off_days) ? [...shift.weekly_off_days] : [],
+      has_lunch: shiftHasLunch(shift),
+      day_time_overrides: normalizeDayTimeOverrides(shift.day_time_overrides),
       late_deduction_minutes: shift.late_deduction_minutes ?? 0,
       late_deduction_amount: shift.late_deduction_amount ?? 0,
       lunch_over_deduction_minutes: shift.lunch_over_deduction_minutes ?? 0,
@@ -602,7 +851,12 @@ export default function ShiftsPage() {
       late_deduction_mode: shift.late_deduction_mode || 'per_day',
       overtime_pay_mode: shift.overtime_pay_mode || 'per_hour',
       overtime_window: shift.overtime_window || 'total_extra',
-      breaks: breaksFromShift(shift, shiftsCompactUi),
+      breaks: (() => {
+        const list = breaksFromShift(shift, shiftsCompactUi);
+        return shiftHasLunch(shift)
+          ? list
+          : list.filter((b) => String(b.name || '').toLowerCase() !== 'lunch');
+      })(),
     });
     setEditingShift(shift);
     setError(null);
@@ -686,6 +940,7 @@ export default function ShiftsPage() {
         half_day_hours: 4,
         grace_minutes: 0,
         lunch_minutes: 0,
+        has_lunch: false,
         weekly_off_days: [],
         allow_overtime: false,
       }));
@@ -885,6 +1140,7 @@ export default function ShiftsPage() {
                     disabled={creating}
                     className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300"
                   />
+                  <p className="text-[10px] text-slate-500">Used on most days.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">End time</label>
@@ -897,6 +1153,7 @@ export default function ShiftsPage() {
                   />
                 </div>
               </div>
+              <DayTimeOverridesEditor form={form} setForm={setForm} disabled={creating} />
 
               {form.attendance_mode === 'day_based' && (
                 <div className="space-y-1">
@@ -968,6 +1225,7 @@ export default function ShiftsPage() {
                 </div>
               </div>
 
+              <LunchOption form={form} setForm={setForm} compact={shiftsCompactUi} disabled={creating} />
               <BreaksEditor form={form} setForm={setForm} disabled={creating} compact={shiftsCompactUi} />
 
               {form.attendance_mode === 'hours_based' && (
@@ -991,7 +1249,7 @@ export default function ShiftsPage() {
                       Employee must be inside for at least this many hours to be marked present.
                     </p>
                   </div>
-                  {shiftsCompactUi && (
+                  {shiftsCompactUi && form.has_lunch !== false && (
                     <div className="space-y-1">
                       <label className="text-[11px] font-medium text-slate-700">Lunch minutes (auto-linked)</label>
                       <input
@@ -1256,7 +1514,7 @@ export default function ShiftsPage() {
                     </div>
                   </div>
 
-                  {form.attendance_mode === 'day_based' && (
+                  {form.attendance_mode === 'day_based' && form.has_lunch !== false && (
                     <div className="mt-2 rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2">
                       <p className="text-[11px] font-medium text-slate-700">
                         Lunch over deduction (optional)
@@ -1389,6 +1647,20 @@ export default function ShiftsPage() {
                         <dt className="text-slate-500">End</dt>
                         <dd className="font-medium text-slate-800">{shift.end_time}</dd>
                       </div>
+                      {formatDayTimeOverrideLines(shift).length > 0 && (
+                        <div className="flex justify-between gap-2">
+                          <dt className="text-slate-500">By weekday</dt>
+                          <dd className="font-medium text-slate-800 text-right">
+                            {formatDayTimeOverrideLines(shift).join(' · ')}
+                          </dd>
+                        </div>
+                      )}
+                      {!shiftHasLunch(shift) && shiftBreaksForDisplay(shift).length === 0 && (
+                        <div className="flex justify-between">
+                          <dt className="text-slate-500">Lunch</dt>
+                          <dd className="font-medium text-slate-800">None</dd>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <dt className="text-slate-500">Grace</dt>
                         <dd className="font-medium text-slate-800">
@@ -1497,7 +1769,7 @@ export default function ShiftsPage() {
 
       {editingShift && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" role="dialog" aria-modal="true" aria-labelledby="edit-shift-title">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-100 px-5 py-3 flex items-center justify-between">
               <h2 id="edit-shift-title" className="text-sm font-semibold text-slate-900">Edit shift</h2>
               <button
@@ -1560,12 +1832,14 @@ export default function ShiftsPage() {
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">Start time</label>
                   <input type="time" value={form.start_time} onChange={handleChange('start_time')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
+                  <p className="text-[10px] text-slate-500">Used on most days.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-medium text-slate-700">End time</label>
                   <input type="time" value={form.end_time} onChange={handleChange('end_time')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
               </div>
+              <DayTimeOverridesEditor form={form} setForm={setForm} disabled={savingEdit} />
               {form.attendance_mode === 'hours_based' && (
                 <div className="space-y-2">
                   <div className="space-y-1">
@@ -1581,7 +1855,7 @@ export default function ShiftsPage() {
                       className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs"
                     />
                   </div>
-                  {shiftsCompactUi && (
+                  {shiftsCompactUi && form.has_lunch !== false && (
                     <div className="space-y-1">
                       <label className="text-[11px] font-medium text-slate-700">Lunch minutes (auto-linked)</label>
                       <input
@@ -1825,6 +2099,7 @@ export default function ShiftsPage() {
                   <input type="number" min={0} value={form.grace_minutes} onChange={handleChange('grace_minutes')} disabled={savingEdit} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs" />
                 </div>
               </div>
+              <LunchOption form={form} setForm={setForm} compact={shiftsCompactUi} disabled={savingEdit} />
               <BreaksEditor form={form} setForm={setForm} disabled={savingEdit} compact={shiftsCompactUi} />
               {!shiftsCompactUi && (
                 <>

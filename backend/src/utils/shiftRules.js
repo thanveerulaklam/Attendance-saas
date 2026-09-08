@@ -2,6 +2,8 @@
  * Shared shift break / late / overtime rules. Pure functions so attendance and payroll stay in sync.
  */
 
+const { weekdayFromYmd } = require('./companyDate');
+
 const CHECKOUT_BUFFER_MINUTES = 60;
 const ACCIDENTAL_PUNCH_GAP_MINUTES = 5;
 
@@ -16,6 +18,116 @@ function parseTimeToMinutes(value) {
     return null;
   }
   return hh * 60 + mm;
+}
+
+function padClock(n) {
+  return String(Number(n) || 0).padStart(2, '0');
+}
+
+function clockPartsFromValue(value) {
+  const mins = parseTimeToMinutes(value);
+  if (mins == null) return null;
+  return { hour: Math.floor(mins / 60), minute: mins % 60 };
+}
+
+function shiftClockDuration(startHour, startMinute, endHour, endMinute) {
+  const startMin = Number(startHour) * 60 + Number(startMinute);
+  const endMin = Number(endHour) * 60 + Number(endMinute);
+  const isOvernightClock = endMin < startMin;
+  const shiftMinutes =
+    endMin >= startMin ? endMin - startMin : 24 * 60 + endMin - startMin;
+  return { isOvernightClock, shiftMs: shiftMinutes * 60 * 1000 };
+}
+
+/**
+ * Persistable weekday → { start_time, end_time } map. Keys are "0".."6".
+ */
+function parseDayTimeOverridesInput(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const day = Number(key);
+    if (!Number.isInteger(day) || day < 0 || day > 6) continue;
+    if (!value || typeof value !== 'object') continue;
+    const start = clockPartsFromValue(value.start_time ?? value.startTime);
+    const end = clockPartsFromValue(value.end_time ?? value.endTime);
+    if (!start && !end) continue;
+    const entry = {};
+    if (start) entry.start_time = `${padClock(start.hour)}:${padClock(start.minute)}`;
+    if (end) entry.end_time = `${padClock(end.hour)}:${padClock(end.minute)}`;
+    out[String(day)] = entry;
+  }
+  return out;
+}
+
+function parseDayTimeOverrides(raw) {
+  const stored = parseDayTimeOverridesInput(raw);
+  const out = {};
+  for (const [key, value] of Object.entries(stored)) {
+    const start = clockPartsFromValue(value.start_time);
+    const end = clockPartsFromValue(value.end_time);
+    out[Number(key)] = {
+      startHour: start?.hour,
+      startMinute: start?.minute,
+      endHour: end?.hour,
+      endMinute: end?.minute,
+      start_time: value.start_time || null,
+      end_time: value.end_time || null,
+    };
+  }
+  return out;
+}
+
+/**
+ * Copy of shift config with start/end (and span) for a calendar date.
+ * Default times stay on defaultStartHour so applying twice is safe.
+ */
+function applyShiftConfigForDate(shiftConfig, calendarDateStr) {
+  if (!shiftConfig) return shiftConfig;
+  const defaultStartHour = shiftConfig.defaultStartHour ?? shiftConfig.startHour;
+  const defaultStartMinute = shiftConfig.defaultStartMinute ?? shiftConfig.startMinute;
+  const defaultEndHour = shiftConfig.defaultEndHour ?? shiftConfig.endHour;
+  const defaultEndMinute = shiftConfig.defaultEndMinute ?? shiftConfig.endMinute;
+  const weekday = weekdayFromYmd(calendarDateStr);
+  const ov =
+    weekday == null
+      ? null
+      : (shiftConfig.dayTimeOverrides || {})[weekday] ||
+        (shiftConfig.dayTimeOverrides || {})[String(weekday)];
+  const startHour = ov?.startHour ?? defaultStartHour;
+  const startMinute = ov?.startMinute ?? defaultStartMinute;
+  const endHour = ov?.endHour ?? defaultEndHour;
+  const endMinute = ov?.endMinute ?? defaultEndMinute;
+  const duration = shiftClockDuration(startHour, startMinute, endHour, endMinute);
+  return {
+    ...shiftConfig,
+    defaultStartHour,
+    defaultStartMinute,
+    defaultEndHour,
+    defaultEndMinute,
+    startHour,
+    startMinute,
+    endHour,
+    endMinute,
+    ...duration,
+  };
+}
+
+function shiftConfigHasOvernight(shiftConfig) {
+  if (!shiftConfig) return false;
+  if (shiftConfig.isOvernightClock) return true;
+  const overrides = shiftConfig.dayTimeOverrides || {};
+  for (const ov of Object.values(overrides)) {
+    if (!ov) continue;
+    const startHour = ov.startHour ?? shiftConfig.startHour;
+    const startMinute = ov.startMinute ?? shiftConfig.startMinute;
+    const endHour = ov.endHour ?? shiftConfig.endHour;
+    const endMinute = ov.endMinute ?? shiftConfig.endMinute;
+    if (shiftClockDuration(startHour, startMinute, endHour, endMinute).isOvernightClock) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function clockMinutesFromMs(ms, shiftStartMs) {
@@ -89,7 +201,7 @@ function resolveBreaks(shiftConfig) {
   const parsed = parseBreaksInput(shiftConfig?.breaks);
   if (parsed.length > 0) return parsed;
   const lunch = Number(shiftConfig?.lunchMinutesAllotted);
-  if (Number.isFinite(lunch) && lunch >= 0) {
+  if (Number.isFinite(lunch) && lunch > 0) {
     const overAmt = Number(shiftConfig?.lunchOverDeductionAmount || 0);
     const overMin = Number(shiftConfig?.lunchOverDeductionMinutes || 0);
     return [
@@ -470,6 +582,11 @@ module.exports = {
   CHECKOUT_BUFFER_MINUTES,
   ACCIDENTAL_PUNCH_GAP_MINUTES,
   parseTimeToMinutes,
+  parseDayTimeOverridesInput,
+  parseDayTimeOverrides,
+  applyShiftConfigForDate,
+  shiftConfigHasOvernight,
+  shiftClockDuration,
   parseBreaksInput,
   normalizeBreak,
   resolveBreaks,
