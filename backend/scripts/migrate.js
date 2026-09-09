@@ -169,6 +169,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'shift_breaks'
   )`,
+  '088_demo_enquiry_city_state.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'demo_enquiries' AND column_name = 'city'
+  )`,
 };
 
 async function hasExistingSchema(client) {

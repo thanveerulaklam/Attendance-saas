@@ -26,6 +26,61 @@ const DEFAULT_LEAD_SOURCE_SUGGESTIONS = [
   'Other',
 ];
 
+const DEFAULT_STATE_SUGGESTIONS = [
+  'Tamil Nadu',
+  'Kerala',
+  'Karnataka',
+  'Andhra Pradesh',
+  'Telangana',
+  'Maharashtra',
+  'Gujarat',
+  'Rajasthan',
+  'Madhya Pradesh',
+  'Uttar Pradesh',
+  'Delhi',
+  'West Bengal',
+  'Odisha',
+  'Bihar',
+  'Jharkhand',
+  'Chhattisgarh',
+  'Punjab',
+  'Haryana',
+  'Himachal Pradesh',
+  'Uttarakhand',
+  'Assam',
+  'Goa',
+  'Puducherry',
+  'Jammu and Kashmir',
+  'Ladakh',
+];
+
+const DEFAULT_CITY_SUGGESTIONS = [
+  'Coimbatore',
+  'Chennai',
+  'Madurai',
+  'Tiruppur',
+  'Salem',
+  'Erode',
+  'Tiruchirappalli',
+  'Tirunelveli',
+  'Vellore',
+  'Thoothukudi',
+  'Dindigul',
+  'Thanjavur',
+  'Karur',
+  'Namakkal',
+  'Hosur',
+  'Nagercoil',
+  'Kanchipuram',
+  'Bengaluru',
+  'Hyderabad',
+  'Mumbai',
+  'Pune',
+  'Kochi',
+];
+
+const LOCATION_MAX_LEN = 80;
+
 function normalizeLeadSource(raw) {
   const text = normText(raw);
   if (!text) return 'Manual entry';
@@ -33,7 +88,7 @@ function normalizeLeadSource(raw) {
 }
 
 const ENQUIRY_LIST_COLUMNS = `de.id, de.full_name, de.business_name, de.phone_number, de.email,
-  de.employees_range, de.source, de.expected_plan, de.notes,
+  de.city, de.state, de.employees_range, de.source, de.expected_plan, de.notes,
   de.status, de.status_updated_at, de.created_at,
   de.converted_company_id, de.converted_at,
   c.name AS converted_company_name`;
@@ -41,6 +96,44 @@ const ENQUIRY_LIST_COLUMNS = `de.id, de.full_name, de.business_name, de.phone_nu
 function normText(v) {
   if (v == null) return '';
   return String(v).trim();
+}
+
+function titleCaseLocation(raw) {
+  const text = normText(raw);
+  if (!text) return '';
+  return text
+    .split(/\s+/)
+    .map((word) => (word ? word.charAt(0).toUpperCase() + word.slice(1).toLowerCase() : word))
+    .join(' ');
+}
+
+function clipLocation(raw) {
+  const text = normText(raw);
+  if (!text) return '';
+  return text.length > LOCATION_MAX_LEN ? text.slice(0, LOCATION_MAX_LEN) : text;
+}
+
+async function canonicalizeLocation(raw, column) {
+  const text = clipLocation(raw);
+  if (!text) return '';
+  const col = column === 'state' ? 'state' : 'city';
+  const defaults = col === 'state' ? DEFAULT_STATE_SUGGESTIONS : DEFAULT_CITY_SUGGESTIONS;
+
+  const result = await pool.query(
+    `SELECT TRIM(${col}) AS label
+     FROM demo_enquiries
+     WHERE ${col} IS NOT NULL AND TRIM(${col}) <> ''
+       AND LOWER(TRIM(${col})) = LOWER($1)
+     ORDER BY id ASC
+     LIMIT 1`,
+    [text]
+  );
+  if (result.rows[0]?.label) return clipLocation(result.rows[0].label);
+
+  const preset = defaults.find((label) => label.toLowerCase() === text.toLowerCase());
+  if (preset) return preset;
+
+  return titleCaseLocation(text);
 }
 
 function enquirySelectFrom() {
@@ -54,20 +147,24 @@ async function createDemoEnquiry(companyIdIgnored, data) {
   const phoneNumber = normText(data.phone_number);
   const employeesRange = normText(data.employees_range);
   const notes = data.notes ? normText(data.notes) : null;
+  const city = await canonicalizeLocation(data.city, 'city');
+  const state = await canonicalizeLocation(data.state, 'state');
 
   if (!fullName) throw new AppError('Full name is required', 400);
   if (!businessName) throw new AppError('Business name is required', 400);
   if (!phoneNumber) throw new AppError('Phone number is required', 400);
   if (!employeesRange) throw new AppError('Number of employees is required', 400);
+  if (!city) throw new AppError('City is required', 400);
+  if (!state) throw new AppError('State is required', 400);
 
   const result = await pool.query(
     `INSERT INTO demo_enquiries (
        full_name, business_name, phone_number, employees_range,
-       source, notes
+       source, notes, city, state
      )
-     VALUES ($1, $2, $3, $4, 'landing', $5)
+     VALUES ($1, $2, $3, $4, 'landing', $5, $6, $7)
      RETURNING *`,
-    [fullName, businessName, phoneNumber, employeesRange, notes]
+    [fullName, businessName, phoneNumber, employeesRange, notes, city, state]
   );
 
   return result.rows[0];
@@ -80,6 +177,8 @@ async function createAdminLead(data) {
   const email = normText(data.email) || null;
   const employeesRange = normText(data.employees_range) || 'Not specified';
   const notes = data.notes ? normText(data.notes) : null;
+  const city = (await canonicalizeLocation(data.city, 'city')) || null;
+  const state = (await canonicalizeLocation(data.state, 'state')) || null;
   const source = normalizeLeadSource(data.source);
   if (!normText(data.source)) {
     throw new AppError('Lead source is required (where did this lead come from?)', 400);
@@ -100,11 +199,11 @@ async function createAdminLead(data) {
   const result = await pool.query(
     `INSERT INTO demo_enquiries (
        full_name, business_name, phone_number, email, employees_range,
-       source, expected_plan, notes, status, status_updated_at
+       source, expected_plan, notes, status, status_updated_at, city, state
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11)
      RETURNING *`,
-    [fullName, businessName, phoneNumber, email, employeesRange, source, expectedPlan, notes, status]
+    [fullName, businessName, phoneNumber, email, employeesRange, source, expectedPlan, notes, status, city, state]
   );
 
   return getDemoEnquiryById(result.rows[0].id);
@@ -166,6 +265,8 @@ async function listDemoEnquiries(
         OR de.business_name ILIKE $${paramIndex}
         OR de.phone_number ILIKE $${paramIndex}
         OR COALESCE(de.email, '') ILIKE $${paramIndex}
+        OR COALESCE(de.city, '') ILIKE $${paramIndex}
+        OR COALESCE(de.state, '') ILIKE $${paramIndex}
         OR COALESCE(de.notes, '') ILIKE $${paramIndex})`
     );
     params.push(`%${search}%`);
@@ -198,37 +299,62 @@ async function listDemoEnquiries(
   };
 }
 
-async function getDemoEnquirySuggestions() {
-  const result = await pool.query(
-    `SELECT TRIM(source) AS source, COUNT(*)::int AS use_count
-     FROM demo_enquiries
-     WHERE source IS NOT NULL AND TRIM(source) <> ''
-     GROUP BY TRIM(source)
-     ORDER BY use_count DESC, source ASC
-     LIMIT 40`
-  );
-
+function mergeSuggestionLabels(defaults, rows, field) {
   const seen = new Set();
-  const sources = [];
+  const labels = [];
 
-  for (const label of DEFAULT_LEAD_SOURCE_SUGGESTIONS) {
-    const key = label.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      sources.push(label);
-    }
-  }
-
-  for (const row of result.rows) {
-    const label = normText(row.source);
+  for (const row of rows) {
+    const label = normText(row[field]);
     if (!label) continue;
     const key = label.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    sources.push(label);
+    labels.push(label);
   }
 
-  return { sources };
+  for (const label of defaults) {
+    const key = String(label).trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+  }
+
+  return labels;
+}
+
+async function getDemoEnquirySuggestions() {
+  const [sourceResult, cityResult, stateResult] = await Promise.all([
+    pool.query(
+      `SELECT TRIM(source) AS source, COUNT(*)::int AS use_count
+       FROM demo_enquiries
+       WHERE source IS NOT NULL AND TRIM(source) <> ''
+       GROUP BY TRIM(source)
+       ORDER BY use_count DESC, source ASC
+       LIMIT 40`
+    ),
+    pool.query(
+      `SELECT TRIM(city) AS city, COUNT(*)::int AS use_count
+       FROM demo_enquiries
+       WHERE city IS NOT NULL AND TRIM(city) <> ''
+       GROUP BY TRIM(city)
+       ORDER BY use_count DESC, city ASC
+       LIMIT 80`
+    ),
+    pool.query(
+      `SELECT TRIM(state) AS state, COUNT(*)::int AS use_count
+       FROM demo_enquiries
+       WHERE state IS NOT NULL AND TRIM(state) <> ''
+       GROUP BY TRIM(state)
+       ORDER BY use_count DESC, state ASC
+       LIMIT 40`
+    ),
+  ]);
+
+  return {
+    sources: mergeSuggestionLabels(DEFAULT_LEAD_SOURCE_SUGGESTIONS, sourceResult.rows, 'source'),
+    cities: mergeSuggestionLabels(DEFAULT_CITY_SUGGESTIONS, cityResult.rows, 'city'),
+    states: mergeSuggestionLabels(DEFAULT_STATE_SUGGESTIONS, stateResult.rows, 'state'),
+  };
 }
 
 async function getDemoEnquiryStats() {
@@ -376,4 +502,6 @@ module.exports = {
   getDemoEnquirySuggestions,
   DEMO_ENQUIRY_STATUSES,
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
+  DEFAULT_CITY_SUGGESTIONS,
+  DEFAULT_STATE_SUGGESTIONS,
 };

@@ -6,7 +6,10 @@ import {
   demoEnquiryStatusLabel,
   leadSourceLabel,
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
+  DEFAULT_CITY_SUGGESTIONS,
+  DEFAULT_STATE_SUGGESTIONS,
 } from '../constants/demoEnquiryStatus';
+import SuggestInput from '../components/SuggestInput';
 import {
   adminPlanFormDefaults,
   applyAdminPlanFields,
@@ -60,6 +63,8 @@ function emptyAddForm() {
     phone_number: '',
     email: '',
     employees_range: '',
+    city: '',
+    state: '',
     source: '',
     expected_plan: 'base',
     notes: '',
@@ -84,7 +89,7 @@ function convertFormFromLead(lead) {
     company_name: lead?.business_name || '',
     company_email: email,
     phone: lead?.phone_number || '',
-    address: '',
+    address: [lead?.city, lead?.state].filter(Boolean).join(', '),
     admin_name: lead?.full_name || '',
     admin_email: adminEmail,
     admin_password: '',
@@ -125,6 +130,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [notesEditId, setNotesEditId] = useState(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [sourceSuggestions, setSourceSuggestions] = useState(DEFAULT_LEAD_SOURCE_SUGGESTIONS);
+  const [citySuggestions, setCitySuggestions] = useState(DEFAULT_CITY_SUGGESTIONS);
+  const [stateSuggestions, setStateSuggestions] = useState(DEFAULT_STATE_SUGGESTIONS);
   const [sourceSuggestionsLoading, setSourceSuggestionsLoading] = useState(false);
 
   const addPlanOptions = useMemo(() => planOptionsForAdminSelect(DEFAULT_COUNTRY_CODE), []);
@@ -147,8 +154,16 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         return;
       }
       const json = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(json.data?.sources) && json.data.sources.length > 0) {
-        setSourceSuggestions(json.data.sources);
+      if (res.ok && json.data) {
+        if (Array.isArray(json.data.sources) && json.data.sources.length > 0) {
+          setSourceSuggestions(json.data.sources);
+        }
+        if (Array.isArray(json.data.cities) && json.data.cities.length > 0) {
+          setCitySuggestions(json.data.cities);
+        }
+        if (Array.isArray(json.data.states) && json.data.states.length > 0) {
+          setStateSuggestions(json.data.states);
+        }
       }
     } catch {
       /* keep defaults */
@@ -493,7 +508,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                 type="search"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Search name, business, phone, email…"
+                placeholder="Search name, business, phone, city, state…"
                 className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
               />
               <button
@@ -553,11 +568,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[1200px] text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs">
                 <tr>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Contact</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Business</th>
+                  <th className="text-left px-4 py-2 font-medium text-slate-700">Location</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Phone</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Source</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Status</th>
@@ -582,6 +598,16 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         )}
                       </td>
                       <td className="px-4 py-3 text-slate-700">{q.business_name || '—'}</td>
+                      <td className="px-4 py-3 text-slate-700 text-xs">
+                        {q.city || q.state ? (
+                          <>
+                            <div className="font-medium text-slate-800">{q.city || '—'}</div>
+                            {q.state ? <div className="text-slate-500 mt-0.5">{q.state}</div> : null}
+                          </>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-slate-700">{q.phone_number || '—'}</td>
                       <td className="px-4 py-3 text-slate-600 text-xs">{leadSourceLabel(q.source)}</td>
                       <td className="px-4 py-3">
@@ -740,6 +766,28 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   />
                 </label>
                 <label className="block">
+                  <span className="text-xs font-medium text-slate-700">City</span>
+                  <SuggestInput
+                    name="city"
+                    value={addForm.city}
+                    onChange={(city) => setAddForm((p) => ({ ...p, city }))}
+                    suggestions={citySuggestions}
+                    placeholder="e.g. Coimbatore"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">State</span>
+                  <SuggestInput
+                    name="state"
+                    value={addForm.state}
+                    onChange={(state) => setAddForm((p) => ({ ...p, state }))}
+                    suggestions={stateSuggestions}
+                    placeholder="e.g. Tamil Nadu"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block">
                   <span className="text-xs font-medium text-slate-700">Phone *</span>
                   <input
                     name="phone_number"
@@ -861,7 +909,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             <div className="border-b border-slate-200 px-5 py-4 sticky top-0 bg-white z-10">
               <h3 className="text-base font-semibold text-slate-900">Convert lead to company</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {convertLead.full_name} · {convertLead.business_name} — creates an active tenant immediately.
+                {convertLead.full_name} · {convertLead.business_name}
+                {[convertLead.city, convertLead.state].filter(Boolean).length
+                  ? ` · ${[convertLead.city, convertLead.state].filter(Boolean).join(', ')}`
+                  : ''}{' '}
+                — creates an active tenant immediately.
               </p>
             </div>
 

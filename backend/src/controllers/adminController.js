@@ -219,7 +219,8 @@ async function listDemoEnquiries(req, res, next) {
 
 /**
  * GET /api/admin/demo-enquiry-suggestions
- * Distinct lead sources for autocomplete (defaults + previously used values).
+ * Distinct lead sources, cities, and states for autocomplete
+ * (defaults + previously used values).
  */
 async function getDemoEnquirySuggestions(req, res, next) {
   try {

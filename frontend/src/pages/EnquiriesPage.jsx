@@ -213,6 +213,7 @@ export default function EnquiriesPage() {
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3 font-medium">Name</th>
                   <th className="pb-2 pr-3 font-medium">Business</th>
+                  <th className="pb-2 pr-3 font-medium">Location</th>
                   <th className="pb-2 pr-3 font-medium">Phone</th>
                   <th className="pb-2 pr-3 font-medium">Employees</th>
                   <th className="pb-2 pr-3 font-medium">Status</th>
@@ -230,6 +231,9 @@ export default function EnquiriesPage() {
                     <tr key={q.id} className="border-b border-slate-100 hover:bg-slate-50/50 align-top">
                       <td className="py-2 pr-3 font-medium text-slate-900">{q.full_name || '—'}</td>
                       <td className="py-2 pr-3 text-slate-700">{q.business_name || '—'}</td>
+                      <td className="py-2 pr-3 text-slate-700">
+                        {[q.city, q.state].filter(Boolean).join(', ') || '—'}
+                      </td>
                       <td className="py-2 pr-3 text-slate-700">{q.phone_number || '—'}</td>
                       <td className="py-2 pr-3 text-slate-700">{q.employees_range || '—'}</td>
                       <td className="py-2 pr-3">

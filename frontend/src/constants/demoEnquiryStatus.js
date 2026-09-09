@@ -67,6 +67,59 @@ export const DEFAULT_LEAD_SOURCE_SUGGESTIONS = [
   'Other',
 ];
 
+export const DEFAULT_STATE_SUGGESTIONS = [
+  'Tamil Nadu',
+  'Kerala',
+  'Karnataka',
+  'Andhra Pradesh',
+  'Telangana',
+  'Maharashtra',
+  'Gujarat',
+  'Rajasthan',
+  'Madhya Pradesh',
+  'Uttar Pradesh',
+  'Delhi',
+  'West Bengal',
+  'Odisha',
+  'Bihar',
+  'Jharkhand',
+  'Chhattisgarh',
+  'Punjab',
+  'Haryana',
+  'Himachal Pradesh',
+  'Uttarakhand',
+  'Assam',
+  'Goa',
+  'Puducherry',
+  'Jammu and Kashmir',
+  'Ladakh',
+];
+
+export const DEFAULT_CITY_SUGGESTIONS = [
+  'Coimbatore',
+  'Chennai',
+  'Madurai',
+  'Tiruppur',
+  'Salem',
+  'Erode',
+  'Tiruchirappalli',
+  'Tirunelveli',
+  'Vellore',
+  'Thoothukudi',
+  'Dindigul',
+  'Thanjavur',
+  'Karur',
+  'Namakkal',
+  'Hosur',
+  'Nagercoil',
+  'Kanchipuram',
+  'Bengaluru',
+  'Hyderabad',
+  'Mumbai',
+  'Pune',
+  'Kochi',
+];
+
 export function demoEnquiryStatusLabel(status) {
   return DEMO_ENQUIRY_STATUS_LABELS[status] || 'Not contacted';
 }

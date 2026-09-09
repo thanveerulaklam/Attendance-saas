@@ -10,6 +10,21 @@ async function create(req, res, next) {
   }
 }
 
+async function suggestions(req, res, next) {
+  try {
+    const data = await demoEnquiryService.getDemoEnquirySuggestions();
+    return res.json({
+      success: true,
+      data: {
+        cities: data.cities || [],
+        states: data.states || [],
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function list(req, res, next) {
   try {
     const { page, limit, status } = req.query || {};
@@ -31,5 +46,5 @@ async function updateStatus(req, res, next) {
   }
 }
 
-module.exports = { create, list, updateStatus };
+module.exports = { create, list, updateStatus, suggestions };
 

@@ -896,6 +896,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { API_BASE } from '../utils/apiBase';
+import SuggestInput from '../components/SuggestInput';
+import { DEFAULT_CITY_SUGGESTIONS, DEFAULT_STATE_SUGGESTIONS } from '../constants/demoEnquiryStatus';
 const WHATSAPP_NUMBER = '919600844041';
 const WHATSAPP_LINK =
   'https://wa.me/919600844041?text=Hi%2C%20I%20want%20to%20try%20PunchPay%20for%20my%20business';
@@ -1095,6 +1097,7 @@ if (!document.getElementById('pp-vars')) {
       .pp-testimonials-grid { grid-template-columns: 1fr !important; }
       .pp-footer-grid { grid-template-columns: 1fr !important; gap: 20px !important; }
       .pp-wa-float { bottom: 14px !important; right: 14px !important; width: 50px !important; height: 50px !important; font-size: 22px !important; }
+      .pp-demo-loc { grid-template-columns: 1fr !important; }
     }
   `;
   document.head.appendChild(style);
@@ -1133,6 +1136,10 @@ export default function LoginPage() {
   const [demoBusiness, setDemoBusiness] = useState('');
   const [demoPhone, setDemoPhone] = useState('');
   const [demoEmployees, setDemoEmployees] = useState('');
+  const [demoCity, setDemoCity] = useState('');
+  const [demoState, setDemoState] = useState('');
+  const [citySuggestions, setCitySuggestions] = useState(DEFAULT_CITY_SUGGESTIONS);
+  const [stateSuggestions, setStateSuggestions] = useState(DEFAULT_STATE_SUGGESTIONS);
   const [demoSubmitting, setDemoSubmitting] = useState(false);
   const [demoError, setDemoError] = useState('');
 
@@ -1154,6 +1161,27 @@ export default function LoginPage() {
   const testimonialsInView = useInView(testimonialsRef);
   const loginInView        = useInView(loginRef);
   const demoInView         = useInView(demoRef);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/api/demo-enquiries/suggestions`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (cancelled || !json?.data) return;
+        if (Array.isArray(json.data.cities) && json.data.cities.length) {
+          setCitySuggestions(json.data.cities);
+        }
+        if (Array.isArray(json.data.states) && json.data.states.length) {
+          setStateSuggestions(json.data.states);
+        }
+      })
+      .catch(() => {
+        /* keep seeded city/state lists */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /* ── handlers (unchanged logic) ── */
   const handleSubmit = async (e) => {
@@ -1216,6 +1244,8 @@ export default function LoginPage() {
           business_name: demoBusiness.trim(),
           phone_number: demoPhone.trim(),
           employees_range: demoEmployees,
+          city: demoCity.trim(),
+          state: demoState.trim(),
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -1726,6 +1756,32 @@ export default function LoginPage() {
                         <input type={f.type} value={f.val} onChange={e=>f.set(e.target.value)} className="pp-input" placeholder={f.ph} required />
                       </div>
                     ))}
+                    <div className="pp-demo-loc" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                      <div>
+                        <label style={S.label}>City</label>
+                        <SuggestInput
+                          theme="dark"
+                          className="pp-input"
+                          value={demoCity}
+                          onChange={setDemoCity}
+                          suggestions={citySuggestions}
+                          placeholder="e.g. Coimbatore"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label style={S.label}>State</label>
+                        <SuggestInput
+                          theme="dark"
+                          className="pp-input"
+                          value={demoState}
+                          onChange={setDemoState}
+                          suggestions={stateSuggestions}
+                          placeholder="e.g. Tamil Nadu"
+                          required
+                        />
+                      </div>
+                    </div>
                     <div>
                       <label style={S.label}>Number of Employees</label>
                       <select value={demoEmployees} onChange={e=>setDemoEmployees(e.target.value)} className="pp-input" required>
