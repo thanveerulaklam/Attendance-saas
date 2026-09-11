@@ -56,6 +56,41 @@ function formatDateTime(iso) {
   });
 }
 
+function todayIstYmd() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+}
+
+function addYmdDays(ymd, days) {
+  const [y, m, d] = String(ymd).split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function startOfWeekMonday(ymd) {
+  const [y, m, d] = String(ymd).split('-').map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  const diff = weekday === 0 ? -6 : 1 - weekday;
+  return addYmdDays(ymd, diff);
+}
+
+function startOfMonthYmd(ymd) {
+  return `${String(ymd).slice(0, 7)}-01`;
+}
+
+function rangeForDatePreset(preset, customFrom, customTo) {
+  const today = todayIstYmd();
+  if (preset === 'day') return { from: today, to: today };
+  if (preset === 'week') return { from: startOfWeekMonday(today), to: today };
+  if (preset === 'month') return { from: startOfMonthYmd(today), to: today };
+  if (preset === 'custom') {
+    return { from: customFrom || startOfMonthYmd(today), to: customTo || today };
+  }
+  return { from: '', to: '' };
+}
+
 function emptyAddForm() {
   return {
     full_name: '',
@@ -68,6 +103,23 @@ function emptyAddForm() {
     source: '',
     expected_plan: 'base',
     notes: '',
+  };
+}
+
+function editFormFromLead(lead) {
+  const sourceRaw = lead?.source || '';
+  return {
+    full_name: lead?.full_name || '',
+    business_name: lead?.business_name || '',
+    phone_number: lead?.phone_number || '',
+    email: lead?.email || '',
+    employees_range: lead?.employees_range || '',
+    city: lead?.city || '',
+    state: lead?.state || '',
+    source: sourceRaw === 'landing' ? 'Landing page' : sourceRaw,
+    expected_plan: lead?.expected_plan || 'base',
+    notes: lead?.notes || '',
+    status: lead?.status || 'not_contacted',
   };
 }
 
@@ -114,6 +166,9 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState('open');
+  const [datePreset, setDatePreset] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -121,6 +176,10 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [addSaving, setAddSaving] = useState(false);
+
+  const [detailLead, setDetailLead] = useState(null);
+  const [detailForm, setDetailForm] = useState(null);
+  const [detailSaving, setDetailSaving] = useState(false);
 
   const [convertLead, setConvertLead] = useState(null);
   const [convertForm, setConvertForm] = useState(null);
@@ -172,10 +231,19 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     }
   }, [adminKey, onAuthError]);
 
+  const appliedDateRange = useMemo(
+    () => rangeForDatePreset(datePreset, dateFrom, dateTo),
+    [datePreset, dateFrom, dateTo]
+  );
+
   const loadStats = useCallback(async () => {
     if (!adminKey) return;
     try {
-      const res = await adminFetch('/demo-enquiry-stats', {}, adminKey);
+      const params = new URLSearchParams();
+      if (appliedDateRange.from) params.set('from', appliedDateRange.from);
+      if (appliedDateRange.to) params.set('to', appliedDateRange.to);
+      const qs = params.toString();
+      const res = await adminFetch(`/demo-enquiry-stats${qs ? `?${qs}` : ''}`, {}, adminKey);
       if (res.status === 401) {
         onAuthError?.();
         return;
@@ -185,7 +253,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     } catch {
       /* non-blocking */
     }
-  }, [adminKey, onAuthError]);
+  }, [adminKey, onAuthError, appliedDateRange.from, appliedDateRange.to]);
 
   const loadLeads = useCallback(async () => {
     if (!adminKey) return;
@@ -202,6 +270,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         params.set('status', statusFilter);
       }
       if (searchQuery.trim()) params.set('q', searchQuery.trim());
+      if (appliedDateRange.from) params.set('from', appliedDateRange.from);
+      if (appliedDateRange.to) params.set('to', appliedDateRange.to);
 
       const res = await adminFetch(`/demo-enquiries?${params}`, {}, adminKey);
       if (res.status === 401) {
@@ -220,7 +290,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     } finally {
       setLoading(false);
     }
-  }, [adminKey, page, statusFilter, searchQuery, onAuthError]);
+  }, [adminKey, page, statusFilter, searchQuery, onAuthError, appliedDateRange.from, appliedDateRange.to]);
 
   useEffect(() => {
     loadStats();
@@ -233,6 +303,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     if (!q) return sourceSuggestions;
     return sourceSuggestions.filter((s) => s.toLowerCase().includes(q));
   }, [addForm.source, sourceSuggestions]);
+
+  const filteredEditSourceSuggestions = useMemo(() => {
+    const q = (detailForm?.source || '').trim().toLowerCase();
+    if (!q) return sourceSuggestions;
+    return sourceSuggestions.filter((s) => s.toLowerCase().includes(q));
+  }, [detailForm?.source, sourceSuggestions]);
 
   const quickSourcePicks = useMemo(() => {
     const q = addForm.source.trim().toLowerCase();
@@ -264,6 +340,10 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       const json = text ? JSON.parse(text) : {};
       if (json.data?.id) {
         setLeads((prev) => prev.map((q) => (q.id === json.data.id ? { ...q, ...json.data } : q)));
+        setDetailLead((prev) => (prev?.id === json.data.id ? { ...prev, ...json.data } : prev));
+        setDetailForm((prev) =>
+          prev && detailLead?.id === json.data.id ? { ...prev, status: json.data.status || prev.status } : prev
+        );
       } else {
         refreshAll();
       }
@@ -289,6 +369,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       const json = text ? JSON.parse(text) : {};
       if (json.data?.id) {
         setLeads((prev) => prev.map((q) => (q.id === json.data.id ? { ...q, ...json.data } : q)));
+        setDetailLead((prev) => (prev?.id === json.data.id ? { ...prev, ...json.data } : prev));
+        setDetailForm((prev) => (prev && detailLead?.id === json.data.id ? { ...prev, notes: json.data.notes || '' } : prev));
       }
       setNotesEditId(null);
       setToast?.({ type: 'success', message: 'Notes saved.' });
@@ -334,6 +416,69 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setToast?.({ type: 'error', message: err.message || 'Failed to add lead' });
     } finally {
       setAddSaving(false);
+    }
+  };
+
+  const openDetail = (lead) => {
+    setDetailLead(lead);
+    setDetailForm(editFormFromLead(lead));
+    loadSourceSuggestions();
+  };
+
+  const closeDetail = () => {
+    if (detailSaving) return;
+    setDetailLead(null);
+    setDetailForm(null);
+  };
+
+  const handleDetailSubmit = async (e) => {
+    e.preventDefault();
+    if (detailSaving || !detailLead || !detailForm) return;
+    if (
+      !detailForm.full_name.trim() ||
+      !detailForm.business_name.trim() ||
+      !detailForm.phone_number.trim() ||
+      !detailForm.source.trim()
+    ) {
+      setToast?.({
+        type: 'error',
+        message: 'Contact name, business name, phone, and lead source are required.',
+      });
+      return;
+    }
+    setDetailSaving(true);
+    try {
+      const res = await adminFetch(
+        '/demo-enquiry-update',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            enquiry_id: detailLead.id,
+            ...detailForm,
+          }),
+        },
+        adminKey
+      );
+      const text = await res.text();
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
+      const json = text ? JSON.parse(text) : {};
+      const updated = json.data || {};
+      if (updated.id) {
+        setLeads((prev) => prev.map((q) => (q.id === updated.id ? { ...q, ...updated } : q)));
+        setDetailLead((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+        setDetailForm(editFormFromLead({ ...detailLead, ...updated }));
+      }
+      loadStats();
+      loadSourceSuggestions();
+      setToast?.({ type: 'success', message: 'Lead updated.' });
+    } catch (err) {
+      setToast?.({ type: 'error', message: err.message || 'Failed to update lead' });
+    } finally {
+      setDetailSaving(false);
     }
   };
 
@@ -418,6 +563,15 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setLeads((prev) =>
         prev.map((q) => (q.id === convertLead.id ? { ...q, ...(json.data?.enquiry || {}) } : q))
       );
+      if (json.data?.enquiry) {
+        const enquiry = json.data.enquiry;
+        setDetailLead((prev) => (prev?.id === convertLead.id ? { ...prev, ...enquiry } : prev));
+        setDetailForm((prev) =>
+          prev && detailLead?.id === convertLead.id
+            ? { ...prev, status: enquiry.status || prev.status }
+            : prev
+        );
+      }
       loadStats();
       onCompanyCreated?.();
       setToast?.({ type: 'success', message: json.message || 'Lead converted to company.' });
@@ -447,6 +601,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             <h2 className="text-lg font-semibold text-slate-900">Leads & enquiries</h2>
             <p className="text-sm text-slate-600 mt-1 max-w-2xl">
               Capture leads, track follow-ups, and convert won deals into active companies — all in one pipeline.
+              Click a lead to open and edit its details.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -520,7 +675,68 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             </form>
             <p className="text-xs text-slate-500">
               Page {page} of {totalPages} · {total} lead{total === 1 ? '' : 's'}
+              {datePreset !== 'all' && appliedDateRange.from
+                ? ` · ${appliedDateRange.from}${appliedDateRange.to && appliedDateRange.to !== appliedDateRange.from ? ` → ${appliedDateRange.to}` : ''}`
+                : ''}
             </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: 'all', label: 'All time' },
+              { id: 'day', label: 'Day' },
+              { id: 'week', label: 'Week' },
+              { id: 'month', label: 'Month' },
+              { id: 'custom', label: 'Custom' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => {
+                  setPage(1);
+                  setDatePreset(f.id);
+                  if (f.id === 'all') {
+                    setDateFrom('');
+                    setDateTo('');
+                    return;
+                  }
+                  const next = rangeForDatePreset(f.id, dateFrom, dateTo);
+                  setDateFrom(next.from);
+                  setDateTo(next.to);
+                }}
+                className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                  datePreset === f.id
+                    ? 'border-slate-900 bg-slate-900 text-white'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+            {datePreset === 'custom' ? (
+              <div className="flex flex-wrap items-center gap-1.5 ml-1">
+                <input
+                  type="date"
+                  value={dateFrom}
+                  max={dateTo || undefined}
+                  onChange={(e) => {
+                    setPage(1);
+                    setDateFrom(e.target.value);
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
+                />
+                <span className="text-[11px] text-slate-400">to</span>
+                <input
+                  type="date"
+                  value={dateTo}
+                  min={dateFrom || undefined}
+                  onChange={(e) => {
+                    setPage(1);
+                    setDateTo(e.target.value);
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] text-slate-700"
+                />
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-1.5">
             {[
@@ -557,7 +773,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         ) : leads.length === 0 ? (
           <div className="p-10 text-center">
             <p className="text-slate-600 font-medium">No leads in this view</p>
-            <p className="text-sm text-slate-500 mt-1">Add a lead manually or wait for landing-page submissions.</p>
+            <p className="text-sm text-slate-500 mt-1">
+              {datePreset === 'all'
+                ? 'Add a lead manually or wait for landing-page submissions.'
+                : 'No leads in this date range. Try All time or a wider custom range.'}
+            </p>
             <button
               type="button"
               onClick={() => setAddOpen(true)}
@@ -589,7 +809,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   const busy = busyId === q.id;
 
                   return (
-                    <tr key={q.id} className="align-top hover:bg-slate-50/50">
+                    <tr
+                      key={q.id}
+                      className="align-top hover:bg-violet-50/60 cursor-pointer"
+                      onClick={() => openDetail(q)}
+                    >
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">{q.full_name || '—'}</div>
                         {q.email && <div className="text-xs text-slate-500">{q.email}</div>}
@@ -625,7 +849,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         )}
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">{formatDateTime(q.created_at)}</td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         {notesEditId === q.id ? (
                           <div className="space-y-1">
                             <textarea
@@ -666,7 +890,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                           </button>
                         )}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         {isConverted ? (
                           <div className="text-xs text-violet-800">
                             <p className="font-medium">Company #{q.converted_company_id}</p>
@@ -903,8 +1127,217 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         </div>
       )}
 
+      {detailLead && detailForm && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={closeDetail}
+        >
+          <div
+            className="w-full max-w-2xl rounded-xl bg-white shadow-xl max-h-[92vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-5 py-4 sticky top-0 bg-white z-10">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Lead details</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    #{detailLead.id} · Created {formatDateTime(detailLead.created_at)}
+                    {detailLead.converted_company_name
+                      ? ` · Converted to ${detailLead.converted_company_name}`
+                      : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeDetail}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <form onSubmit={handleDetailSubmit} className="p-5 space-y-4">
+              <div>
+                <p className="text-xs font-medium text-slate-700 mb-1.5">Status</p>
+                {detailLead.converted_company_id || detailForm.status === 'converted' ? (
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                      DEMO_ENQUIRY_STATUS_STYLES.converted
+                    }`}
+                  >
+                    Converted
+                  </span>
+                ) : (
+                  <div className="flex flex-wrap gap-1">
+                    {DEMO_ENQUIRY_PIPELINE_STATUSES.map((status) => {
+                      const isActive = detailForm.status === status;
+                      return (
+                        <button
+                          key={status}
+                          type="button"
+                          onClick={() => setDetailForm((p) => ({ ...p, status }))}
+                          className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
+                            isActive
+                              ? 'border-slate-900 bg-slate-900 text-white'
+                              : DEMO_ENQUIRY_STATUS_BUTTON_STYLES[status]
+                          }`}
+                        >
+                          {demoEnquiryStatusLabel(status)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-700">Contact name *</span>
+                  <input
+                    value={detailForm.full_name}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, full_name: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    required
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-700">Business name *</span>
+                  <input
+                    value={detailForm.business_name}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, business_name: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">City</span>
+                  <SuggestInput
+                    value={detailForm.city}
+                    onChange={(city) => setDetailForm((p) => ({ ...p, city }))}
+                    suggestions={citySuggestions}
+                    placeholder="e.g. Coimbatore"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">State</span>
+                  <SuggestInput
+                    value={detailForm.state}
+                    onChange={(state) => setDetailForm((p) => ({ ...p, state }))}
+                    suggestions={stateSuggestions}
+                    placeholder="e.g. Tamil Nadu"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">Phone *</span>
+                  <input
+                    value={detailForm.phone_number}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, phone_number: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    required
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">Email</span>
+                  <input
+                    type="email"
+                    value={detailForm.email}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, email: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-700">Lead source *</span>
+                  <input
+                    value={detailForm.source}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, source: e.target.value }))}
+                    list="edit-lead-source-suggestions"
+                    autoComplete="off"
+                    required
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                  <datalist id="edit-lead-source-suggestions">
+                    {filteredEditSourceSuggestions.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">Employees</span>
+                  <input
+                    value={detailForm.employees_range}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, employees_range: e.target.value }))}
+                    placeholder="e.g. 25–50"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">Expected plan</span>
+                  <select
+                    value={detailForm.expected_plan}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, expected_plan: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    {addPlanOptions.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="text-xs font-medium text-slate-700">Notes</span>
+                  <textarea
+                    value={detailForm.notes}
+                    onChange={(e) => setDetailForm((p) => ({ ...p, notes: e.target.value }))}
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                {detailLead.converted_company_id || detailForm.status === 'converted' || detailForm.status === 'lost' ? (
+                  <span className="text-[11px] text-slate-500">
+                    {detailLead.converted_company_id
+                      ? `Linked company #${detailLead.converted_company_id}`
+                      : ''}
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={detailSaving}
+                    onClick={() => openConvert({ ...detailLead, ...detailForm })}
+                    className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                  >
+                    Convert to company
+                  </button>
+                )}
+                <div className="flex gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={closeDetail}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={detailSaving}
+                    className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {detailSaving ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {convertLead && convertForm && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-3 sm:p-6" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 sm:p-6" role="dialog" aria-modal="true">
           <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl max-h-[92vh] overflow-y-auto">
             <div className="border-b border-slate-200 px-5 py-4 sticky top-0 bg-white z-10">
               <h3 className="text-base font-semibold text-slate-900">Convert lead to company</h3>

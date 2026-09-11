@@ -141,6 +141,50 @@ function enquirySelectFrom() {
           LEFT JOIN companies c ON c.id = de.converted_company_id`;
 }
 
+const DATE_YMD = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function parseYmdStartIst(raw, label) {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  if (!DATE_YMD.test(text)) {
+    throw new AppError(`${label} must be YYYY-MM-DD`, 400);
+  }
+  const start = new Date(`${text}T00:00:00+05:30`);
+  if (Number.isNaN(start.getTime())) {
+    throw new AppError(`${label} is invalid`, 400);
+  }
+  return start;
+}
+
+function createdAtRange({ from, to } = {}) {
+  const start = parseYmdStartIst(from, 'from');
+  const endDay = parseYmdStartIst(to, 'to');
+  if (!start && !endDay) return null;
+  if (start && endDay && endDay < start) {
+    throw new AppError('from must be on or before to', 400);
+  }
+  return {
+    start,
+    endExclusive: endDay ? new Date(endDay.getTime() + 24 * 60 * 60 * 1000) : null,
+  };
+}
+
+function pushCreatedAtRange(conditions, params, paramIndex, range) {
+  let index = paramIndex;
+  if (!range) return index;
+  if (range.start) {
+    conditions.push(`de.created_at >= $${index}`);
+    params.push(range.start.toISOString());
+    index += 1;
+  }
+  if (range.endExclusive) {
+    conditions.push(`de.created_at < $${index}`);
+    params.push(range.endExclusive.toISOString());
+    index += 1;
+  }
+  return index;
+}
+
 async function createDemoEnquiry(companyIdIgnored, data) {
   const fullName = normText(data.full_name);
   const businessName = normText(data.business_name);
@@ -231,7 +275,7 @@ async function getDemoEnquiryById(enquiryId) {
 
 async function listDemoEnquiries(
   _companyIdIgnored,
-  { page = 1, limit = 20, status = null, q = null, pipeline = null } = {}
+  { page = 1, limit = 20, status = null, q = null, pipeline = null, from = null, to = null } = {}
 ) {
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -272,6 +316,8 @@ async function listDemoEnquiries(
     params.push(`%${search}%`);
     paramIndex += 1;
   }
+
+  paramIndex = pushCreatedAtRange(conditions, params, paramIndex, createdAtRange({ from, to }));
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -357,11 +403,18 @@ async function getDemoEnquirySuggestions() {
   };
 }
 
-async function getDemoEnquiryStats() {
+async function getDemoEnquiryStats({ from = null, to = null } = {}) {
+  const conditions = [];
+  const params = [];
+  pushCreatedAtRange(conditions, params, 1, createdAtRange({ from, to }));
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
   const result = await pool.query(
     `SELECT status, COUNT(*)::int AS count
-     FROM demo_enquiries
-     GROUP BY status`
+     FROM demo_enquiries de
+     ${whereClause}
+     GROUP BY status`,
+    params
   );
 
   const byStatus = {};
@@ -441,6 +494,87 @@ async function updateDemoEnquiryNotes(enquiryId, notes) {
   return getDemoEnquiryById(id);
 }
 
+async function updateDemoEnquiryDetails(enquiryId, data) {
+  const enquiry = await getDemoEnquiryById(enquiryId);
+
+  const fullName = normText(data.full_name);
+  const businessName = normText(data.business_name);
+  const phoneNumber = normText(data.phone_number);
+  const email = normText(data.email) || null;
+  const employeesRange = normText(data.employees_range) || enquiry.employees_range || 'Not specified';
+  const notes = data.notes == null || data.notes === '' ? null : normText(data.notes);
+  const city = (await canonicalizeLocation(data.city, 'city')) || null;
+  const state = (await canonicalizeLocation(data.state, 'state')) || null;
+  const source = normalizeLeadSource(data.source);
+  if (!normText(data.source)) {
+    throw new AppError('Lead source is required (where did this lead come from?)', 400);
+  }
+  const expectedPlan =
+    typeof data.expected_plan === 'string' && data.expected_plan.trim()
+      ? data.expected_plan.trim().toLowerCase()
+      : null;
+
+  if (!fullName) throw new AppError('Contact name is required', 400);
+  if (!businessName) throw new AppError('Business name is required', 400);
+  if (!phoneNumber) throw new AppError('Phone number is required', 400);
+
+  const isConverted = Boolean(enquiry.converted_company_id) || enquiry.status === 'converted';
+  let status = enquiry.status;
+  if (data.status != null && String(data.status).trim() !== '') {
+    const statusRaw = normText(data.status).toLowerCase();
+    if (isConverted) {
+      if (statusRaw !== 'converted') {
+        throw new AppError('Converted leads cannot change status', 400);
+      }
+    } else if (!DEMO_ENQUIRY_STATUSES.includes(statusRaw) || statusRaw === 'converted') {
+      throw new AppError(
+        `status must be one of: ${DEMO_ENQUIRY_STATUSES.filter((s) => s !== 'converted').join(', ')}`,
+        400
+      );
+    } else {
+      status = statusRaw;
+    }
+  }
+
+  const result = await pool.query(
+    `UPDATE demo_enquiries
+     SET full_name = $2,
+         business_name = $3,
+         phone_number = $4,
+         email = $5,
+         employees_range = $6,
+         source = $7,
+         expected_plan = $8,
+         notes = $9,
+         city = $10,
+         state = $11,
+         status = $12,
+         status_updated_at = CASE WHEN $12 <> status THEN NOW() ELSE status_updated_at END
+     WHERE id = $1
+     RETURNING id`,
+    [
+      enquiry.id,
+      fullName,
+      businessName,
+      phoneNumber,
+      email,
+      employeesRange,
+      source,
+      expectedPlan,
+      notes,
+      city,
+      state,
+      status,
+    ]
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Enquiry not found', 404);
+  }
+
+  return getDemoEnquiryById(enquiry.id);
+}
+
 async function convertEnquiryToCompany(enquiryId, companyPayload) {
   const enquiry = await getDemoEnquiryById(enquiryId);
   if (enquiry.converted_company_id) {
@@ -498,6 +632,7 @@ module.exports = {
   getDemoEnquiryStats,
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
+  updateDemoEnquiryDetails,
   convertEnquiryToCompany,
   getDemoEnquirySuggestions,
   DEMO_ENQUIRY_STATUSES,

@@ -192,20 +192,22 @@ async function getAdminOverview(req, res, next) {
 
 /**
  * GET /api/admin/demo-enquiries
- * List leads (landing + manual). Query: page, limit, status, q, pipeline=open
+ * List leads (landing + manual). Query: page, limit, status, q, pipeline=open, from, to (YYYY-MM-DD)
  */
 async function listDemoEnquiries(req, res, next) {
   try {
     const demoEnquiryService = require('../services/demoEnquiryService');
     const page = req.query?.page != null ? Number(req.query.page) : 1;
     const limit = req.query?.limit != null ? Number(req.query.limit) : 20;
-    const { status, q, pipeline } = req.query || {};
+    const { status, q, pipeline, from, to } = req.query || {};
     const data = await demoEnquiryService.listDemoEnquiries(null, {
       page,
       limit,
       status,
       q,
       pipeline,
+      from,
+      to,
     });
 
     res.status(200).json({
@@ -234,11 +236,13 @@ async function getDemoEnquirySuggestions(req, res, next) {
 
 /**
  * GET /api/admin/demo-enquiry-stats
+ * Query: from, to (YYYY-MM-DD, IST calendar days)
  */
 async function getDemoEnquiryStats(req, res, next) {
   try {
     const demoEnquiryService = require('../services/demoEnquiryService');
-    const stats = await demoEnquiryService.getDemoEnquiryStats();
+    const { from, to } = req.query || {};
+    const stats = await demoEnquiryService.getDemoEnquiryStats({ from, to });
     res.status(200).json({ success: true, data: stats });
   } catch (err) {
     next(err);
@@ -279,6 +283,25 @@ async function updateDemoEnquiryStatus(req, res, next) {
       success: true,
       data: updated,
       message: 'Enquiry status updated.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiry-update
+ * Body: { enquiry_id, full_name, business_name, phone_number, ... }
+ */
+async function updateDemoEnquiryDetails(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    const updated = await demoEnquiryService.updateDemoEnquiryDetails(enquiryId, req.body || {});
+    res.status(200).json({
+      success: true,
+      data: updated,
+      message: 'Lead updated.',
     });
   } catch (err) {
     next(err);
@@ -1777,6 +1800,7 @@ module.exports = {
   createAdminDemoEnquiry,
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
+  updateDemoEnquiryDetails,
   convertDemoEnquiry,
   updateCompanyBilling,
   createCompanyProvisioned,
