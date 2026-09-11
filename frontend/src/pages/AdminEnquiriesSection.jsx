@@ -5,6 +5,7 @@ import {
   DEMO_ENQUIRY_STATUS_STYLES,
   demoEnquiryStatusLabel,
   leadSourceLabel,
+  employeesCountLabel,
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
   DEFAULT_CITY_SUGGESTIONS,
   DEFAULT_STATE_SUGGESTIONS,
@@ -106,6 +107,20 @@ function emptyAddForm() {
   };
 }
 
+function employeesFormValue(raw) {
+  const v = String(raw || '').trim();
+  if (!v || v === 'Not specified') return '';
+  if (/^\d+$/.test(v)) return v;
+  const map = {
+    'up-to-25': '25',
+    'up-to-50': '50',
+    'up-to-100': '100',
+    'up-to-200': '200',
+    '200+': '200',
+  };
+  return map[v] || '';
+}
+
 function editFormFromLead(lead) {
   const sourceRaw = lead?.source || '';
   return {
@@ -113,7 +128,7 @@ function editFormFromLead(lead) {
     business_name: lead?.business_name || '',
     phone_number: lead?.phone_number || '',
     email: lead?.email || '',
-    employees_range: lead?.employees_range || '',
+    employees_range: employeesFormValue(lead?.employees_range),
     city: lead?.city || '',
     state: lead?.state || '',
     source: sourceRaw === 'landing' ? 'Landing page' : sourceRaw,
@@ -794,6 +809,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Contact</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Business</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Location</th>
+                  <th className="text-left px-4 py-2 font-medium text-slate-700">Employees</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Phone</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Source</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Status</th>
@@ -817,9 +833,6 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">{q.full_name || '—'}</div>
                         {q.email && <div className="text-xs text-slate-500">{q.email}</div>}
-                        {q.employees_range && (
-                          <div className="text-[10px] text-slate-400 mt-0.5">{q.employees_range} staff</div>
-                        )}
                       </td>
                       <td className="px-4 py-3 text-slate-700">{q.business_name || '—'}</td>
                       <td className="px-4 py-3 text-slate-700 text-xs">
@@ -832,6 +845,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                           <span className="text-slate-400">—</span>
                         )}
                       </td>
+                      <td className="px-4 py-3 text-slate-700 tabular-nums">{employeesCountLabel(q.employees_range)}</td>
                       <td className="px-4 py-3 text-slate-700">{q.phone_number || '—'}</td>
                       <td className="px-4 py-3 text-slate-600 text-xs">{leadSourceLabel(q.source)}</td>
                       <td className="px-4 py-3">
@@ -1073,12 +1087,16 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   </p>
                 </label>
                 <label className="block">
-                  <span className="text-xs font-medium text-slate-700">Employees</span>
+                  <span className="text-xs font-medium text-slate-700">Number of employees</span>
                   <input
                     name="employees_range"
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
                     value={addForm.employees_range}
                     onChange={(e) => setAddForm((p) => ({ ...p, employees_range: e.target.value }))}
-                    placeholder="e.g. 25–50"
+                    placeholder="e.g. 25"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>
@@ -1265,11 +1283,15 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   </datalist>
                 </label>
                 <label className="block">
-                  <span className="text-xs font-medium text-slate-700">Employees</span>
+                  <span className="text-xs font-medium text-slate-700">Number of employees</span>
                   <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    inputMode="numeric"
                     value={detailForm.employees_range}
                     onChange={(e) => setDetailForm((p) => ({ ...p, employees_range: e.target.value }))}
-                    placeholder="e.g. 25–50"
+                    placeholder="e.g. 25"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   />
                 </label>

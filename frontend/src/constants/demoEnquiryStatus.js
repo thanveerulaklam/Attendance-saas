@@ -127,3 +127,18 @@ export function demoEnquiryStatusLabel(status) {
 export function leadSourceLabel(source) {
   return LEAD_SOURCE_LABELS[source] || source || '—';
 }
+
+const EMPLOYEE_RANGE_LABELS = {
+  'up-to-25': 'Up to 25',
+  'up-to-50': 'Up to 50',
+  'up-to-100': 'Up to 100',
+  'up-to-200': 'Up to 200',
+  '200+': '200+',
+  'Not specified': '—',
+};
+
+export function employeesCountLabel(value) {
+  const v = String(value || '').trim();
+  if (!v) return '—';
+  return EMPLOYEE_RANGE_LABELS[v] || v;
+}

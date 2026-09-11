@@ -1784,14 +1784,17 @@ export default function LoginPage() {
                     </div>
                     <div>
                       <label style={S.label}>Number of Employees</label>
-                      <select value={demoEmployees} onChange={e=>setDemoEmployees(e.target.value)} className="pp-input" required>
-                        <option value="">Select employee count</option>
-                        <option value="up-to-25">Up to 25</option>
-                        <option value="up-to-50">Up to 50</option>
-                        <option value="up-to-100">Up to 100</option>
-                        <option value="up-to-200">Up to 200</option>
-                        <option value="200+">200+</option>
-                      </select>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        inputMode="numeric"
+                        value={demoEmployees}
+                        onChange={e=>setDemoEmployees(e.target.value)}
+                        className="pp-input"
+                        placeholder="e.g. 25"
+                        required
+                      />
                     </div>
                     <button type="submit" disabled={demoSubmitting} className="pp-btn-gold" style={{ width:'100%', textAlign:'center', opacity: demoSubmitting ? 0.6 : 1 }}>
                       {demoSubmitting ? 'Requesting...' : 'Request Free Demo →'}
