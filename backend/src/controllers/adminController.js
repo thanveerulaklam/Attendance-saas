@@ -309,6 +309,39 @@ async function updateDemoEnquiryDetails(req, res, next) {
 }
 
 /**
+ * GET /api/admin/demo-enquiry-scheduled
+ * Upcoming and overdue booked demos for the reminder card.
+ */
+async function listScheduledDemoEnquiries(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const data = await demoEnquiryService.listScheduledDemos();
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiry-book
+ * Body: { enquiry_id, scheduled_at }
+ */
+async function bookDemoEnquiry(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    const updated = await demoEnquiryService.bookDemoEnquiry(enquiryId, req.body?.scheduled_at);
+    res.status(200).json({
+      success: true,
+      data: updated,
+      message: 'Demo booked.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/admin/demo-enquiry-notes
  * Body: { enquiry_id, notes }
  */
@@ -1801,6 +1834,8 @@ module.exports = {
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   updateDemoEnquiryDetails,
+  listScheduledDemoEnquiries,
+  bookDemoEnquiry,
   convertDemoEnquiry,
   updateCompanyBilling,
   createCompanyProvisioned,

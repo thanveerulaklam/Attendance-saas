@@ -4,6 +4,7 @@ const { AppError } = require('../utils/AppError');
 const DEMO_ENQUIRY_STATUSES = [
   'not_contacted',
   'contacted',
+  'demo_booked',
   'demo_given',
   'sold',
   'lost',
@@ -89,7 +90,7 @@ function normalizeLeadSource(raw) {
 
 const ENQUIRY_LIST_COLUMNS = `de.id, de.full_name, de.business_name, de.phone_number, de.email,
   de.city, de.state, de.employees_range, de.source, de.expected_plan, de.notes,
-  de.status, de.status_updated_at, de.created_at,
+  de.status, de.status_updated_at, de.created_at, de.demo_scheduled_at,
   de.converted_company_id, de.converted_at,
   c.name AS converted_company_name`;
 
@@ -229,7 +230,7 @@ async function createAdminLead(data) {
   }
   const expectedPlan =
     typeof data.expected_plan === 'string' && data.expected_plan.trim()
-      ? data.expected_plan.trim().toLowerCase()
+      ? data.expected_plan.trim().toLowerCase().slice(0, 32)
       : null;
   const statusRaw = normText(data.status).toLowerCase() || 'not_contacted';
   const status = DEMO_ENQUIRY_STATUSES.includes(statusRaw) && statusRaw !== 'converted'
@@ -430,6 +431,7 @@ async function getDemoEnquiryStats({ from = null, to = null } = {}) {
   const open =
     byStatus.not_contacted +
     byStatus.contacted +
+    byStatus.demo_booked +
     byStatus.demo_given +
     byStatus.sold;
 
@@ -437,10 +439,11 @@ async function getDemoEnquiryStats({ from = null, to = null } = {}) {
     total,
     open,
     by_status: byStatus,
-    in_progress: byStatus.contacted + byStatus.demo_given,
+    in_progress: byStatus.contacted + byStatus.demo_booked + byStatus.demo_given,
     hot: byStatus.sold,
     converted: byStatus.converted,
     lost: byStatus.lost,
+    demo_booked: byStatus.demo_booked,
   };
 }
 
@@ -453,6 +456,9 @@ async function updateDemoEnquiryStatus(enquiryId, status) {
   const normalizedStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
   if (!DEMO_ENQUIRY_STATUSES.includes(normalizedStatus) || normalizedStatus === 'converted') {
     throw new AppError(`status must be one of: ${DEMO_ENQUIRY_STATUSES.filter((s) => s !== 'converted').join(', ')}`, 400);
+  }
+  if (normalizedStatus === 'demo_booked') {
+    throw new AppError('Pick a demo date and time to mark as Demo booked', 400);
   }
 
   const result = await pool.query(
@@ -469,6 +475,57 @@ async function updateDemoEnquiryStatus(enquiryId, status) {
   }
 
   return getDemoEnquiryById(enquiry.id);
+}
+
+function parseDemoScheduledAt(raw) {
+  if (raw == null || raw === '') return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    throw new AppError('Demo date and time is invalid', 400);
+  }
+  return d;
+}
+
+async function bookDemoEnquiry(enquiryId, scheduledAtRaw) {
+  const enquiry = await getDemoEnquiryById(enquiryId);
+  if (enquiry.converted_company_id || enquiry.status === 'converted') {
+    throw new AppError('Converted leads cannot be booked for a demo', 400);
+  }
+  if (enquiry.status === 'lost') {
+    throw new AppError('Cannot book a demo for a lost lead. Change status first.', 400);
+  }
+  const scheduledAt = parseDemoScheduledAt(scheduledAtRaw);
+  if (!scheduledAt) {
+    throw new AppError('Demo date and time is required', 400);
+  }
+
+  const result = await pool.query(
+    `UPDATE demo_enquiries
+     SET status = 'demo_booked',
+         demo_scheduled_at = $2,
+         status_updated_at = NOW()
+     WHERE id = $1
+     RETURNING id`,
+    [enquiry.id, scheduledAt.toISOString()]
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Enquiry not found', 404);
+  }
+
+  return getDemoEnquiryById(enquiry.id);
+}
+
+async function listScheduledDemos() {
+  const result = await pool.query(
+    `SELECT ${ENQUIRY_LIST_COLUMNS}
+     ${enquirySelectFrom()}
+     WHERE de.status = 'demo_booked'
+       AND de.demo_scheduled_at IS NOT NULL
+     ORDER BY de.demo_scheduled_at ASC
+     LIMIT 40`
+  );
+  return result.rows;
 }
 
 async function updateDemoEnquiryNotes(enquiryId, notes) {
@@ -511,7 +568,7 @@ async function updateDemoEnquiryDetails(enquiryId, data) {
   }
   const expectedPlan =
     typeof data.expected_plan === 'string' && data.expected_plan.trim()
-      ? data.expected_plan.trim().toLowerCase()
+      ? data.expected_plan.trim().toLowerCase().slice(0, 32)
       : null;
 
   if (!fullName) throw new AppError('Contact name is required', 400);
@@ -536,6 +593,18 @@ async function updateDemoEnquiryDetails(enquiryId, data) {
     }
   }
 
+  if (status === 'demo_booked' && !enquiry.demo_scheduled_at && !data.demo_scheduled_at) {
+    throw new AppError('Pick a demo date and time before saving as Demo booked', 400);
+  }
+
+  let demoScheduledAt = enquiry.demo_scheduled_at || null;
+  if (Object.prototype.hasOwnProperty.call(data, 'demo_scheduled_at')) {
+    demoScheduledAt = parseDemoScheduledAt(data.demo_scheduled_at);
+  } else if (status !== 'demo_booked' && status !== enquiry.status) {
+    demoScheduledAt = enquiry.demo_scheduled_at || null;
+  }
+
+  const statusChanged = status !== enquiry.status;
   const result = await pool.query(
     `UPDATE demo_enquiries
      SET full_name = $2,
@@ -549,7 +618,8 @@ async function updateDemoEnquiryDetails(enquiryId, data) {
          city = $10,
          state = $11,
          status = $12,
-         status_updated_at = CASE WHEN $12 <> status THEN NOW() ELSE status_updated_at END
+         status_updated_at = $13,
+         demo_scheduled_at = $14
      WHERE id = $1
      RETURNING id`,
     [
@@ -565,6 +635,8 @@ async function updateDemoEnquiryDetails(enquiryId, data) {
       city,
       state,
       status,
+      statusChanged ? new Date() : enquiry.status_updated_at,
+      demoScheduledAt,
     ]
   );
 
@@ -633,6 +705,8 @@ module.exports = {
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   updateDemoEnquiryDetails,
+  bookDemoEnquiry,
+  listScheduledDemos,
   convertEnquiryToCompany,
   getDemoEnquirySuggestions,
   DEMO_ENQUIRY_STATUSES,

@@ -61,6 +61,14 @@ function todayIstYmd() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
 }
 
+function todayIstDateValue() {
+  return todayIstYmd();
+}
+
+function tomorrowIstDateValue() {
+  return addYmdDays(todayIstYmd(), 1);
+}
+
 function addYmdDays(ymd, days) {
   const [y, m, d] = String(ymd).split('-').map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d + days));
@@ -90,6 +98,70 @@ function rangeForDatePreset(preset, customFrom, customTo) {
     return { from: customFrom || startOfMonthYmd(today), to: customTo || today };
   }
   return { from: '', to: '' };
+}
+
+const DEFAULT_DEMO_TIME = '11:00';
+
+function formatDemoSlot(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+  const time = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(d);
+  const today = todayIstYmd();
+  const tomorrow = addYmdDays(today, 1);
+  const yesterday = addYmdDays(today, -1);
+  if (ymd === today) return `Today ${time}`;
+  if (ymd === tomorrow) return `Tomorrow ${time}`;
+  if (ymd === yesterday) return `Yesterday ${time}`;
+  const pretty = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+  }).format(d);
+  return `${pretty}, ${time}`;
+}
+
+function isDemoOverdue(iso) {
+  if (!iso) return false;
+  return new Date(iso).getTime() < Date.now();
+}
+
+function scheduledDateValue(iso) {
+  if (!iso) return todayIstYmd();
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return todayIstYmd();
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(d);
+}
+
+function scheduledTimeValue(iso) {
+  if (!iso) return DEFAULT_DEMO_TIME;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return DEFAULT_DEMO_TIME;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const hour = parts.find((p) => p.type === 'hour')?.value || '11';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+  return `${hour}:${minute}`;
+}
+
+function istIsoFromDateAndTime(ymd, hhmm) {
+  const date = String(ymd || '').trim();
+  const raw = String(hhmm || '').trim();
+  const time = /^\d{2}:\d{2}(:\d{2})?$/.test(raw) ? raw.slice(0, 5) : DEFAULT_DEMO_TIME;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const d = new Date(`${date}T${time}:00+05:30`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 function emptyAddForm() {
@@ -187,6 +259,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const [scheduledDemos, setScheduledDemos] = useState([]);
+  const [bookLead, setBookLead] = useState(null);
+  const [bookDayPreset, setBookDayPreset] = useState('today');
+  const [bookDate, setBookDate] = useState('');
+  const [bookTime, setBookTime] = useState(DEFAULT_DEMO_TIME);
+  const [bookSaving, setBookSaving] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
@@ -307,11 +385,29 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     }
   }, [adminKey, page, statusFilter, searchQuery, onAuthError, appliedDateRange.from, appliedDateRange.to]);
 
+  const loadScheduledDemos = useCallback(async () => {
+    if (!adminKey) return;
+    try {
+      const res = await adminFetch('/demo-enquiry-scheduled', {}, adminKey);
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setScheduledDemos(Array.isArray(json.data) ? json.data : []);
+      }
+    } catch {
+      /* non-blocking */
+    }
+  }, [adminKey, onAuthError]);
+
   useEffect(() => {
     loadStats();
     loadLeads();
     loadSourceSuggestions();
-  }, [loadStats, loadLeads, loadSourceSuggestions]);
+    loadScheduledDemos();
+  }, [loadStats, loadLeads, loadSourceSuggestions, loadScheduledDemos]);
 
   const filteredSourceSuggestions = useMemo(() => {
     const q = addForm.source.trim().toLowerCase();
@@ -336,6 +432,79 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const refreshAll = () => {
     loadStats();
     loadLeads();
+    loadScheduledDemos();
+  };
+
+  const openDemoScheduler = (lead) => {
+    const existing = lead?.demo_scheduled_at ? new Date(lead.demo_scheduled_at) : null;
+    const validExisting = existing && !Number.isNaN(existing.getTime());
+    setBookLead(lead);
+    setBookDayPreset(validExisting ? 'custom' : 'today');
+    setBookDate(validExisting ? scheduledDateValue(lead.demo_scheduled_at) : todayIstDateValue());
+    setBookTime(validExisting ? scheduledTimeValue(lead.demo_scheduled_at) : DEFAULT_DEMO_TIME);
+  };
+
+  const submitDemoBook = async () => {
+    if (!bookLead) return;
+    const dateValue =
+      bookDayPreset === 'today'
+        ? todayIstDateValue()
+        : bookDayPreset === 'tomorrow'
+          ? tomorrowIstDateValue()
+          : bookDate;
+    if (!dateValue) {
+      setToast?.({ type: 'error', message: 'Choose a demo date.' });
+      return;
+    }
+    if (!bookTime) {
+      setToast?.({ type: 'error', message: 'Choose a demo time.' });
+      return;
+    }
+    setBookSaving(true);
+    try {
+      const res = await adminFetch(
+        '/demo-enquiry-book',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            enquiry_id: bookLead.id,
+            scheduled_at: istIsoFromDateAndTime(dateValue, bookTime),
+          }),
+        },
+        adminKey
+      );
+      const text = await res.text();
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
+      const json = text ? JSON.parse(text) : {};
+      const updated = json.data;
+      if (updated?.id) {
+        setLeads((prev) => prev.map((q) => (q.id === updated.id ? { ...q, ...updated } : q)));
+        setDetailLead((prev) => (prev?.id === updated.id ? { ...prev, ...updated } : prev));
+        setDetailForm((prev) =>
+          prev && detailLead?.id === updated.id ? { ...prev, status: updated.status || prev.status } : prev
+        );
+      }
+      setBookLead(null);
+      loadStats();
+      loadScheduledDemos();
+      setToast?.({ type: 'success', message: `Demo booked for ${formatDemoSlot(updated?.demo_scheduled_at)}.` });
+    } catch (err) {
+      setToast?.({ type: 'error', message: err.message || 'Failed to book demo' });
+    } finally {
+      setBookSaving(false);
+    }
+  };
+
+  const requestStatusChange = (lead, status) => {
+    if (status === 'demo_booked') {
+      openDemoScheduler(lead);
+      return;
+    }
+    updateStatus(lead.id, status);
   };
 
   const updateStatus = async (enquiryId, status) => {
@@ -363,6 +532,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         refreshAll();
       }
       loadStats();
+      loadScheduledDemos();
       setToast?.({ type: 'success', message: `Marked as ${demoEnquiryStatusLabel(status)}.` });
     } catch (err) {
       setToast?.({ type: 'error', message: err.message || 'Failed to update status' });
@@ -461,6 +631,10 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       });
       return;
     }
+    if (detailForm.status === 'demo_booked' && !detailLead.demo_scheduled_at) {
+      openDemoScheduler({ ...detailLead, ...detailForm });
+      return;
+    }
     setDetailSaving(true);
     try {
       const res = await adminFetch(
@@ -488,6 +662,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         setDetailForm(editFormFromLead({ ...detailLead, ...updated }));
       }
       loadStats();
+      loadScheduledDemos();
       loadSourceSuggestions();
       setToast?.({ type: 'success', message: 'Lead updated.' });
     } catch (err) {
@@ -588,6 +763,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         );
       }
       loadStats();
+      loadScheduledDemos();
       onCompanyCreated?.();
       setToast?.({ type: 'success', message: json.message || 'Lead converted to company.' });
     } catch (err) {
@@ -601,12 +777,23 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     () => [
       { key: 'open', label: 'Open pipeline', value: stats?.open ?? '—', tone: 'text-sky-900 bg-sky-50 border-sky-200' },
       { key: 'in_progress', label: 'In progress', value: stats?.in_progress ?? '—', tone: 'text-indigo-900 bg-indigo-50 border-indigo-200' },
+      { key: 'demo_booked', label: 'Demos booked', value: stats?.demo_booked ?? '—', tone: 'text-amber-900 bg-amber-50 border-amber-200' },
       { key: 'hot', label: 'Ready to close', value: stats?.hot ?? '—', tone: 'text-emerald-900 bg-emerald-50 border-emerald-200' },
       { key: 'converted', label: 'Converted', value: stats?.converted ?? '—', tone: 'text-violet-900 bg-violet-50 border-violet-200' },
       { key: 'lost', label: 'Lost', value: stats?.lost ?? '—', tone: 'text-rose-900 bg-rose-50 border-rose-200' },
     ],
     [stats]
   );
+
+  const reminderGroups = useMemo(() => {
+    const overdue = [];
+    const upcoming = [];
+    for (const lead of scheduledDemos) {
+      if (isDemoOverdue(lead.demo_scheduled_at)) overdue.push(lead);
+      else upcoming.push(lead);
+    }
+    return { overdue, upcoming };
+  }, [scheduledDemos]);
 
   return (
     <div className="space-y-6">
@@ -643,7 +830,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {kpiCards.map((card) => (
           <button
             key={card.key}
@@ -661,6 +848,60 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             <p className="mt-1 text-2xl font-semibold tabular-nums">{card.value}</p>
           </button>
         ))}
+      </div>
+
+      <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50/40 p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-amber-950">Demo reminders</h3>
+            <p className="text-xs text-amber-800/80 mt-0.5">
+              Scheduled demos for follow-up. Overdue slots stay at the top until the status changes.
+            </p>
+          </div>
+          <p className="text-[11px] font-medium text-amber-900">
+            {reminderGroups.overdue.length} overdue · {reminderGroups.upcoming.length} upcoming
+          </p>
+        </div>
+        {scheduledDemos.length === 0 ? (
+          <p className="mt-3 text-sm text-amber-800/70">No demos booked yet. Mark a lead as Demo booked to schedule one.</p>
+        ) : (
+          <ul className="mt-3 divide-y divide-amber-100 rounded-lg border border-amber-100 bg-white/80 overflow-hidden">
+            {scheduledDemos.map((lead) => {
+              const overdue = isDemoOverdue(lead.demo_scheduled_at);
+              return (
+                <li key={lead.id}>
+                  <button
+                    type="button"
+                    onClick={() => openDetail(lead)}
+                    className={`w-full px-3 py-2.5 text-left hover:bg-amber-50 ${overdue ? 'bg-rose-50/70' : ''}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-900 truncate">
+                          {lead.full_name || '—'}
+                          {lead.business_name ? ` · ${lead.business_name}` : ''}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {[lead.phone_number, lead.city, lead.state].filter(Boolean).join(' · ') || '—'}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                          overdue
+                            ? 'border-rose-200 bg-rose-50 text-rose-800'
+                            : 'border-amber-200 bg-amber-50 text-amber-900'
+                        }`}
+                      >
+                        {overdue ? 'Overdue · ' : ''}
+                        {formatDemoSlot(lead.demo_scheduled_at)}
+                      </span>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -823,11 +1064,19 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   const currentStatus = q.status || 'not_contacted';
                   const isConverted = currentStatus === 'converted' || q.converted_company_id;
                   const busy = busyId === q.id;
+                  const isBooked = currentStatus === 'demo_booked';
+                  const bookedOverdue = isBooked && isDemoOverdue(q.demo_scheduled_at);
 
                   return (
                     <tr
                       key={q.id}
-                      className="align-top hover:bg-violet-50/60 cursor-pointer"
+                      className={`align-top cursor-pointer ${
+                        isBooked
+                          ? bookedOverdue
+                            ? 'bg-rose-50 hover:bg-rose-100/80'
+                            : 'bg-amber-50 hover:bg-amber-100/70'
+                          : 'hover:bg-violet-50/60'
+                      }`}
                       onClick={() => openDetail(q)}
                     >
                       <td className="px-4 py-3">
@@ -856,6 +1105,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         >
                           {demoEnquiryStatusLabel(currentStatus)}
                         </span>
+                        {isBooked && q.demo_scheduled_at ? (
+                          <p className={`text-[10px] mt-1 font-medium ${bookedOverdue ? 'text-rose-700' : 'text-amber-800'}`}>
+                            {bookedOverdue ? 'Overdue · ' : ''}
+                            {formatDemoSlot(q.demo_scheduled_at)}
+                          </p>
+                        ) : null}
                         {isConverted && q.converted_company_name && (
                           <p className="text-[10px] text-violet-700 mt-1 font-medium">
                             → {q.converted_company_name}
@@ -916,12 +1171,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                             <div className="flex flex-wrap gap-1">
                               {DEMO_ENQUIRY_PIPELINE_STATUSES.map((status) => {
                                 const isActive = currentStatus === status;
+                                const canReschedule = status === 'demo_booked';
                                 return (
                                   <button
                                     key={status}
                                     type="button"
-                                    disabled={busy || isActive}
-                                    onClick={() => updateStatus(q.id, status)}
+                                    disabled={busy || (isActive && !canReschedule)}
+                                    onClick={() => requestStatusChange(q, status)}
                                     className={`rounded border px-1.5 py-0.5 text-[10px] font-medium disabled:opacity-50 ${
                                       isActive
                                         ? 'border-slate-900 bg-slate-900 text-white'
@@ -1195,7 +1451,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         <button
                           key={status}
                           type="button"
-                          onClick={() => setDetailForm((p) => ({ ...p, status }))}
+                          onClick={() => {
+                            if (status === 'demo_booked') {
+                              openDemoScheduler(detailLead);
+                              return;
+                            }
+                            setDetailForm((p) => ({ ...p, status }));
+                          }}
                           className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
                             isActive
                               ? 'border-slate-900 bg-slate-900 text-white'
@@ -1207,6 +1469,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                       );
                     })}
                   </div>
+                  {detailLead.demo_scheduled_at ? (
+                    <p className={`text-[11px] mt-1.5 font-medium ${isDemoOverdue(detailLead.demo_scheduled_at) ? 'text-rose-700' : 'text-amber-800'}`}>
+                      {isDemoOverdue(detailLead.demo_scheduled_at) ? 'Overdue · ' : 'Scheduled · '}
+                      {formatDemoSlot(detailLead.demo_scheduled_at)}
+                    </p>
+                  ) : null}
                 )}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1502,6 +1770,99 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           </div>
         </div>
       )}
+      {bookLead && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            if (!bookSaving) setBookLead(null);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-900">Book a demo</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {bookLead.full_name}
+                {bookLead.business_name ? ` · ${bookLead.business_name}` : ''}
+              </p>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <p className="text-xs font-medium text-slate-700 mb-1.5">Date</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    { id: 'today', label: 'Today' },
+                    { id: 'tomorrow', label: 'Tomorrow' },
+                    { id: 'custom', label: 'Custom date' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setBookDayPreset(opt.id);
+                        if (opt.id === 'today') setBookDate(todayIstDateValue());
+                        if (opt.id === 'tomorrow') setBookDate(tomorrowIstDateValue());
+                        if (opt.id === 'custom' && !bookDate) setBookDate(todayIstDateValue());
+                      }}
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+                        bookDayPreset === opt.id
+                          ? 'border-amber-800 bg-amber-800 text-white'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-amber-50'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                {bookDayPreset === 'custom' ? (
+                  <input
+                    type="date"
+                    value={bookDate}
+                    onChange={(e) => setBookDate(e.target.value)}
+                    className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                ) : (
+                  <p className="mt-2 text-xs text-slate-500">
+                    {bookDayPreset === 'tomorrow' ? tomorrowIstDateValue() : todayIstDateValue()}
+                  </p>
+                )}
+              </div>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-700">Time</span>
+                <input
+                  type="time"
+                  value={bookTime}
+                  onChange={(e) => setBookTime(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={bookSaving}
+                  onClick={() => setBookLead(null)}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={bookSaving}
+                  onClick={submitDemoBook}
+                  className="rounded-lg bg-amber-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {bookSaving ? 'Booking…' : 'Save demo time'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

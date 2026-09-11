@@ -228,7 +228,14 @@ export default function EnquiriesPage() {
                   const currentStatus = q.status || 'not_contacted';
                   const busy = busyId === q.id;
                   return (
-                    <tr key={q.id} className="border-b border-slate-100 hover:bg-slate-50/50 align-top">
+                    <tr
+                      key={q.id}
+                      className={`border-b border-slate-100 align-top ${
+                        currentStatus === 'demo_booked'
+                          ? 'bg-amber-50 hover:bg-amber-100/70'
+                          : 'hover:bg-slate-50/50'
+                      }`}
+                    >
                       <td className="py-2 pr-3 font-medium text-slate-900">{q.full_name || '—'}</td>
                       <td className="py-2 pr-3 text-slate-700">{q.business_name || '—'}</td>
                       <td className="py-2 pr-3 text-slate-700">
@@ -250,7 +257,9 @@ export default function EnquiriesPage() {
                       <td className="py-2 pr-3 text-slate-600 max-w-[180px]">{q.notes || '—'}</td>
                       <td className="py-2 pr-3">
                         <div className="flex flex-wrap gap-1">
-                          {DEMO_ENQUIRY_STATUSES.map((status) => {
+                          {DEMO_ENQUIRY_STATUSES.filter(
+                            (status) => status !== 'demo_booked' && status !== 'converted'
+                          ).map((status) => {
                             const isActive = currentStatus === status;
                             return (
                               <button
