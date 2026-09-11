@@ -1444,37 +1444,39 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     Converted
                   </span>
                 ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {DEMO_ENQUIRY_PIPELINE_STATUSES.map((status) => {
-                      const isActive = detailForm.status === status;
-                      return (
-                        <button
-                          key={status}
-                          type="button"
-                          onClick={() => {
-                            if (status === 'demo_booked') {
-                              openDemoScheduler(detailLead);
-                              return;
-                            }
-                            setDetailForm((p) => ({ ...p, status }));
-                          }}
-                          className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
-                            isActive
-                              ? 'border-slate-900 bg-slate-900 text-white'
-                              : DEMO_ENQUIRY_STATUS_BUTTON_STYLES[status]
-                          }`}
-                        >
-                          {demoEnquiryStatusLabel(status)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {detailLead.demo_scheduled_at ? (
-                    <p className={`text-[11px] mt-1.5 font-medium ${isDemoOverdue(detailLead.demo_scheduled_at) ? 'text-rose-700' : 'text-amber-800'}`}>
-                      {isDemoOverdue(detailLead.demo_scheduled_at) ? 'Overdue · ' : 'Scheduled · '}
-                      {formatDemoSlot(detailLead.demo_scheduled_at)}
-                    </p>
-                  ) : null}
+                  <>
+                    <div className="flex flex-wrap gap-1">
+                      {DEMO_ENQUIRY_PIPELINE_STATUSES.map((status) => {
+                        const isActive = detailForm.status === status;
+                        return (
+                          <button
+                            key={status}
+                            type="button"
+                            onClick={() => {
+                              if (status === 'demo_booked') {
+                                openDemoScheduler(detailLead);
+                                return;
+                              }
+                              setDetailForm((p) => ({ ...p, status }));
+                            }}
+                            className={`rounded border px-2 py-0.5 text-[11px] font-medium ${
+                              isActive
+                                ? 'border-slate-900 bg-slate-900 text-white'
+                                : DEMO_ENQUIRY_STATUS_BUTTON_STYLES[status]
+                            }`}
+                          >
+                            {demoEnquiryStatusLabel(status)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {detailLead.demo_scheduled_at ? (
+                      <p className={`text-[11px] mt-1.5 font-medium ${isDemoOverdue(detailLead.demo_scheduled_at) ? 'text-rose-700' : 'text-amber-800'}`}>
+                        {isDemoOverdue(detailLead.demo_scheduled_at) ? 'Overdue · ' : 'Scheduled · '}
+                        {formatDemoSlot(detailLead.demo_scheduled_at)}
+                      </p>
+                    ) : null}
+                  </>
                 )}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
