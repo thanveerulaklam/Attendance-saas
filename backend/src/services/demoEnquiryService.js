@@ -88,11 +88,27 @@ function normalizeLeadSource(raw) {
   return text.length > 120 ? text.slice(0, 120) : text;
 }
 
+const CALL_OUTCOMES = [
+  'pending',
+  'no_answer',
+  'busy',
+  'voicemail',
+  'callback',
+  'connected',
+  'interested',
+  'not_interested',
+  'wrong_number',
+];
+
 const ENQUIRY_LIST_COLUMNS = `de.id, de.full_name, de.business_name, de.phone_number, de.email,
   de.city, de.state, de.employees_range, de.source, de.expected_plan, de.notes,
   de.status, de.status_updated_at, de.created_at, de.demo_scheduled_at,
-  de.converted_company_id, de.converted_at,
-  c.name AS converted_company_name`;
+  de.last_contacted_at, de.converted_company_id, de.converted_at,
+  c.name AS converted_company_name,
+  last_call.id AS last_call_id,
+  last_call.outcome AS last_call_outcome,
+  last_call.notes AS last_call_notes,
+  last_call.called_at AS last_call_at`;
 
 function normText(v) {
   if (v == null) return '';
@@ -182,7 +198,14 @@ async function canonicalizeLocation(raw, column) {
 
 function enquirySelectFrom() {
   return `FROM demo_enquiries de
-          LEFT JOIN companies c ON c.id = de.converted_company_id`;
+          LEFT JOIN companies c ON c.id = de.converted_company_id
+          LEFT JOIN LATERAL (
+            SELECT id, outcome, notes, called_at
+            FROM demo_enquiry_calls
+            WHERE enquiry_id = de.id
+            ORDER BY called_at DESC, id DESC
+            LIMIT 1
+          ) last_call ON TRUE`;
 }
 
 const DATE_YMD = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -695,6 +718,96 @@ async function updateDemoEnquiryDetails(enquiryId, data) {
   return getDemoEnquiryById(enquiry.id);
 }
 
+function normalizeCallOutcome(raw, { allowPending = true } = {}) {
+  const outcome = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!CALL_OUTCOMES.includes(outcome)) {
+    throw new AppError(
+      `outcome must be one of: ${CALL_OUTCOMES.filter((o) => o !== 'pending').join(', ')}`,
+      400
+    );
+  }
+  if (outcome === 'pending' && !allowPending) {
+    throw new AppError('Pick a call outcome', 400);
+  }
+  return outcome;
+}
+
+async function listEnquiryCalls(enquiryId) {
+  const enquiry = await getDemoEnquiryById(enquiryId);
+  const result = await pool.query(
+    `SELECT id, enquiry_id, outcome, notes, called_at, updated_at
+     FROM demo_enquiry_calls
+     WHERE enquiry_id = $1
+     ORDER BY called_at DESC, id DESC
+     LIMIT 50`,
+    [enquiry.id]
+  );
+  return result.rows;
+}
+
+async function logEnquiryCall(enquiryId, data = {}) {
+  const enquiry = await getDemoEnquiryById(enquiryId);
+  const outcome = Object.prototype.hasOwnProperty.call(data, 'outcome')
+    ? normalizeCallOutcome(data.outcome, { allowPending: true })
+    : 'pending';
+  const notes = data.notes == null || data.notes === '' ? null : normText(data.notes);
+
+  const result = await pool.query(
+    `INSERT INTO demo_enquiry_calls (enquiry_id, outcome, notes, called_at, updated_at)
+     VALUES ($1, $2, $3, NOW(), NOW())
+     RETURNING id, enquiry_id, outcome, notes, called_at, updated_at`,
+    [enquiry.id, outcome, notes]
+  );
+  const call = result.rows[0];
+  await pool.query(`UPDATE demo_enquiries SET last_contacted_at = $2 WHERE id = $1`, [
+    enquiry.id,
+    call.called_at,
+  ]);
+  return {
+    call,
+    enquiry: await getDemoEnquiryById(enquiry.id),
+  };
+}
+
+async function updateEnquiryCall(callId, data = {}) {
+  const id = Number(callId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError('call_id (number) is required', 400);
+  }
+
+  const existing = await pool.query(
+    `SELECT id, enquiry_id, outcome, notes, called_at, updated_at
+     FROM demo_enquiry_calls
+     WHERE id = $1`,
+    [id]
+  );
+  if (existing.rowCount === 0) {
+    throw new AppError('Call record not found', 404);
+  }
+  const current = existing.rows[0];
+  const outcome = Object.prototype.hasOwnProperty.call(data, 'outcome')
+    ? normalizeCallOutcome(data.outcome, { allowPending: true })
+    : current.outcome;
+  const notes = Object.prototype.hasOwnProperty.call(data, 'notes')
+    ? data.notes == null || data.notes === ''
+      ? null
+      : normText(data.notes)
+    : current.notes;
+
+  const result = await pool.query(
+    `UPDATE demo_enquiry_calls
+     SET outcome = $2, notes = $3, updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, enquiry_id, outcome, notes, called_at, updated_at`,
+    [current.id, outcome, notes]
+  );
+
+  return {
+    call: result.rows[0],
+    enquiry: await getDemoEnquiryById(current.enquiry_id),
+  };
+}
+
 async function convertEnquiryToCompany(enquiryId, companyPayload) {
   const enquiry = await getDemoEnquiryById(enquiryId);
   if (enquiry.converted_company_id) {
@@ -755,6 +868,9 @@ module.exports = {
   updateDemoEnquiryDetails,
   bookDemoEnquiry,
   listScheduledDemos,
+  listEnquiryCalls,
+  logEnquiryCall,
+  updateEnquiryCall,
   convertEnquiryToCompany,
   getDemoEnquirySuggestions,
   DEMO_ENQUIRY_STATUSES,

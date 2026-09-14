@@ -125,8 +125,47 @@ export const DEFAULT_CITY_SUGGESTIONS = [
   'Kochi',
 ];
 
+export const CALL_OUTCOMES = [
+  'no_answer',
+  'busy',
+  'voicemail',
+  'callback',
+  'connected',
+  'interested',
+  'not_interested',
+  'wrong_number',
+];
+
+export const CALL_OUTCOME_LABELS = {
+  pending: 'Outcome not logged',
+  no_answer: 'No answer',
+  busy: 'Busy',
+  voicemail: 'Voicemail',
+  callback: 'Call back later',
+  connected: 'Talked',
+  interested: 'Interested',
+  not_interested: 'Not interested',
+  wrong_number: 'Wrong number',
+};
+
+export const CALL_OUTCOME_STYLES = {
+  pending: 'bg-slate-100 text-slate-700 border-slate-200',
+  no_answer: 'bg-slate-100 text-slate-700 border-slate-200',
+  busy: 'bg-orange-50 text-orange-800 border-orange-200',
+  voicemail: 'bg-slate-100 text-slate-700 border-slate-200',
+  callback: 'bg-sky-50 text-sky-800 border-sky-200',
+  connected: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+  interested: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  not_interested: 'bg-rose-50 text-rose-800 border-rose-200',
+  wrong_number: 'bg-rose-50 text-rose-800 border-rose-200',
+};
+
 export function demoEnquiryStatusLabel(status) {
   return DEMO_ENQUIRY_STATUS_LABELS[status] || 'Not contacted';
+}
+
+export function callOutcomeLabel(outcome) {
+  return CALL_OUTCOME_LABELS[outcome] || 'Outcome not logged';
 }
 
 export function leadSourceLabel(source) {

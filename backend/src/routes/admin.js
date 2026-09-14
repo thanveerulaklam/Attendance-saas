@@ -13,6 +13,9 @@ const {
   updateDemoEnquiryDetails,
   listScheduledDemoEnquiries,
   bookDemoEnquiry,
+  listDemoEnquiryCalls,
+  logDemoEnquiryCall,
+  updateDemoEnquiryCall,
   convertDemoEnquiry,
   updateCompanyBilling,
   createCompanyProvisioned,
@@ -94,6 +97,9 @@ router.post('/demo-enquiry-status', updateDemoEnquiryStatus);
 router.post('/demo-enquiry-update', updateDemoEnquiryDetails);
 router.get('/demo-enquiry-scheduled', listScheduledDemoEnquiries);
 router.post('/demo-enquiry-book', bookDemoEnquiry);
+router.get('/demo-enquiry-calls', listDemoEnquiryCalls);
+router.post('/demo-enquiry-call', logDemoEnquiryCall);
+router.post('/demo-enquiry-call-update', updateDemoEnquiryCall);
 router.post('/demo-enquiry-notes', updateDemoEnquiryNotes);
 router.post('/convert-enquiry', convertDemoEnquiry);
 router.post('/company-billing', updateCompanyBilling);

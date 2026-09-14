@@ -342,6 +342,58 @@ async function bookDemoEnquiry(req, res, next) {
 }
 
 /**
+ * GET /api/admin/demo-enquiry-calls?enquiry_id=
+ */
+async function listDemoEnquiryCalls(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.query?.enquiry_id != null ? Number(req.query.enquiry_id) : null;
+    const data = await demoEnquiryService.listEnquiryCalls(enquiryId);
+    res.status(200).json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiry-call
+ * Body: { enquiry_id, outcome?, notes? }
+ */
+async function logDemoEnquiryCall(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    const data = await demoEnquiryService.logEnquiryCall(enquiryId, req.body || {});
+    res.status(201).json({
+      success: true,
+      data,
+      message: 'Call logged.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiry-call-update
+ * Body: { call_id, outcome?, notes? }
+ */
+async function updateDemoEnquiryCall(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const callId = req.body?.call_id != null ? Number(req.body.call_id) : null;
+    const data = await demoEnquiryService.updateEnquiryCall(callId, req.body || {});
+    res.status(200).json({
+      success: true,
+      data,
+      message: 'Call outcome updated.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/admin/demo-enquiry-notes
  * Body: { enquiry_id, notes }
  */
@@ -1836,6 +1888,9 @@ module.exports = {
   updateDemoEnquiryDetails,
   listScheduledDemoEnquiries,
   bookDemoEnquiry,
+  listDemoEnquiryCalls,
+  logDemoEnquiryCall,
+  updateDemoEnquiryCall,
   convertDemoEnquiry,
   updateCompanyBilling,
   createCompanyProvisioned,

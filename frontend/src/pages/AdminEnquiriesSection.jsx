@@ -3,7 +3,10 @@ import {
   DEMO_ENQUIRY_PIPELINE_STATUSES,
   DEMO_ENQUIRY_STATUS_BUTTON_STYLES,
   DEMO_ENQUIRY_STATUS_STYLES,
+  CALL_OUTCOMES,
+  CALL_OUTCOME_STYLES,
   demoEnquiryStatusLabel,
+  callOutcomeLabel,
   leadSourceLabel,
   employeesCountLabel,
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
@@ -125,6 +128,35 @@ function formatDemoSlot(iso) {
     month: 'short',
   }).format(d);
   return `${pretty}, ${time}`;
+}
+
+function formatLastContacted(iso) {
+  if (!iso) return 'Never contacted';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Never contacted';
+  const mins = Math.round((Date.now() - d.getTime()) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min ago`;
+  return formatDemoSlot(iso);
+}
+
+function e164Phone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`;
+  if (digits.startsWith('91') && digits.length >= 12) return `+${digits}`;
+  return `+${digits}`;
+}
+
+function telHref(raw) {
+  const n = e164Phone(raw);
+  return n ? `tel:${n}` : '';
+}
+
+function facetimeAudioHref(raw) {
+  const n = e164Phone(raw);
+  return n ? `facetime-audio:${n}` : '';
 }
 
 function isDemoOverdue(iso) {
@@ -265,6 +297,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [bookDate, setBookDate] = useState('');
   const [bookTime, setBookTime] = useState(DEFAULT_DEMO_TIME);
   const [bookSaving, setBookSaving] = useState(false);
+  const [callLead, setCallLead] = useState(null);
+  const [callRecord, setCallRecord] = useState(null);
+  const [callOutcome, setCallOutcome] = useState('');
+  const [callNotes, setCallNotes] = useState('');
+  const [callSaving, setCallSaving] = useState(false);
+  const [callHistory, setCallHistory] = useState([]);
+  const [callDidDial, setCallDidDial] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
@@ -435,6 +474,129 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     loadStats();
     loadLeads();
     loadScheduledDemos();
+  };
+
+  const applyEnquiry = (enquiry) => {
+    if (!enquiry?.id) return;
+    setLeads((prev) => prev.map((q) => (q.id === enquiry.id ? { ...q, ...enquiry } : q)));
+    setDetailLead((prev) => (prev?.id === enquiry.id ? { ...prev, ...enquiry } : prev));
+    setCallLead((prev) => (prev?.id === enquiry.id ? { ...prev, ...enquiry } : prev));
+    setScheduledDemos((prev) => prev.map((q) => (q.id === enquiry.id ? { ...q, ...enquiry } : q)));
+  };
+
+  const loadCallHistory = useCallback(
+    async (enquiryId) => {
+      if (!adminKey || !enquiryId) {
+        setCallHistory([]);
+        return;
+      }
+      try {
+        const res = await adminFetch(`/demo-enquiry-calls?enquiry_id=${enquiryId}`, {}, adminKey);
+        if (res.status === 401) {
+          onAuthError?.();
+          return;
+        }
+        const json = await res.json().catch(() => ({}));
+        if (res.ok) setCallHistory(Array.isArray(json.data) ? json.data : []);
+      } catch {
+        /* non-blocking */
+      }
+    },
+    [adminKey, onAuthError]
+  );
+
+  const beginCallFeedback = async (lead) => {
+    setCallLead(lead);
+    setCallRecord(null);
+    setCallOutcome('');
+    setCallNotes('');
+    setCallDidDial(true);
+    setCallSaving(true);
+    loadCallHistory(lead.id);
+    try {
+      const res = await adminFetch(
+        '/demo-enquiry-call',
+        { method: 'POST', body: JSON.stringify({ enquiry_id: lead.id, outcome: 'pending' }) },
+        adminKey
+      );
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (!res.ok) throw new Error(json.message || 'Failed to log call');
+      if (json.data?.enquiry) applyEnquiry(json.data.enquiry);
+      if (json.data?.call) {
+        setCallRecord(json.data.call);
+        setCallOutcome(json.data.call.outcome === 'pending' ? '' : json.data.call.outcome || '');
+        setCallNotes(json.data.call.notes || '');
+      }
+      loadCallHistory(lead.id);
+    } catch (err) {
+      setToast?.({ type: 'error', message: err.message || 'Failed to start call log' });
+    } finally {
+      setCallSaving(false);
+    }
+  };
+
+  const editCallFeedback = (lead, call) => {
+    setCallLead(lead);
+    setCallRecord(call || null);
+    setCallOutcome(call?.outcome && call.outcome !== 'pending' ? call.outcome : '');
+    setCallNotes(call?.notes || '');
+    setCallDidDial(false);
+    loadCallHistory(lead.id);
+  };
+
+  const saveCallOutcome = async ({ skip = false } = {}) => {
+    if (!callLead) return;
+    if (skip) {
+      setCallLead(null);
+      setCallRecord(null);
+      setCallDidDial(false);
+      return;
+    }
+    if (!callOutcome) {
+      setToast?.({ type: 'error', message: 'Pick how the call went.' });
+      return;
+    }
+    setCallSaving(true);
+    try {
+      const payload = {
+        outcome: callOutcome,
+        notes: callNotes,
+      };
+      let res;
+      if (callRecord?.id) {
+        res = await adminFetch(
+          '/demo-enquiry-call-update',
+          { method: 'POST', body: JSON.stringify({ call_id: callRecord.id, ...payload }) },
+          adminKey
+        );
+      } else {
+        res = await adminFetch(
+          '/demo-enquiry-call',
+          { method: 'POST', body: JSON.stringify({ enquiry_id: callLead.id, ...payload }) },
+          adminKey
+        );
+      }
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (!res.ok) throw new Error(json.message || 'Failed to save call outcome');
+      if (json.data?.enquiry) applyEnquiry(json.data.enquiry);
+      setCallLead(null);
+      setCallRecord(null);
+      setCallDidDial(false);
+      if (detailLead?.id === callLead.id) loadCallHistory(callLead.id);
+      setToast?.({ type: 'success', message: 'Call outcome saved.' });
+    } catch (err) {
+      setToast?.({ type: 'error', message: err.message || 'Failed to save call outcome' });
+    } finally {
+      setCallSaving(false);
+    }
   };
 
   const openDemoScheduler = (lead) => {
@@ -627,6 +789,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     setDetailLead(lead);
     setDetailForm(editFormFromLead(lead));
     loadSourceSuggestions();
+    loadCallHistory(lead.id);
   };
 
   const closeDetail = () => {
@@ -1122,7 +1285,39 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         )}
                       </td>
                       <td className="px-4 py-3 text-slate-700 tabular-nums">{employeesCountLabel(q.employees_range)}</td>
-                      <td className="px-4 py-3 text-slate-700">{q.phone_number || '—'}</td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="text-slate-700">{q.phone_number || '—'}</div>
+                        {q.phone_number ? (
+                          <a
+                            href={telHref(q.phone_number)}
+                            onClick={() => beginCallFeedback(q)}
+                            className="mt-1 inline-flex items-center rounded-lg bg-emerald-700 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-800"
+                          >
+                            Call
+                          </a>
+                        ) : null}
+                        <p className="text-[10px] text-slate-500 mt-1.5">
+                          Last contacted {formatLastContacted(q.last_call_at || q.last_contacted_at)}
+                        </p>
+                        {q.last_call_outcome ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              editCallFeedback(q, {
+                                id: q.last_call_id,
+                                outcome: q.last_call_outcome,
+                                notes: q.last_call_notes,
+                                called_at: q.last_call_at || q.last_contacted_at,
+                              })
+                            }
+                            className={`mt-0.5 inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+                              CALL_OUTCOME_STYLES[q.last_call_outcome] || CALL_OUTCOME_STYLES.pending
+                            }`}
+                          >
+                            {callOutcomeLabel(q.last_call_outcome)}
+                          </button>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-slate-600 text-xs">{leadSourceLabel(q.source)}</td>
                       <td className="px-4 py-3">
                         <span
@@ -1499,18 +1694,31 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   <h3 className="text-base font-semibold text-slate-900">Lead details</h3>
                   <p className="text-xs text-slate-500 mt-0.5">
                     #{detailLead.id} · Created {formatDateTime(detailLead.created_at)}
+                    {' · Last contacted '}
+                    {formatLastContacted(detailLead.last_call_at || detailLead.last_contacted_at)}
                     {detailLead.converted_company_name
                       ? ` · Converted to ${detailLead.converted_company_name}`
                       : ''}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={closeDetail}
-                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
-                >
-                  Close
-                </button>
+                <div className="flex items-center gap-2">
+                  {detailLead.phone_number ? (
+                    <a
+                      href={telHref(detailLead.phone_number)}
+                      onClick={() => beginCallFeedback(detailLead)}
+                      className="rounded-lg bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-800"
+                    >
+                      Call
+                    </a>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={closeDetail}
+                    className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
             <form onSubmit={handleDetailSubmit} className="p-5 space-y-4">
@@ -1558,6 +1766,42 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                       </p>
                     ) : null}
                   </>
+                )}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-slate-700 mb-1.5">Call history</p>
+                {callHistory.length === 0 ? (
+                  <p className="text-xs text-slate-500">No calls logged yet. Use Call to dial from this Mac.</p>
+                ) : (
+                  <ul className="space-y-1.5">
+                    {callHistory.map((call) => (
+                      <li
+                        key={call.id}
+                        className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-slate-800">
+                            {formatLastContacted(call.called_at)}
+                            <span
+                              className={`ml-1.5 inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+                                CALL_OUTCOME_STYLES[call.outcome] || CALL_OUTCOME_STYLES.pending
+                              }`}
+                            >
+                              {callOutcomeLabel(call.outcome)}
+                            </span>
+                          </p>
+                          {call.notes ? <p className="text-[11px] text-slate-500 mt-0.5">{call.notes}</p> : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => editCallFeedback(detailLead, call)}
+                          className="text-[11px] font-medium text-violet-700 hover:text-violet-900"
+                        >
+                          Update
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1939,6 +2183,113 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   className="rounded-lg bg-amber-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   {bookSaving ? 'Booking…' : 'Save demo time'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {callLead && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/50 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            if (callSaving) return;
+            if (!callRecord || callRecord.outcome === 'pending') {
+              saveCallOutcome({ skip: true });
+              return;
+            }
+            setCallLead(null);
+            setCallRecord(null);
+            setCallDidDial(false);
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-900">How did the call go?</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {callLead.full_name}
+                {callLead.business_name ? ` · ${callLead.business_name}` : ''}
+                {callLead.phone_number ? ` · ${callLead.phone_number}` : ''}
+              </p>
+            </div>
+            <div className="p-5 space-y-4">
+              {callDidDial && callLead.phone_number ? (
+                <p className="text-xs text-slate-600">
+                  This should open FaceTime or Phone on your Mac.
+                  {facetimeAudioHref(callLead.phone_number) ? (
+                    <>
+                      {' '}
+                      If it did not,{' '}
+                      <a
+                        href={facetimeAudioHref(callLead.phone_number)}
+                        className="font-medium text-emerald-800 hover:underline"
+                      >
+                        open FaceTime Audio
+                      </a>
+                      .
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+              <div>
+                <p className="text-xs font-medium text-slate-700 mb-1.5">Outcome</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {CALL_OUTCOMES.map((outcome) => {
+                    const active = callOutcome === outcome;
+                    return (
+                      <button
+                        key={outcome}
+                        type="button"
+                        onClick={() => setCallOutcome(outcome)}
+                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                          active
+                            ? 'border-slate-900 bg-slate-900 text-white'
+                            : CALL_OUTCOME_STYLES[outcome]
+                        }`}
+                      >
+                        {callOutcomeLabel(outcome)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <label className="block">
+                <span className="text-xs font-medium text-slate-700">Notes (optional)</span>
+                <textarea
+                  value={callNotes}
+                  onChange={(e) => setCallNotes(e.target.value)}
+                  rows={3}
+                  placeholder="What did they say? Next step?"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </label>
+              {callHistory.length > 1 ? (
+                <p className="text-[11px] text-slate-500">
+                  Earlier calls stay in the lead. You can update this outcome later from the row or call history.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={callSaving}
+                  onClick={() => saveCallOutcome({ skip: true })}
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm"
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  disabled={callSaving}
+                  onClick={() => saveCallOutcome()}
+                  className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {callSaving ? 'Saving…' : 'Save outcome'}
                 </button>
               </div>
             </div>
