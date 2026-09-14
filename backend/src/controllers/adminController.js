@@ -1,6 +1,6 @@
 const { pool } = require('../config/database');
 const { getEffectiveEmployeeLimit, PLAN_EMPLOYEE_LIMITS } = require('../services/employeeService');
-const { computeNextAmcDueDate } = require('../services/companyService');
+const { computeNextAmcDueDate, isAmcCollectible } = require('../services/companyService');
 const { recordPaymentsFromBillingChange } = require('../services/paymentLedgerService');
 const auditService = require('../services/auditService');
 const authService = require('../services/authService');
@@ -1681,21 +1681,26 @@ async function getCollectionsQueue(req, res, next) {
        LEFT JOIN employees e ON e.company_id = c.id
        WHERE c.status IN ('active', 'locked')
        GROUP BY c.id
-       HAVING (
-         c.subscription_end_date IS NOT NULL
-         AND c.subscription_end_date <= (NOW()::date + $1 * INTERVAL '1 day')
-       )
-       OR c.onetime_payment_status IN ('overdue', 'pending', 'unpaid')
-       OR c.amc_payment_status IN ('overdue', 'pending', 'unpaid')
-       ORDER BY c.subscription_end_date ASC NULLS LAST, c.id ASC`,
-      [days]
+       ORDER BY c.subscription_end_date ASC NULLS LAST, c.id ASC`
     );
-    res.status(200).json({
-      success: true,
-      data: result.rows.map((row) => ({
+    const openPay = new Set(['overdue', 'pending', 'unpaid']);
+    const rows = result.rows
+      .map((row) => ({
         ...row,
         next_amc_due_date: computeNextAmcDueDate(row),
-      })),
+      }))
+      .filter((row) => {
+        const accessSoon =
+          row.subscription_end_date &&
+          new Date(row.subscription_end_date) <= new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+        const otcOpen = openPay.has(row.onetime_payment_status || 'unpaid');
+        const amcOpen = openPay.has(row.amc_payment_status || 'unpaid');
+        const amcDueSoon = amcOpen && isAmcCollectible(row, { withinDays: days });
+        return Boolean(accessSoon || otcOpen || amcDueSoon);
+      });
+    res.status(200).json({
+      success: true,
+      data: rows,
       meta: { days },
     });
   } catch (err) {

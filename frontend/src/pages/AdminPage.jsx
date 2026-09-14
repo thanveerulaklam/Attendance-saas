@@ -160,6 +160,8 @@ function paymentStatusBadgeClass(status) {
       return 'bg-amber-50 text-amber-800 border-amber-200';
     case 'overdue':
       return 'bg-rose-50 text-rose-800 border-rose-200';
+    case 'not_due':
+      return 'bg-sky-50 text-sky-800 border-sky-100';
     case 'unpaid':
     default:
       return 'bg-slate-100 text-slate-700 border-slate-200';
@@ -222,6 +224,60 @@ function paymentNeedsAttention(status) {
   return ['unpaid', 'overdue', 'pending'].includes(status || 'unpaid');
 }
 
+function padDatePart(n) {
+  return String(n).padStart(2, '0');
+}
+
+function toCalendarIso(dateLike) {
+  if (dateLike == null || dateLike === '') return null;
+  if (dateLike instanceof Date) {
+    if (Number.isNaN(dateLike.getTime())) return null;
+    return `${dateLike.getFullYear()}-${padDatePart(dateLike.getMonth() + 1)}-${padDatePart(dateLike.getDate())}`;
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(dateLike).trim());
+  if (match) return match[1];
+  const parsed = new Date(dateLike);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return toCalendarIso(parsed);
+}
+
+function addDaysToIso(iso, days) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const next = new Date(y, m - 1, d + Number(days || 0));
+  return `${next.getFullYear()}-${padDatePart(next.getMonth() + 1)}-${padDatePart(next.getDate())}`;
+}
+
+function todayCalendarIso() {
+  return toCalendarIso(new Date());
+}
+
+function isAmcCollectible(company, withinDays = 0) {
+  const due = toCalendarIso(company?.next_amc_due_date) || computeNextAmcDueDateClient(company);
+  if (!due) return false;
+  const today = todayCalendarIso();
+  const limit = Number(withinDays) > 0 ? addDaysToIso(today, withinDays) : today;
+  return Boolean(limit && due <= limit);
+}
+
+function amcPaymentNeedsAttention(company) {
+  if (!isAmcCollectible(company, 0)) return false;
+  return paymentNeedsAttention(company?.amc_payment_status);
+}
+
+function displayAmcPaymentStatus(company) {
+  const raw = company?.amc_payment_status || 'unpaid';
+  if (raw === 'paid') return 'paid';
+  if (!isAmcCollectible(company, 0)) return 'not_due';
+  return raw;
+}
+
+function amcStatusLabel(company) {
+  const status = displayAmcPaymentStatus(company);
+  if (status === 'not_due') return 'not due yet';
+  return status;
+}
+
 function isOnetimePaid(company) {
   if (!company) return false;
   if (company.onetime_fee_paid === true) return true;
@@ -241,7 +297,7 @@ function getBillingAttentionReasons(company) {
   if (amcDue.level === 'critical') reasons.push(`AMC overdue (${amcDue.text})`);
   else if (amcDue.level === 'warn') reasons.push(`AMC due soon (${amcDue.text})`);
   if (paymentNeedsAttention(otc)) reasons.push(`One-time ${otc}`);
-  if (paymentNeedsAttention(amc)) reasons.push(`AMC ${amc}`);
+  if (amcPaymentNeedsAttention(company)) reasons.push(`AMC ${amc}`);
   if (company.status === 'locked') reasons.push('Account locked');
   return reasons;
 }
@@ -253,11 +309,12 @@ function companyNeedsBillingAttention(company) {
 function computeNextAmcDueDateClient(company) {
   if (!company) return null;
   const addYear = (dateLike) => {
-    if (!dateLike) return null;
-    const d = new Date(dateLike);
-    if (Number.isNaN(d.getTime())) return null;
-    d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().slice(0, 10);
+    const iso = toCalendarIso(dateLike);
+    if (!iso) return null;
+    const [y, m, d] = iso.split('-').map(Number);
+    const next = new Date(y + 1, m - 1, d);
+    if (next.getMonth() !== m - 1) next.setDate(0);
+    return `${next.getFullYear()}-${padDatePart(next.getMonth() + 1)}-${padDatePart(next.getDate())}`;
   };
   if (company.last_amc_payment_date) return addYear(company.last_amc_payment_date);
   if (company.last_onetime_payment_date) return addYear(company.last_onetime_payment_date);
@@ -293,7 +350,7 @@ function PaymentStatusPill({ status, label }) {
       )}`}
       title={label}
     >
-      {status || 'unpaid'}
+      {label || (status === 'not_due' ? 'not due yet' : status) || 'unpaid'}
     </span>
   );
 }
@@ -1381,16 +1438,18 @@ export default function AdminPage() {
     }
     if (queueFilter === 'overdue') {
       return (
-        item.onetime_payment_status === 'overdue' || item.amc_payment_status === 'overdue'
+        item.onetime_payment_status === 'overdue' ||
+        (amcPaymentNeedsAttention(item) && item.amc_payment_status === 'overdue')
       );
     }
     if (queueFilter === 'pending') {
       return (
-        item.onetime_payment_status === 'pending' || item.amc_payment_status === 'pending'
+        item.onetime_payment_status === 'pending' ||
+        (amcPaymentNeedsAttention(item) && item.amc_payment_status === 'pending')
       );
     }
     if (queueFilter === 'unpaid') {
-      return item.onetime_payment_status === 'unpaid' || item.amc_payment_status === 'unpaid';
+      return item.onetime_payment_status === 'unpaid' || amcPaymentNeedsAttention(item);
     }
     return true;
   });
@@ -1406,7 +1465,7 @@ export default function AdminPage() {
       return u.level === 'critical' || u.level === 'warn';
     }).length,
     unpaidOtc: customers.filter((c) => paymentNeedsAttention(c.onetime_payment_status)).length,
-    unpaidAmc: customers.filter((c) => paymentNeedsAttention(c.amc_payment_status)).length,
+    unpaidAmc: customers.filter((c) => amcPaymentNeedsAttention(c)).length,
   };
 
   const rosterCompanies = companies.filter((c) => {
@@ -1438,8 +1497,7 @@ export default function AdminPage() {
     }
     if (customerBillingFilter === 'payments') {
       return (
-        paymentNeedsAttention(c.onetime_payment_status) ||
-        paymentNeedsAttention(c.amc_payment_status)
+        paymentNeedsAttention(c.onetime_payment_status) || amcPaymentNeedsAttention(c)
       );
     }
     if (customerBillingFilter === 'access_30') {
@@ -1451,7 +1509,7 @@ export default function AdminPage() {
       return u.level === 'critical' || u.level === 'warn';
     }
     if (customerBillingFilter === 'unpaid_otc') return paymentNeedsAttention(c.onetime_payment_status);
-    if (customerBillingFilter === 'unpaid_amc') return paymentNeedsAttention(c.amc_payment_status);
+    if (customerBillingFilter === 'unpaid_amc') return amcPaymentNeedsAttention(c);
     return true;
   });
 
@@ -1786,7 +1844,7 @@ export default function AdminPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <PaymentStatusPill status={q.amc_payment_status} />
+                          <PaymentStatusPill status={displayAmcPaymentStatus(q)} />
                           <div className={`mt-1 text-xs ${urgencyTextClass(amcUrgency.level)}`}>
                             Due {formatDateShort(q.next_amc_due_date)}
                           </div>
@@ -2058,7 +2116,7 @@ export default function AdminPage() {
                           )}
                         </td>
                         <td className="px-4 py-2.5">
-                          <PaymentStatusPill status={c.amc_payment_status} />
+                          <PaymentStatusPill status={displayAmcPaymentStatus(c)} />
                           <div className={`mt-1 text-xs ${urgencyTextClass(amcUrgency.level)}`}>
                             Next due {formatDateShort(c.next_amc_due_date)}
                           </div>
@@ -2211,11 +2269,11 @@ export default function AdminPage() {
                       </span>
                       <span
                         className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentStatusBadgeClass(
-                          detailsCompany.amc_payment_status || 'unpaid'
+                          displayAmcPaymentStatus(detailsCompany)
                         )}`}
-                        title="Annual maintenance"
+                        title="Annual maintenance starts 1 year after the start date"
                       >
-                        AMC: {detailsCompany.amc_payment_status || 'unpaid'}
+                        AMC: {amcStatusLabel(detailsCompany)}
                       </span>
                     </div>
                   </div>
@@ -2308,7 +2366,7 @@ export default function AdminPage() {
                         {billingIsAnnualOnly ? 'Annual subscription' : 'AMC (annual)'}
                       </p>
                       <div className="mt-1 flex items-center gap-2">
-                        <PaymentStatusPill status={detailsCompany.amc_payment_status} />
+                        <PaymentStatusPill status={displayAmcPaymentStatus(detailsCompany)} />
                         <span className="text-sm font-semibold text-slate-900">
                           {formatCompanyMoney(detailsCompany.amc_amount, detailsCompany.currency)}
                         </span>
@@ -2513,6 +2571,11 @@ export default function AdminPage() {
                           <option value="pending">Pending</option>
                           <option value="overdue">Overdue</option>
                         </select>
+                        {displayAmcPaymentStatus(detailsCompany) === 'not_due' && (
+                          <p className="mt-1 text-[11px] text-sky-700">
+                            Not collectible until {formatDateShort(detailsCompany.next_amc_due_date)} — first year is covered from the start date.
+                          </p>
+                        )}
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">

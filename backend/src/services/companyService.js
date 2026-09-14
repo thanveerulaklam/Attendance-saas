@@ -14,13 +14,45 @@ const {
  * - Before any AMC: 1 year from one-time fee payment (first year covered by one-time; AMC starts after).
  * - Fallback: 1 year from access start if one-time date not recorded.
  */
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function toCalendarIso(dateLike) {
+  if (dateLike == null || dateLike === '') return null;
+  if (dateLike instanceof Date) {
+    if (Number.isNaN(dateLike.getTime())) return null;
+    const utcMidnight =
+      dateLike.getUTCHours() === 0 &&
+      dateLike.getUTCMinutes() === 0 &&
+      dateLike.getUTCSeconds() === 0 &&
+      dateLike.getUTCMilliseconds() === 0;
+    const y = utcMidnight ? dateLike.getUTCFullYear() : dateLike.getFullYear();
+    const m = (utcMidnight ? dateLike.getUTCMonth() : dateLike.getMonth()) + 1;
+    const d = utcMidnight ? dateLike.getUTCDate() : dateLike.getDate();
+    return `${y}-${pad2(m)}-${pad2(d)}`;
+  }
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(dateLike).trim());
+  if (match) return match[1];
+  const parsed = new Date(dateLike);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return toCalendarIso(parsed);
+}
+
+function addDaysToIso(iso, days) {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const next = new Date(y, m - 1, d + Number(days || 0));
+  return `${next.getFullYear()}-${pad2(next.getMonth() + 1)}-${pad2(next.getDate())}`;
+}
+
 function addOneYearIso(dateLike) {
-  if (!dateLike) return null;
-  const d = new Date(dateLike);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setHours(0, 0, 0, 0);
-  d.setFullYear(d.getFullYear() + 1);
-  return d.toISOString().slice(0, 10);
+  const iso = toCalendarIso(dateLike);
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  const next = new Date(y + 1, m - 1, d);
+  if (next.getMonth() !== m - 1) next.setDate(0);
+  return `${next.getFullYear()}-${pad2(next.getMonth() + 1)}-${pad2(next.getDate())}`;
 }
 
 function computeNextAmcDueDate(company) {
@@ -35,6 +67,16 @@ function computeNextAmcDueDate(company) {
     return addOneYearIso(company.subscription_start_date);
   }
   return null;
+}
+
+/** AMC is billed from the first anniversary, not during year one. */
+function isAmcCollectible(company, { asOf = new Date(), withinDays = 0 } = {}) {
+  const due = computeNextAmcDueDate(company);
+  if (!due) return false;
+  const asOfIso = toCalendarIso(asOf);
+  if (!asOfIso) return false;
+  const limit = Number(withinDays) > 0 ? addDaysToIso(asOfIso, withinDays) : asOfIso;
+  return Boolean(limit && due <= limit);
 }
 
 function branchesAllowedTotal(company) {
@@ -474,6 +516,7 @@ module.exports = {
   updateSubscription,
   updateBillingMetadata,
   computeNextAmcDueDate,
+  isAmcCollectible,
   branchesAllowedTotal,
 };
 
