@@ -347,6 +347,7 @@ export default function AdminPage() {
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueFilter, setQueueFilter] = useState('all');
   const [customerBillingFilter, setCustomerBillingFilter] = useState('all');
+  const [companyStatusFilter, setCompanyStatusFilter] = useState('customers');
   const [renewBusyId, setRenewBusyId] = useState(null);
   const [billingQuickBusyId, setBillingQuickBusyId] = useState(null);
   const [adminTab, setAdminTab] = useState('operations');
@@ -1327,6 +1328,51 @@ export default function AdminPage() {
   const totals = overview?.totals || {};
   const companies = Array.isArray(overview?.companies) ? overview.companies : [];
   const customers = companies.filter((c) => c.status === 'active' || c.status === 'locked');
+  const scrollToSection = (id) => {
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const selectStatusCard = (key) => {
+    const next =
+      key === 'activeCompanies'
+        ? 'active'
+        : key === 'pendingCompanies'
+          ? 'pending'
+          : key === 'declinedCompanies'
+            ? 'declined'
+            : key === 'lockedCompanies'
+              ? 'locked'
+              : 'all';
+    setCompanyStatusFilter((prev) => (prev === next ? 'customers' : next));
+    setCustomerBillingFilter('all');
+    if (next === 'pending') scrollToSection('pending-signups');
+    else scrollToSection('company-roster');
+  };
+
+  const selectBillingCard = (key) => {
+    const next =
+      key === 'needAction'
+        ? 'action'
+        : key === 'accessExpiring'
+          ? 'access_30'
+          : key === 'amcDueSoon'
+            ? 'amc_30'
+            : key === 'unpaidOtc'
+              ? 'unpaid_otc'
+              : key === 'unpaidAmc'
+                ? 'unpaid_amc'
+                : 'all';
+    setCustomerBillingFilter((prev) => (prev === next ? 'all' : next));
+    setCompanyStatusFilter('customers');
+    if (key === 'needAction') {
+      setQueueFilter('all');
+      scrollToSection('billing-action-queue');
+      return;
+    }
+    scrollToSection('company-roster');
+  };
   const filteredQueue = collectionsQueue.filter((item) => {
     if (queueFilter === 'expired') return getSubscriptionUrgency(item.subscription_end_date).isExpired;
     if (queueFilter === 'amc_due') {
@@ -1363,7 +1409,13 @@ export default function AdminPage() {
     unpaidAmc: customers.filter((c) => paymentNeedsAttention(c.amc_payment_status)).length,
   };
 
-  const sortedCustomers = [...customers].sort((a, b) => {
+  const rosterCompanies = companies.filter((c) => {
+    if (companyStatusFilter === 'all') return true;
+    if (companyStatusFilter === 'customers') return c.status === 'active' || c.status === 'locked';
+    return c.status === companyStatusFilter;
+  });
+
+  const sortedCustomers = [...rosterCompanies].sort((a, b) => {
     const aNeeds = companyNeedsBillingAttention(a) ? 0 : 1;
     const bNeeds = companyNeedsBillingAttention(b) ? 0 : 1;
     if (aNeeds !== bNeeds) return aNeeds - bNeeds;
@@ -1390,8 +1442,41 @@ export default function AdminPage() {
         paymentNeedsAttention(c.amc_payment_status)
       );
     }
+    if (customerBillingFilter === 'access_30') {
+      const d = daysUntil(c.subscription_end_date);
+      return d != null && d <= 30;
+    }
+    if (customerBillingFilter === 'amc_30') {
+      const u = getDateUrgency(c.next_amc_due_date, 30);
+      return u.level === 'critical' || u.level === 'warn';
+    }
+    if (customerBillingFilter === 'unpaid_otc') return paymentNeedsAttention(c.onetime_payment_status);
+    if (customerBillingFilter === 'unpaid_amc') return paymentNeedsAttention(c.amc_payment_status);
     return true;
   });
+
+  const rosterHeading =
+    companyStatusFilter === 'pending'
+      ? 'Pending approval'
+      : companyStatusFilter === 'declined'
+        ? 'Declined companies'
+        : companyStatusFilter === 'locked'
+          ? 'Locked companies'
+          : companyStatusFilter === 'active'
+            ? 'Approved (active) companies'
+            : companyStatusFilter === 'all'
+              ? 'All companies'
+              : customerBillingFilter === 'action'
+                ? 'Needs attention'
+                : customerBillingFilter === 'access_30'
+                  ? 'Access ending within 30 days'
+                  : customerBillingFilter === 'amc_30'
+                    ? 'AMC due within 30 days'
+                    : customerBillingFilter === 'unpaid_otc'
+                      ? 'One-time unpaid / overdue / pending'
+                      : customerBillingFilter === 'unpaid_amc'
+                        ? 'AMC unpaid / overdue / pending'
+                        : 'All customers — billing register';
   const detailsDerived = detailsCompany ? deriveSubscriptionDates(detailsCompany) : { start: null, end: null };
   const detailsEndLabel = detailsDerived.end ? detailsDerived.end.toLocaleDateString() : null;
   const billingPlanHints = detailsCompany
@@ -1492,10 +1577,20 @@ export default function AdminPage() {
               lockedCompanies: 'bg-slate-500',
             };
             const value = totals[key] ?? 0;
+            const selected =
+              (key === 'totalCompanies' && companyStatusFilter === 'all') ||
+              (key === 'activeCompanies' && companyStatusFilter === 'active') ||
+              (key === 'pendingCompanies' && companyStatusFilter === 'pending') ||
+              (key === 'declinedCompanies' && companyStatusFilter === 'declined') ||
+              (key === 'lockedCompanies' && companyStatusFilter === 'locked');
             return (
-              <article
+              <button
                 key={key}
-                className="rounded-xl bg-white shadow-sm border border-slate-200 px-4 py-3 flex flex-col justify-between"
+                type="button"
+                onClick={() => selectStatusCard(key)}
+                className={`rounded-xl bg-white shadow-sm border px-4 py-3 flex flex-col justify-between text-left transition-shadow hover:shadow-md ${
+                  selected ? 'border-slate-900 ring-2 ring-slate-900/10' : 'border-slate-200'
+                }`}
               >
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -1518,7 +1613,7 @@ export default function AdminPage() {
                 <p className="text-2xl font-semibold text-slate-900">
                   {overviewLoading && !overview ? '…' : value}
                 </p>
-              </article>
+              </button>
             );
           })}
         </div>
@@ -1581,12 +1676,27 @@ export default function AdminPage() {
                 tone: billingMetrics.unpaidAmc > 0 ? 'border-slate-300 bg-slate-50' : 'border-slate-200 bg-white',
                 valueTone: 'text-slate-900',
               },
-            ].map((card) => (
-              <div key={card.key} className={`rounded-xl border px-3 py-3 ${card.tone}`}>
-                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{card.label}</p>
-                <p className={`mt-1 text-2xl font-semibold tabular-nums ${card.valueTone}`}>{card.value}</p>
-              </div>
-            ))}
+            ].map((card) => {
+              const selected =
+                (card.key === 'needAction' && customerBillingFilter === 'action') ||
+                (card.key === 'accessExpiring' && customerBillingFilter === 'access_30') ||
+                (card.key === 'amcDueSoon' && customerBillingFilter === 'amc_30') ||
+                (card.key === 'unpaidOtc' && customerBillingFilter === 'unpaid_otc') ||
+                (card.key === 'unpaidAmc' && customerBillingFilter === 'unpaid_amc');
+              return (
+                <button
+                  key={card.key}
+                  type="button"
+                  onClick={() => selectBillingCard(card.key)}
+                  className={`rounded-xl border px-3 py-3 text-left transition-shadow hover:shadow-md ${card.tone} ${
+                    selected ? 'ring-2 ring-indigo-500/40 border-indigo-400' : ''
+                  }`}
+                >
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{card.label}</p>
+                  <p className={`mt-1 text-2xl font-semibold tabular-nums ${card.valueTone}`}>{card.value}</p>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1746,7 +1856,12 @@ export default function AdminPage() {
         </div>
 
         {/* Pending signup requests */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
+        <div
+          id="pending-signups"
+          className={`rounded-xl border bg-white shadow-sm overflow-hidden mb-6 ${
+            companyStatusFilter === 'pending' ? 'border-amber-400 ring-2 ring-amber-400/30' : 'border-slate-200'
+          }`}
+        >
           <div className="px-4 py-3 border-b border-slate-200 bg-slate-50">
             <h2 className="text-sm font-semibold text-slate-900">Pending signup requests</h2>
             <p className="text-xs text-slate-500">Review self-service registrations. Approve fills in plan, limits, and billing.</p>
@@ -1821,23 +1936,30 @@ export default function AdminPage() {
         </div>
 
         {/* All customers — billing register */}
-        <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
+        <div id="company-roster" className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden mb-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">All customers — billing register</h2>
+              <h2 className="text-sm font-semibold text-slate-900">{rosterHeading}</h2>
               <p className="text-xs text-slate-500">
-                Sorted by urgency. Click a row for full billing form, limits, and account controls.
+                {displayedCustomers.length} shown. Click a row for full billing form, limits, and account controls.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {overviewLoading && <span className="text-xs text-slate-500">Refreshing…</span>}
               <select
                 value={customerBillingFilter}
-                onChange={(e) => setCustomerBillingFilter(e.target.value)}
+                onChange={(e) => {
+                  setCustomerBillingFilter(e.target.value);
+                  if (e.target.value !== 'all') setCompanyStatusFilter('customers');
+                }}
                 className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs"
               >
-                <option value="all">All customers</option>
+                <option value="all">All in this list</option>
                 <option value="action">Needs attention</option>
+                <option value="access_30">Access ≤ 30 days</option>
+                <option value="amc_30">AMC due ≤ 30 days</option>
+                <option value="unpaid_otc">One-time unpaid+</option>
+                <option value="unpaid_amc">AMC unpaid+</option>
                 <option value="renewal">Renewal / access due</option>
                 <option value="payments">Payment issues</option>
               </select>
@@ -1847,9 +1969,15 @@ export default function AdminPage() {
             <div className="p-6 text-sm text-slate-500">Loading overview…</div>
           ) : displayedCustomers.length === 0 ? (
             <div className="p-6 text-sm text-slate-500">
-              {customers.length === 0
-                ? 'No customers yet. Create a company above or approve a pending request.'
-                : 'No customers match this filter.'}
+              {rosterCompanies.length === 0
+                ? companyStatusFilter === 'declined'
+                  ? 'No declined companies.'
+                  : companyStatusFilter === 'pending'
+                    ? 'No pending requests.'
+                    : companyStatusFilter === 'locked'
+                      ? 'No locked companies.'
+                      : 'No companies in this view.'
+                : 'No companies match this filter.'}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1879,7 +2007,11 @@ export default function AdminPage() {
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
                         : c.status === 'locked'
                           ? 'bg-slate-100 text-slate-800 border-slate-200'
-                          : 'bg-slate-50 text-slate-700 border-slate-200';
+                          : c.status === 'declined'
+                            ? 'bg-rose-50 text-rose-700 border-rose-100'
+                            : c.status === 'pending'
+                              ? 'bg-amber-50 text-amber-800 border-amber-100'
+                              : 'bg-slate-50 text-slate-700 border-slate-200';
                     const busy = renewBusyId === c.id || billingQuickBusyId === c.id;
                     return (
                       <tr
