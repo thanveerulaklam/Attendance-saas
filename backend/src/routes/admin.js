@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const {
   listPendingCompanies,
@@ -8,6 +9,8 @@ const {
   getDemoEnquiryStats,
   getDemoEnquirySuggestions,
   createAdminDemoEnquiry,
+  downloadDemoEnquiryImportTemplate,
+  bulkCreateAdminDemoEnquiries,
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   updateDemoEnquiryDetails,
@@ -38,6 +41,23 @@ const {
 const { requireApprovalSecret, requireAdminIpAllowlist } = require('../middleware/approvalSecret');
 
 const router = express.Router();
+
+const leadImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+});
+
+function handleMulterLeadImport(req, res, next) {
+  leadImportUpload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, message: 'File too large (maximum 10 MB).' });
+      }
+      return next(err);
+    }
+    next();
+  });
+}
 
 // Count only failed admin responses (401/403) — slows brute-force on ADMIN_APPROVAL_SECRET.
 const adminFailedAuthLimiter = rateLimit({
@@ -92,7 +112,9 @@ router.post('/renew-company-subscription', renewCompanySubscription);
 router.get('/demo-enquiries', listDemoEnquiries);
 router.get('/demo-enquiry-stats', getDemoEnquiryStats);
 router.get('/demo-enquiry-suggestions', getDemoEnquirySuggestions);
+router.get('/demo-enquiry-import-template', downloadDemoEnquiryImportTemplate);
 router.post('/demo-enquiries', createAdminDemoEnquiry);
+router.post('/demo-enquiries-bulk', handleMulterLeadImport, bulkCreateAdminDemoEnquiries);
 router.post('/demo-enquiry-status', updateDemoEnquiryStatus);
 router.post('/demo-enquiry-update', updateDemoEnquiryDetails);
 router.get('/demo-enquiry-scheduled', listScheduledDemoEnquiries);

@@ -158,6 +158,19 @@ export const CALL_OUTCOME_GROUPS = [
   },
 ];
 
+/** Last-call chips on the lead table (pipeline statuses already have their own row). */
+export const CALL_OUTCOME_FILTERS = [
+  'pending',
+  'no_answer',
+  'busy',
+  'voicemail',
+  'wrong_number',
+  'connected',
+  'callback',
+  'interested',
+  'not_interested',
+];
+
 export const CALL_OUTCOMES_REQUIRE_FOLLOW_UP = ['callback', 'demo_booked'];
 export const CALL_OUTCOMES_OPTIONAL_FOLLOW_UP = ['no_answer', 'busy', 'voicemail', 'interested', 'demo_given'];
 export const CALL_OUTCOMES_REQUIRE_REASON = ['not_interested', 'lost'];

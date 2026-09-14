@@ -4,6 +4,7 @@ import {
   DEMO_ENQUIRY_STATUS_BUTTON_STYLES,
   DEMO_ENQUIRY_STATUS_STYLES,
   CALL_OUTCOME_GROUPS,
+  CALL_OUTCOME_FILTERS,
   CALL_OUTCOMES_REQUIRE_REASON,
   CALL_OUTCOME_STYLES,
   demoEnquiryStatusLabel,
@@ -18,6 +19,7 @@ import {
   DEFAULT_STATE_SUGGESTIONS,
 } from '../constants/demoEnquiryStatus';
 import SuggestInput from '../components/SuggestInput';
+import LeadBulkImportModal from '../components/LeadBulkImportModal';
 import {
   adminPlanFormDefaults,
   applyAdminPlanFields,
@@ -29,12 +31,27 @@ import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../consta
 
 const PAGE_SIZE = 25;
 
+function chipCount(value) {
+  if (value == null) return '—';
+  return Number(value) || 0;
+}
+
+function statusChipCount(id, stats) {
+  if (!stats) return null;
+  if (id === 'all') return stats.total ?? 0;
+  if (id === 'open') return stats.open ?? 0;
+  return stats.by_status?.[id] ?? 0;
+}
+
 function adminFetch(path, options = {}, key) {
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers = {
-    'Content-Type': 'application/json',
     'X-Approval-Secret': key,
     ...(options.headers || {}),
   };
+  if (!isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
   return fetch(`/api/admin${path}`, { ...options, headers });
 }
 
@@ -346,6 +363,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState('open');
+  const [callOutcomeFilter, setCallOutcomeFilter] = useState('');
   const [datePreset, setDatePreset] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -372,6 +390,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [callAltPhone, setCallAltPhone] = useState('');
 
   const [addOpen, setAddOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [addSaving, setAddSaving] = useState(false);
   const [duplicateLead, setDuplicateLead] = useState(null);
@@ -469,6 +488,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       } else if (statusFilter !== 'all') {
         params.set('status', statusFilter);
       }
+      if (callOutcomeFilter) params.set('call_outcome', callOutcomeFilter);
       if (searchQuery.trim()) params.set('q', searchQuery.trim());
       if (appliedDateRange.from) params.set('from', appliedDateRange.from);
       if (appliedDateRange.to) params.set('to', appliedDateRange.to);
@@ -490,7 +510,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     } finally {
       setLoading(false);
     }
-  }, [adminKey, page, statusFilter, searchQuery, onAuthError, appliedDateRange.from, appliedDateRange.to]);
+  }, [adminKey, page, statusFilter, callOutcomeFilter, searchQuery, onAuthError, appliedDateRange.from, appliedDateRange.to]);
 
   const loadScheduledDemos = useCallback(async () => {
     if (!adminKey) return;
@@ -1138,6 +1158,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             </button>
             <button
               type="button"
+              onClick={() => setBulkOpen(true)}
+              className="rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50"
+            >
+              Bulk upload
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setAddForm(emptyAddForm());
                 setDuplicateLead(null);
@@ -1324,23 +1351,59 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               { id: 'all', label: 'All' },
               ...DEMO_ENQUIRY_PIPELINE_STATUSES.map((s) => ({ id: s, label: demoEnquiryStatusLabel(s) })),
               { id: 'converted', label: 'Converted' },
-            ].map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                onClick={() => {
-                  setPage(1);
-                  setStatusFilter(f.id);
-                }}
-                className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
-                  statusFilter === f.id
-                    ? 'border-violet-700 bg-violet-700 text-white'
-                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+            ].map((f) => {
+              const selected = statusFilter === f.id;
+              const count = statusChipCount(f.id, stats);
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => {
+                    setPage(1);
+                    setStatusFilter(f.id);
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                    selected
+                      ? 'border-violet-700 bg-violet-700 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {f.label}
+                  <span className={`tabular-nums ${selected ? 'text-white/85' : 'text-slate-400'}`}>
+                    {chipCount(count)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mr-0.5">
+              Last call
+            </span>
+            {CALL_OUTCOME_FILTERS.map((outcome) => {
+              const selected = callOutcomeFilter === outcome;
+              const count = stats?.by_call_outcome?.[outcome];
+              return (
+                <button
+                  key={outcome}
+                  type="button"
+                  onClick={() => {
+                    setPage(1);
+                    setCallOutcomeFilter((prev) => (prev === outcome ? '' : outcome));
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                    selected
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  {outcome === 'pending' ? 'Not logged' : callOutcomeLabel(outcome)}
+                  <span className={`tabular-nums ${selected ? 'text-white/85' : 'text-slate-400'}`}>
+                    {chipCount(count)}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -1355,22 +1418,31 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             <p className="text-slate-600 font-medium">No leads in this view</p>
             <p className="text-sm text-slate-500 mt-1">
               {datePreset === 'all'
-                ? 'Add a lead manually or wait for landing-page submissions.'
+                ? 'Add a lead manually, bulk-upload from WhatsApp, or wait for landing-page submissions.'
                 : 'No leads in this date range. Try All time or a wider custom range.'}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setAddForm(emptyAddForm());
-                setDuplicateLead(null);
-                setDuplicateMatchCount(0);
-                setAddOpen(true);
-                loadSourceSuggestions();
-              }}
-              className="mt-4 rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white hover:bg-violet-800"
-            >
-              Add your first lead
-            </button>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setBulkOpen(true)}
+                className="rounded-lg border border-violet-200 bg-white px-4 py-2 text-sm font-medium text-violet-800 hover:bg-violet-50"
+              >
+                Bulk upload
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddForm(emptyAddForm());
+                  setDuplicateLead(null);
+                  setDuplicateMatchCount(0);
+                  setAddOpen(true);
+                  loadSourceSuggestions();
+                }}
+                className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white hover:bg-violet-800"
+              >
+                Add your first lead
+              </button>
+            </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1605,6 +1677,24 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           </div>
         )}
       </div>
+
+      <LeadBulkImportModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        adminFetch={(path, options = {}) => adminFetch(path, options, adminKey)}
+        onAuthError={onAuthError}
+        onComplete={(summary) => {
+          refreshAll();
+          if (!summary) return;
+          const created = summary.created || 0;
+          const skipped = summary.skipped || 0;
+          const failed = summary.failed || 0;
+          setToast?.({
+            type: created > 0 && failed === 0 ? 'success' : failed > 0 ? 'error' : 'success',
+            message: `Imported ${created} lead${created === 1 ? '' : 's'}. ${skipped} skipped, ${failed} failed.`,
+          });
+        }}
+      />
 
       {addOpen && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true">

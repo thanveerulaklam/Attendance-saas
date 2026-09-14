@@ -355,7 +355,16 @@ async function getDemoEnquiryById(enquiryId) {
 
 async function listDemoEnquiries(
   _companyIdIgnored,
-  { page = 1, limit = 20, status = null, q = null, pipeline = null, from = null, to = null } = {}
+  {
+    page = 1,
+    limit = 20,
+    status = null,
+    q = null,
+    pipeline = null,
+    from = null,
+    to = null,
+    call_outcome = null,
+  } = {}
 ) {
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
@@ -382,6 +391,23 @@ async function listDemoEnquiries(
     conditions.push(`de.status NOT IN ('lost', 'converted')`);
   }
 
+  const normalizedCallOutcome =
+    typeof call_outcome === 'string' && call_outcome.trim()
+      ? call_outcome.trim().toLowerCase()
+      : null;
+  if (normalizedCallOutcome) {
+    if (!CALL_OUTCOMES.includes(normalizedCallOutcome)) {
+      throw new AppError(`call_outcome must be one of: ${CALL_OUTCOMES.join(', ')}`, 400);
+    }
+    if (normalizedCallOutcome === 'pending') {
+      conditions.push(`(last_call.outcome IS NULL OR last_call.outcome = 'pending')`);
+    } else {
+      conditions.push(`last_call.outcome = $${paramIndex}`);
+      params.push(normalizedCallOutcome);
+      paramIndex += 1;
+    }
+  }
+
   const search = typeof q === 'string' ? q.trim() : '';
   if (search) {
     conditions.push(
@@ -402,7 +428,7 @@ async function listDemoEnquiries(
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const countResult = await pool.query(
-    `SELECT COUNT(*) AS total FROM demo_enquiries de ${whereClause}`,
+    `SELECT COUNT(*) AS total ${enquirySelectFrom()} ${whereClause}`,
     params
   );
   const total = Number(countResult.rows[0]?.total || 0);
@@ -489,22 +515,40 @@ async function getDemoEnquiryStats({ from = null, to = null } = {}) {
   pushCreatedAtRange(conditions, params, 1, createdAtRange({ from, to }));
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const result = await pool.query(
-    `SELECT status, COUNT(*)::int AS count
-     FROM demo_enquiries de
-     ${whereClause}
-     GROUP BY status`,
-    params
-  );
+  const [statusResult, outcomeResult] = await Promise.all([
+    pool.query(
+      `SELECT status, COUNT(*)::int AS count
+       FROM demo_enquiries de
+       ${whereClause}
+       GROUP BY status`,
+      params
+    ),
+    pool.query(
+      `SELECT COALESCE(last_call.outcome, 'pending') AS outcome, COUNT(*)::int AS count
+       ${enquirySelectFrom()}
+       ${whereClause}
+       GROUP BY COALESCE(last_call.outcome, 'pending')`,
+      params
+    ),
+  ]);
 
   const byStatus = {};
   for (const status of DEMO_ENQUIRY_STATUSES) {
     byStatus[status] = 0;
   }
   let total = 0;
-  for (const row of result.rows) {
+  for (const row of statusResult.rows) {
     byStatus[row.status] = Number(row.count || 0);
     total += Number(row.count || 0);
+  }
+
+  const byCallOutcome = {};
+  for (const outcome of CALL_OUTCOMES) {
+    byCallOutcome[outcome] = 0;
+  }
+  for (const row of outcomeResult.rows) {
+    const key = CALL_OUTCOMES.includes(row.outcome) ? row.outcome : 'pending';
+    byCallOutcome[key] = (byCallOutcome[key] || 0) + Number(row.count || 0);
   }
 
   const open =
@@ -518,6 +562,7 @@ async function getDemoEnquiryStats({ from = null, to = null } = {}) {
     total,
     open,
     by_status: byStatus,
+    by_call_outcome: byCallOutcome,
     in_progress: byStatus.contacted + byStatus.demo_booked + byStatus.demo_given,
     hot: byStatus.sold,
     converted: byStatus.converted,
@@ -983,6 +1028,8 @@ async function convertEnquiryToCompany(enquiryId, companyPayload) {
 module.exports = {
   createDemoEnquiry,
   createAdminLead,
+  phoneMatchKey,
+  findDemoEnquiriesByPhone,
   getDemoEnquiryById,
   listDemoEnquiries,
   getDemoEnquiryStats,

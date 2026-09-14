@@ -199,7 +199,7 @@ async function listDemoEnquiries(req, res, next) {
     const demoEnquiryService = require('../services/demoEnquiryService');
     const page = req.query?.page != null ? Number(req.query.page) : 1;
     const limit = req.query?.limit != null ? Number(req.query.limit) : 20;
-    const { status, q, pipeline, from, to } = req.query || {};
+    const { status, q, pipeline, from, to, call_outcome } = req.query || {};
     const data = await demoEnquiryService.listDemoEnquiries(null, {
       page,
       limit,
@@ -208,6 +208,7 @@ async function listDemoEnquiries(req, res, next) {
       pipeline,
       from,
       to,
+      call_outcome,
     });
 
     res.status(200).json({
@@ -261,6 +262,72 @@ async function createAdminDemoEnquiry(req, res, next) {
       success: true,
       data: created,
       message: 'Lead added.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/admin/demo-enquiry-import-template
+ * Excel template for bulk CRM lead import.
+ */
+async function downloadDemoEnquiryImportTemplate(req, res, next) {
+  try {
+    const { buildLeadImportTemplateBuffer } = require('../services/demoEnquiryImportTemplate');
+    const buffer = await buildLeadImportTemplateBuffer();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename="lead-import-template.xlsx"');
+    return res.send(Buffer.from(buffer));
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/admin/demo-enquiries-bulk
+ * Multipart field "file" (.xlsx / .xls / .csv), or JSON { text } / { leads }.
+ */
+async function bulkCreateAdminDemoEnquiries(req, res, next) {
+  try {
+    const bulk = require('../services/demoEnquiryBulkImportService');
+    let inputRows = [];
+
+    if (req.file?.buffer) {
+      const original = (req.file.originalname || '').toLowerCase();
+      if (!/\.(xlsx|xls|csv)$/.test(original)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid file type. Use .xlsx, .xls, or .csv.',
+        });
+      }
+      const parsed = bulk.parseImportFile(req.file.buffer, {
+        filename: req.file.originalname,
+      });
+      inputRows = parsed.rows.map((row, i) => ({
+        ...bulk.rowToLeadPayload(row, parsed.headerMap),
+        _row: i + 2,
+      }));
+    } else if (typeof req.body?.text === 'string' && req.body.text.trim()) {
+      inputRows = bulk.parsePastedLeadLines(req.body.text);
+    } else if (Array.isArray(req.body?.leads) && req.body.leads.length) {
+      inputRows = req.body.leads;
+    } else {
+      return res.status(400).json({
+        success: false,
+        message: 'Upload an Excel/CSV file, or paste one lead per line.',
+      });
+    }
+
+    const result = await bulk.bulkCreateAdminLeads(inputRows);
+    const createdLabel = result.created === 1 ? 'lead' : 'leads';
+    res.json({
+      success: true,
+      data: result,
+      message: `Imported ${result.created} ${createdLabel}. ${result.skipped} skipped, ${result.failed} failed.`,
     });
   } catch (err) {
     next(err);
@@ -1883,6 +1950,8 @@ module.exports = {
   getDemoEnquiryStats,
   getDemoEnquirySuggestions,
   createAdminDemoEnquiry,
+  downloadDemoEnquiryImportTemplate,
+  bulkCreateAdminDemoEnquiries,
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   updateDemoEnquiryDetails,
