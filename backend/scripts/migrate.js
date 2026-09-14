@@ -181,6 +181,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'demo_enquiry_calls'
   )`,
+  '091_demo_enquiry_call_feedback.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'demo_enquiry_calls' AND column_name = 'follow_up_at'
+  )`,
 };
 
 async function hasExistingSchema(client) {

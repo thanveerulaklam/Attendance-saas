@@ -96,19 +96,27 @@ const CALL_OUTCOMES = [
   'callback',
   'connected',
   'interested',
+  'demo_booked',
+  'demo_given',
+  'sold',
   'not_interested',
+  'lost',
   'wrong_number',
 ];
+
+const CALL_OUTCOMES_REQUIRE_FOLLOW_UP = ['callback', 'demo_booked'];
 
 const ENQUIRY_LIST_COLUMNS = `de.id, de.full_name, de.business_name, de.phone_number, de.email,
   de.city, de.state, de.employees_range, de.source, de.expected_plan, de.notes,
   de.status, de.status_updated_at, de.created_at, de.demo_scheduled_at,
-  de.last_contacted_at, de.converted_company_id, de.converted_at,
+  de.last_contacted_at, de.next_follow_up_at, de.converted_company_id, de.converted_at,
   c.name AS converted_company_name,
   last_call.id AS last_call_id,
   last_call.outcome AS last_call_outcome,
   last_call.notes AS last_call_notes,
-  last_call.called_at AS last_call_at`;
+  last_call.called_at AS last_call_at,
+  last_call.follow_up_at AS last_call_follow_up_at,
+  last_call.reason AS last_call_reason`;
 
 function normText(v) {
   if (v == null) return '';
@@ -200,7 +208,7 @@ function enquirySelectFrom() {
   return `FROM demo_enquiries de
           LEFT JOIN companies c ON c.id = de.converted_company_id
           LEFT JOIN LATERAL (
-            SELECT id, outcome, notes, called_at
+            SELECT id, outcome, notes, called_at, follow_up_at, reason, extra_phone
             FROM demo_enquiry_calls
             WHERE enquiry_id = de.id
             ORDER BY called_at DESC, id DESC
@@ -574,6 +582,7 @@ async function bookDemoEnquiry(enquiryId, scheduledAtRaw) {
     `UPDATE demo_enquiries
      SET status = 'demo_booked',
          demo_scheduled_at = $2,
+         next_follow_up_at = $2,
          status_updated_at = NOW()
      WHERE id = $1
      RETURNING id`,
@@ -591,9 +600,12 @@ async function listScheduledDemos() {
   const result = await pool.query(
     `SELECT ${ENQUIRY_LIST_COLUMNS}
      ${enquirySelectFrom()}
-     WHERE de.status = 'demo_booked'
-       AND de.demo_scheduled_at IS NOT NULL
-     ORDER BY de.demo_scheduled_at ASC
+     WHERE de.status NOT IN ('converted')
+       AND (
+         (de.status = 'demo_booked' AND de.demo_scheduled_at IS NOT NULL)
+         OR de.next_follow_up_at IS NOT NULL
+       )
+     ORDER BY COALESCE(de.next_follow_up_at, de.demo_scheduled_at) ASC
      LIMIT 40`
   );
   return result.rows;
@@ -735,7 +747,7 @@ function normalizeCallOutcome(raw, { allowPending = true } = {}) {
 async function listEnquiryCalls(enquiryId) {
   const enquiry = await getDemoEnquiryById(enquiryId);
   const result = await pool.query(
-    `SELECT id, enquiry_id, outcome, notes, called_at, updated_at
+    `SELECT id, enquiry_id, outcome, notes, follow_up_at, reason, extra_phone, called_at, updated_at
      FROM demo_enquiry_calls
      WHERE enquiry_id = $1
      ORDER BY called_at DESC, id DESC
@@ -745,27 +757,124 @@ async function listEnquiryCalls(enquiryId) {
   return result.rows;
 }
 
+function parseFollowUpAt(raw, label = 'Follow-up date and time') {
+  if (raw == null || raw === '') return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) {
+    throw new AppError(`${label} is invalid`, 400);
+  }
+  return d;
+}
+
+function pipelineStatusForOutcome(outcome, currentStatus) {
+  if (currentStatus === 'converted') return currentStatus;
+  if (outcome === 'lost' || outcome === 'not_interested') return 'lost';
+  if (outcome === 'sold') return 'sold';
+  if (outcome === 'demo_given') return currentStatus === 'sold' ? 'sold' : 'demo_given';
+  if (outcome === 'demo_booked') return 'demo_booked';
+  if (currentStatus === 'lost' && ['callback', 'connected', 'interested', 'demo_booked'].includes(outcome)) {
+    return outcome === 'demo_booked' ? 'demo_booked' : 'contacted';
+  }
+  if (currentStatus === 'not_contacted') return 'contacted';
+  return currentStatus;
+}
+
+async function applyCallOutcomeToEnquiry(enquiryId, { outcome, followUpAt, calledAt }) {
+  const enquiry = await getDemoEnquiryById(enquiryId);
+  if (enquiry.converted_company_id || enquiry.status === 'converted') {
+    await pool.query(`UPDATE demo_enquiries SET last_contacted_at = COALESCE($2, last_contacted_at) WHERE id = $1`, [
+      enquiry.id,
+      calledAt || null,
+    ]);
+    return getDemoEnquiryById(enquiry.id);
+  }
+
+  if (outcome === 'demo_booked') {
+    if (!followUpAt) throw new AppError('Pick a demo date and time', 400);
+    await pool.query(
+      `UPDATE demo_enquiries
+       SET status = 'demo_booked',
+           demo_scheduled_at = $2,
+           next_follow_up_at = $2,
+           last_contacted_at = COALESCE($3, last_contacted_at, NOW()),
+           status_updated_at = $4
+       WHERE id = $1`,
+      [
+        enquiry.id,
+        followUpAt.toISOString(),
+        calledAt || null,
+        enquiry.status === 'demo_booked' ? enquiry.status_updated_at : new Date(),
+      ]
+    );
+    return getDemoEnquiryById(enquiry.id);
+  }
+
+  const nextStatus = pipelineStatusForOutcome(outcome, enquiry.status);
+  const nextFollowUp = followUpAt || null;
+  const clearFollowUp = outcome === 'lost' || outcome === 'not_interested' || outcome === 'sold';
+  const statusChanged = nextStatus !== enquiry.status;
+
+  await pool.query(
+    `UPDATE demo_enquiries
+     SET status = $2,
+         next_follow_up_at = $3,
+         last_contacted_at = COALESCE($4, last_contacted_at, NOW()),
+         status_updated_at = $5
+     WHERE id = $1`,
+    [
+      enquiry.id,
+      nextStatus,
+      clearFollowUp ? null : nextFollowUp ? nextFollowUp.toISOString() : enquiry.next_follow_up_at,
+      calledAt || null,
+      statusChanged ? new Date() : enquiry.status_updated_at,
+    ]
+  );
+  return getDemoEnquiryById(enquiry.id);
+}
+
+function readCallFeedback(data, { requireFollowUp }) {
+  const notes = data.notes == null || data.notes === '' ? null : normText(data.notes);
+  const reason = data.reason == null || data.reason === '' ? null : normText(data.reason);
+  const extraPhone = data.extra_phone == null || data.extra_phone === '' ? null : normText(data.extra_phone);
+  const followUpAt = parseFollowUpAt(data.follow_up_at, requireFollowUp ? 'Date and time' : 'Follow-up date and time');
+  if (requireFollowUp && !followUpAt) {
+    throw new AppError('Pick a date and time', 400);
+  }
+  return { notes, reason, extraPhone, followUpAt };
+}
+
 async function logEnquiryCall(enquiryId, data = {}) {
   const enquiry = await getDemoEnquiryById(enquiryId);
   const outcome = Object.prototype.hasOwnProperty.call(data, 'outcome')
     ? normalizeCallOutcome(data.outcome, { allowPending: true })
     : 'pending';
-  const notes = data.notes == null || data.notes === '' ? null : normText(data.notes);
+  const requireFollowUp = CALL_OUTCOMES_REQUIRE_FOLLOW_UP.includes(outcome);
+  const { notes, reason, extraPhone, followUpAt } = readCallFeedback(data, { requireFollowUp });
 
   const result = await pool.query(
-    `INSERT INTO demo_enquiry_calls (enquiry_id, outcome, notes, called_at, updated_at)
-     VALUES ($1, $2, $3, NOW(), NOW())
-     RETURNING id, enquiry_id, outcome, notes, called_at, updated_at`,
-    [enquiry.id, outcome, notes]
+    `INSERT INTO demo_enquiry_calls (enquiry_id, outcome, notes, follow_up_at, reason, extra_phone, called_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+     RETURNING id, enquiry_id, outcome, notes, follow_up_at, reason, extra_phone, called_at, updated_at`,
+    [enquiry.id, outcome, notes, followUpAt, reason, extraPhone]
   );
   const call = result.rows[0];
-  await pool.query(`UPDATE demo_enquiries SET last_contacted_at = $2 WHERE id = $1`, [
-    enquiry.id,
-    call.called_at,
-  ]);
+  const updatedEnquiry =
+    outcome === 'pending'
+      ? await (async () => {
+          await pool.query(`UPDATE demo_enquiries SET last_contacted_at = $2 WHERE id = $1`, [
+            enquiry.id,
+            call.called_at,
+          ]);
+          return getDemoEnquiryById(enquiry.id);
+        })()
+      : await applyCallOutcomeToEnquiry(enquiry.id, {
+          outcome,
+          followUpAt,
+          calledAt: call.called_at,
+        });
   return {
     call,
-    enquiry: await getDemoEnquiryById(enquiry.id),
+    enquiry: updatedEnquiry,
   };
 }
 
@@ -776,7 +885,7 @@ async function updateEnquiryCall(callId, data = {}) {
   }
 
   const existing = await pool.query(
-    `SELECT id, enquiry_id, outcome, notes, called_at, updated_at
+    `SELECT id, enquiry_id, outcome, notes, follow_up_at, reason, extra_phone, called_at, updated_at
      FROM demo_enquiry_calls
      WHERE id = $1`,
     [id]
@@ -788,23 +897,37 @@ async function updateEnquiryCall(callId, data = {}) {
   const outcome = Object.prototype.hasOwnProperty.call(data, 'outcome')
     ? normalizeCallOutcome(data.outcome, { allowPending: true })
     : current.outcome;
-  const notes = Object.prototype.hasOwnProperty.call(data, 'notes')
-    ? data.notes == null || data.notes === ''
-      ? null
-      : normText(data.notes)
-    : current.notes;
+  const requireFollowUp = CALL_OUTCOMES_REQUIRE_FOLLOW_UP.includes(outcome);
+  const merged = {
+    notes: Object.prototype.hasOwnProperty.call(data, 'notes') ? data.notes : current.notes,
+    reason: Object.prototype.hasOwnProperty.call(data, 'reason') ? data.reason : current.reason,
+    extra_phone: Object.prototype.hasOwnProperty.call(data, 'extra_phone') ? data.extra_phone : current.extra_phone,
+    follow_up_at: Object.prototype.hasOwnProperty.call(data, 'follow_up_at')
+      ? data.follow_up_at
+      : current.follow_up_at,
+  };
+  const { notes, reason, extraPhone, followUpAt } = readCallFeedback(merged, { requireFollowUp });
 
   const result = await pool.query(
     `UPDATE demo_enquiry_calls
-     SET outcome = $2, notes = $3, updated_at = NOW()
+     SET outcome = $2, notes = $3, follow_up_at = $4, reason = $5, extra_phone = $6, updated_at = NOW()
      WHERE id = $1
-     RETURNING id, enquiry_id, outcome, notes, called_at, updated_at`,
-    [current.id, outcome, notes]
+     RETURNING id, enquiry_id, outcome, notes, follow_up_at, reason, extra_phone, called_at, updated_at`,
+    [current.id, outcome, notes, followUpAt, reason, extraPhone]
   );
+
+  const updatedEnquiry =
+    outcome === 'pending'
+      ? await getDemoEnquiryById(current.enquiry_id)
+      : await applyCallOutcomeToEnquiry(current.enquiry_id, {
+          outcome,
+          followUpAt,
+          calledAt: current.called_at,
+        });
 
   return {
     call: result.rows[0],
-    enquiry: await getDemoEnquiryById(current.enquiry_id),
+    enquiry: updatedEnquiry,
   };
 }
 

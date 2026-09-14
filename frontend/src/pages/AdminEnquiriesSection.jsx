@@ -3,10 +3,14 @@ import {
   DEMO_ENQUIRY_PIPELINE_STATUSES,
   DEMO_ENQUIRY_STATUS_BUTTON_STYLES,
   DEMO_ENQUIRY_STATUS_STYLES,
-  CALL_OUTCOMES,
+  CALL_OUTCOME_GROUPS,
+  CALL_OUTCOMES_REQUIRE_REASON,
   CALL_OUTCOME_STYLES,
   demoEnquiryStatusLabel,
   callOutcomeLabel,
+  callNeedsFollowUp,
+  callAllowsFollowUp,
+  callFollowUpLabel,
   leadSourceLabel,
   employeesCountLabel,
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,
@@ -159,6 +163,63 @@ function facetimeAudioHref(raw) {
   return n ? `facetime-audio:${n}` : '';
 }
 
+function DateTimePresetFields({ preset, date, time, onPresetChange, onDateChange, onTimeChange, label, required }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-slate-700 mb-1.5">
+        {label}
+        {required ? ' *' : <span className="font-normal text-slate-500"> (optional)</span>}
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {[
+          { id: 'today', label: 'Today' },
+          { id: 'tomorrow', label: 'Tomorrow' },
+          { id: 'custom', label: 'Custom date' },
+        ].map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => {
+              onPresetChange(opt.id);
+              if (opt.id === 'today') onDateChange(todayIstDateValue());
+              if (opt.id === 'tomorrow') onDateChange(tomorrowIstDateValue());
+              if (opt.id === 'custom' && !date) onDateChange(todayIstDateValue());
+            }}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+              preset === opt.id
+                ? 'border-slate-900 bg-slate-900 text-white'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      {preset === 'custom' ? (
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => onDateChange(e.target.value)}
+          className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      ) : (
+        <p className="mt-2 text-xs text-slate-500">
+          {preset === 'tomorrow' ? tomorrowIstDateValue() : todayIstDateValue()}
+        </p>
+      )}
+      <label className="block mt-2">
+        <span className="text-xs font-medium text-slate-700">Time{required ? ' *' : ''}</span>
+        <input
+          type="time"
+          value={time}
+          onChange={(e) => onTimeChange(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        />
+      </label>
+    </div>
+  );
+}
+
 function isDemoOverdue(iso) {
   if (!iso) return false;
   return new Date(iso).getTime() < Date.now();
@@ -304,6 +365,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [callSaving, setCallSaving] = useState(false);
   const [callHistory, setCallHistory] = useState([]);
   const [callDidDial, setCallDidDial] = useState(false);
+  const [callFollowPreset, setCallFollowPreset] = useState('tomorrow');
+  const [callFollowDate, setCallFollowDate] = useState('');
+  const [callFollowTime, setCallFollowTime] = useState(DEFAULT_DEMO_TIME);
+  const [callReason, setCallReason] = useState('');
+  const [callAltPhone, setCallAltPhone] = useState('');
 
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
@@ -505,11 +571,55 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     [adminKey, onAuthError]
   );
 
+  const resetCallFollowFields = (iso) => {
+    if (iso) {
+      setCallFollowPreset('custom');
+      setCallFollowDate(scheduledDateValue(iso));
+      setCallFollowTime(scheduledTimeValue(iso));
+      return;
+    }
+    setCallFollowPreset('tomorrow');
+    setCallFollowDate(tomorrowIstDateValue());
+    setCallFollowTime(DEFAULT_DEMO_TIME);
+  };
+
+  const followUpIsoFromForm = () => {
+    if (!callAllowsFollowUp(callOutcome)) return null;
+    const dateValue =
+      callFollowPreset === 'today'
+        ? todayIstDateValue()
+        : callFollowPreset === 'tomorrow'
+          ? tomorrowIstDateValue()
+          : callFollowDate;
+    if (!dateValue || !callFollowTime) return null;
+    return istIsoFromDateAndTime(dateValue, callFollowTime);
+  };
+
+  const pickCallOutcome = (outcome) => {
+    setCallOutcome(outcome);
+    if (!callAllowsFollowUp(outcome)) return;
+    if (outcome === 'demo_booked' && (callLead?.demo_scheduled_at || callRecord?.follow_up_at)) {
+      resetCallFollowFields(callRecord?.follow_up_at || callLead.demo_scheduled_at);
+      return;
+    }
+    if (outcome === 'callback' || outcome === 'no_answer' || outcome === 'busy' || outcome === 'voicemail') {
+      setCallFollowPreset('tomorrow');
+      setCallFollowDate(tomorrowIstDateValue());
+    } else {
+      setCallFollowPreset('today');
+      setCallFollowDate(todayIstDateValue());
+    }
+    setCallFollowTime((t) => t || DEFAULT_DEMO_TIME);
+  };
+
   const beginCallFeedback = async (lead) => {
     setCallLead(lead);
     setCallRecord(null);
     setCallOutcome('');
     setCallNotes('');
+    setCallReason('');
+    setCallAltPhone('');
+    resetCallFollowFields();
     setCallDidDial(true);
     setCallSaving(true);
     loadCallHistory(lead.id);
@@ -530,6 +640,9 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         setCallRecord(json.data.call);
         setCallOutcome(json.data.call.outcome === 'pending' ? '' : json.data.call.outcome || '');
         setCallNotes(json.data.call.notes || '');
+        setCallReason(json.data.call.reason || '');
+        setCallAltPhone(json.data.call.extra_phone || '');
+        if (json.data.call.follow_up_at) resetCallFollowFields(json.data.call.follow_up_at);
       }
       loadCallHistory(lead.id);
     } catch (err) {
@@ -544,6 +657,9 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     setCallRecord(call || null);
     setCallOutcome(call?.outcome && call.outcome !== 'pending' ? call.outcome : '');
     setCallNotes(call?.notes || '');
+    setCallReason(call?.reason || '');
+    setCallAltPhone(call?.extra_phone || '');
+    resetCallFollowFields(call?.follow_up_at || (call?.outcome === 'demo_booked' ? lead?.demo_scheduled_at : null));
     setCallDidDial(false);
     loadCallHistory(lead.id);
   };
@@ -560,11 +676,26 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setToast?.({ type: 'error', message: 'Pick how the call went.' });
       return;
     }
+    const followUpAt = followUpIsoFromForm();
+    if (callNeedsFollowUp(callOutcome) && !followUpAt) {
+      setToast?.({
+        type: 'error',
+        message: callOutcome === 'demo_booked' ? 'Pick a demo date and time.' : 'Pick a callback date and time.',
+      });
+      return;
+    }
+    if (CALL_OUTCOMES_REQUIRE_REASON.includes(callOutcome) && !callReason.trim()) {
+      setToast?.({ type: 'error', message: 'Add a short reason.' });
+      return;
+    }
     setCallSaving(true);
     try {
       const payload = {
         outcome: callOutcome,
         notes: callNotes,
+        follow_up_at: followUpAt,
+        reason: callReason,
+        extra_phone: callAltPhone,
       };
       let res;
       if (callRecord?.id) {
@@ -590,8 +721,15 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setCallLead(null);
       setCallRecord(null);
       setCallDidDial(false);
-      if (detailLead?.id === callLead.id) loadCallHistory(callLead.id);
-      setToast?.({ type: 'success', message: 'Call outcome saved.' });
+      if (detailLead?.id === callLead.id) {
+        loadCallHistory(callLead.id);
+        setDetailForm((prev) =>
+          prev ? { ...prev, status: json.data?.enquiry?.status || prev.status } : prev
+        );
+      }
+      loadStats();
+      loadScheduledDemos();
+      setToast?.({ type: 'success', message: 'Call feedback saved.' });
     } catch (err) {
       setToast?.({ type: 'error', message: err.message || 'Failed to save call outcome' });
     } finally {
@@ -971,7 +1109,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     const overdue = [];
     const upcoming = [];
     for (const lead of scheduledDemos) {
-      if (isDemoOverdue(lead.demo_scheduled_at)) overdue.push(lead);
+      const when = lead.next_follow_up_at || lead.demo_scheduled_at;
+      if (isDemoOverdue(when)) overdue.push(lead);
       else upcoming.push(lead);
     }
     return { overdue, upcoming };
@@ -1037,9 +1176,9 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50/40 p-4 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-amber-950">Demo reminders</h3>
+            <h3 className="text-sm font-semibold text-amber-950">Follow-up reminders</h3>
             <p className="text-xs text-amber-800/80 mt-0.5">
-              Scheduled demos for follow-up. Overdue slots stay at the top until the status changes.
+              Booked demos and scheduled call-backs. Overdue slots stay at the top until they are updated.
             </p>
           </div>
           <p className="text-[11px] font-medium text-amber-900">
@@ -1047,11 +1186,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           </p>
         </div>
         {scheduledDemos.length === 0 ? (
-          <p className="mt-3 text-sm text-amber-800/70">No demos booked yet. Mark a lead as Demo booked to schedule one.</p>
+          <p className="mt-3 text-sm text-amber-800/70">No demos or call-backs scheduled yet.</p>
         ) : (
           <ul className="mt-3 divide-y divide-amber-100 rounded-lg border border-amber-100 bg-white/80 overflow-hidden">
             {scheduledDemos.map((lead) => {
-              const overdue = isDemoOverdue(lead.demo_scheduled_at);
+              const when = lead.next_follow_up_at || lead.demo_scheduled_at;
+              const overdue = isDemoOverdue(when);
               return (
                 <li key={lead.id}>
                   <button
@@ -1077,7 +1217,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         }`}
                       >
                         {overdue ? 'Overdue · ' : ''}
-                        {formatDemoSlot(lead.demo_scheduled_at)}
+                        {callFollowUpLabel(lead.last_call_outcome || lead.status)} {formatDemoSlot(when)}
                       </span>
                     </div>
                   </button>
@@ -1299,6 +1439,18 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                         <p className="text-[10px] text-slate-500 mt-1.5">
                           Last contacted {formatLastContacted(q.last_call_at || q.last_contacted_at)}
                         </p>
+                        {q.next_follow_up_at || q.last_call_follow_up_at || (q.status === 'demo_booked' && q.demo_scheduled_at) ? (
+                          <p
+                            className={`text-[10px] font-medium mt-0.5 ${
+                              isDemoOverdue(q.next_follow_up_at || q.last_call_follow_up_at || q.demo_scheduled_at)
+                                ? 'text-rose-700'
+                                : 'text-sky-800'
+                            }`}
+                          >
+                            {callFollowUpLabel(q.last_call_outcome || q.status)}{' '}
+                            {formatDemoSlot(q.next_follow_up_at || q.last_call_follow_up_at || q.demo_scheduled_at)}
+                          </p>
+                        ) : null}
                         {q.last_call_outcome ? (
                           <button
                             type="button"
@@ -1307,6 +1459,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                                 id: q.last_call_id,
                                 outcome: q.last_call_outcome,
                                 notes: q.last_call_notes,
+                                reason: q.last_call_reason,
+                                follow_up_at: q.last_call_follow_up_at || q.next_follow_up_at,
                                 called_at: q.last_call_at || q.last_contacted_at,
                               })
                             }
@@ -1790,6 +1944,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                               {callOutcomeLabel(call.outcome)}
                             </span>
                           </p>
+                          {call.follow_up_at ? (
+                            <p className="text-[11px] text-sky-800 mt-0.5">
+                              {callFollowUpLabel(call.outcome)} {formatDemoSlot(call.follow_up_at)}
+                            </p>
+                          ) : null}
+                          {call.reason ? <p className="text-[11px] text-slate-500 mt-0.5">{call.reason}</p> : null}
                           {call.notes ? <p className="text-[11px] text-slate-500 mt-0.5">{call.notes}</p> : null}
                         </div>
                         <button
@@ -2206,12 +2366,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             setCallDidDial(false);
           }}
         >
-          <div
-            className="w-full max-w-md rounded-xl bg-white shadow-xl"
+            <div className="w-full max-w-xl rounded-xl bg-white shadow-xl max-h-[92vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="border-b border-slate-200 px-5 py-4">
-              <h3 className="text-base font-semibold text-slate-900">How did the call go?</h3>
+            <div className="border-b border-slate-200 px-5 py-4 sticky top-0 bg-white z-10">
+              <h3 className="text-base font-semibold text-slate-900">Call feedback</h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 {callLead.full_name}
                 {callLead.business_name ? ` · ${callLead.business_name}` : ''}
@@ -2237,28 +2396,70 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   ) : null}
                 </p>
               ) : null}
-              <div>
-                <p className="text-xs font-medium text-slate-700 mb-1.5">Outcome</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {CALL_OUTCOMES.map((outcome) => {
-                    const active = callOutcome === outcome;
-                    return (
-                      <button
-                        key={outcome}
-                        type="button"
-                        onClick={() => setCallOutcome(outcome)}
-                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
-                          active
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : CALL_OUTCOME_STYLES[outcome]
-                        }`}
-                      >
-                        {callOutcomeLabel(outcome)}
-                      </button>
-                    );
-                  })}
+              {CALL_OUTCOME_GROUPS.map((group) => (
+                <div key={group.id}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">{group.label}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {group.outcomes.map((outcome) => {
+                      const active = callOutcome === outcome;
+                      return (
+                        <button
+                          key={outcome}
+                          type="button"
+                          onClick={() => pickCallOutcome(outcome)}
+                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium ${
+                            active
+                              ? 'border-slate-900 bg-slate-900 text-white'
+                              : CALL_OUTCOME_STYLES[outcome]
+                          }`}
+                        >
+                          {callOutcomeLabel(outcome)}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              ))}
+              {callAllowsFollowUp(callOutcome) ? (
+                <DateTimePresetFields
+                  preset={callFollowPreset}
+                  date={callFollowDate}
+                  time={callFollowTime}
+                  onPresetChange={setCallFollowPreset}
+                  onDateChange={setCallFollowDate}
+                  onTimeChange={setCallFollowTime}
+                  label={callFollowUpLabel(callOutcome)}
+                  required={callNeedsFollowUp(callOutcome)}
+                />
+              ) : null}
+              {CALL_OUTCOMES_REQUIRE_REASON.includes(callOutcome) ? (
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">Reason *</span>
+                  <textarea
+                    value={callReason}
+                    onChange={(e) => setCallReason(e.target.value)}
+                    rows={2}
+                    placeholder="Why did they say no? Budget, timing, competitor…"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              ) : null}
+              {callOutcome === 'wrong_number' ? (
+                <label className="block">
+                  <span className="text-xs font-medium text-slate-700">Correct number (optional)</span>
+                  <input
+                    value={callAltPhone}
+                    onChange={(e) => setCallAltPhone(e.target.value)}
+                    placeholder="If they shared another number"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  />
+                </label>
+              ) : null}
+              {callOutcome === 'sold' ? (
+                <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  Save this, then use Convert to company on the row to provision their account.
+                </p>
+              ) : null}
               <label className="block">
                 <span className="text-xs font-medium text-slate-700">Notes (optional)</span>
                 <textarea
@@ -2271,7 +2472,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               </label>
               {callHistory.length > 1 ? (
                 <p className="text-[11px] text-slate-500">
-                  Earlier calls stay in the lead. You can update this outcome later from the row or call history.
+                  Earlier calls stay on the lead. You can update this feedback later from the row or call history.
                 </p>
               ) : null}
               <div className="flex flex-wrap justify-end gap-2 pt-1">
@@ -2289,7 +2490,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   onClick={() => saveCallOutcome()}
                   className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  {callSaving ? 'Saving…' : 'Save outcome'}
+                  {callSaving ? 'Saving…' : 'Save feedback'}
                 </button>
               </div>
             </div>

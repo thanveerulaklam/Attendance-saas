@@ -129,12 +129,38 @@ export const CALL_OUTCOMES = [
   'no_answer',
   'busy',
   'voicemail',
+  'wrong_number',
   'callback',
   'connected',
   'interested',
+  'demo_booked',
+  'demo_given',
+  'sold',
   'not_interested',
-  'wrong_number',
+  'lost',
 ];
+
+export const CALL_OUTCOME_GROUPS = [
+  {
+    id: 'reach',
+    label: 'Could not reach',
+    outcomes: ['no_answer', 'busy', 'voicemail', 'wrong_number'],
+  },
+  {
+    id: 'talked',
+    label: 'Reached',
+    outcomes: ['connected', 'callback', 'interested'],
+  },
+  {
+    id: 'pipeline',
+    label: 'Pipeline',
+    outcomes: ['demo_booked', 'demo_given', 'sold', 'not_interested', 'lost'],
+  },
+];
+
+export const CALL_OUTCOMES_REQUIRE_FOLLOW_UP = ['callback', 'demo_booked'];
+export const CALL_OUTCOMES_OPTIONAL_FOLLOW_UP = ['no_answer', 'busy', 'voicemail', 'interested', 'demo_given'];
+export const CALL_OUTCOMES_REQUIRE_REASON = ['not_interested', 'lost'];
 
 export const CALL_OUTCOME_LABELS = {
   pending: 'Outcome not logged',
@@ -144,7 +170,11 @@ export const CALL_OUTCOME_LABELS = {
   callback: 'Call back later',
   connected: 'Talked',
   interested: 'Interested',
+  demo_booked: 'Demo booked',
+  demo_given: 'Demo given',
+  sold: 'Sold',
   not_interested: 'Not interested',
+  lost: 'Lost',
   wrong_number: 'Wrong number',
 };
 
@@ -156,8 +186,22 @@ export const CALL_OUTCOME_STYLES = {
   callback: 'bg-sky-50 text-sky-800 border-sky-200',
   connected: 'bg-indigo-50 text-indigo-800 border-indigo-200',
   interested: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  demo_booked: 'bg-amber-50 text-amber-900 border-amber-300',
+  demo_given: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+  sold: 'bg-emerald-50 text-emerald-800 border-emerald-200',
   not_interested: 'bg-rose-50 text-rose-800 border-rose-200',
+  lost: 'bg-rose-50 text-rose-800 border-rose-200',
   wrong_number: 'bg-rose-50 text-rose-800 border-rose-200',
+};
+
+export const CALL_FOLLOW_UP_LABELS = {
+  no_answer: 'Retry at',
+  busy: 'Retry at',
+  voicemail: 'Retry at',
+  callback: 'Call back at',
+  interested: 'Follow up at',
+  demo_booked: 'Demo at',
+  demo_given: 'Next meeting',
 };
 
 export function demoEnquiryStatusLabel(status) {
@@ -166,6 +210,20 @@ export function demoEnquiryStatusLabel(status) {
 
 export function callOutcomeLabel(outcome) {
   return CALL_OUTCOME_LABELS[outcome] || 'Outcome not logged';
+}
+
+export function callNeedsFollowUp(outcome) {
+  return CALL_OUTCOMES_REQUIRE_FOLLOW_UP.includes(outcome);
+}
+
+export function callAllowsFollowUp(outcome) {
+  return (
+    CALL_OUTCOMES_REQUIRE_FOLLOW_UP.includes(outcome) || CALL_OUTCOMES_OPTIONAL_FOLLOW_UP.includes(outcome)
+  );
+}
+
+export function callFollowUpLabel(outcome) {
+  return CALL_FOLLOW_UP_LABELS[outcome] || 'Follow up at';
 }
 
 export function leadSourceLabel(source) {
