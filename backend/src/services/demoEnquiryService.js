@@ -114,6 +114,49 @@ function clipLocation(raw) {
   return text.length > LOCATION_MAX_LEN ? text.slice(0, LOCATION_MAX_LEN) : text;
 }
 
+function phoneDigits(raw) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+function phoneMatchKey(raw) {
+  const digits = phoneDigits(raw);
+  if (!digits) return '';
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+async function findDemoEnquiriesByPhone(phoneRaw) {
+  const key = phoneMatchKey(phoneRaw);
+  if (!key) return [];
+
+  const result = await pool.query(
+    `SELECT ${ENQUIRY_LIST_COLUMNS}
+     ${enquirySelectFrom()}
+     WHERE regexp_replace(COALESCE(de.phone_number, ''), '[^0-9]', '', 'g') <> ''
+       AND RIGHT(regexp_replace(de.phone_number, '[^0-9]', '', 'g'), $2) = $1
+     ORDER BY de.created_at DESC
+     LIMIT 5`,
+    [key, key.length]
+  );
+  return result.rows;
+}
+
+function duplicatePhoneError(matches) {
+  const existing = matches[0];
+  const extra = matches.length - 1;
+  const who = [existing.full_name, existing.business_name].filter(Boolean).join(' · ');
+  const extraNote = extra > 0 ? ` (${extra} more with this number)` : '';
+  const err = new AppError(
+    `This mobile number is already on the CRM as ${who || `lead #${existing.id}`}${extraNote}.`,
+    409,
+    'duplicate_phone'
+  );
+  err.data = {
+    existing,
+    match_count: matches.length,
+  };
+  return err;
+}
+
 async function canonicalizeLocation(raw, column) {
   const text = clipLocation(raw);
   if (!text) return '';
@@ -240,6 +283,11 @@ async function createAdminLead(data) {
   if (!fullName) throw new AppError('Contact name is required', 400);
   if (!businessName) throw new AppError('Business name is required', 400);
   if (!phoneNumber) throw new AppError('Phone number is required', 400);
+
+  const existingByPhone = await findDemoEnquiriesByPhone(phoneNumber);
+  if (existingByPhone.length > 0) {
+    throw duplicatePhoneError(existingByPhone);
+  }
 
   const result = await pool.query(
     `INSERT INTO demo_enquiries (

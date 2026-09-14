@@ -21,6 +21,7 @@ function errorHandler(err, _req, res, _next) {
       ? 'Internal server error'
       : message,
     ...(err.code && { code: err.code }),
+    ...(err.data != null ? { data: err.data } : {}),
     ...(process.env.NODE_ENV !== 'production' && err.stack && { stack: err.stack }),
   };
 

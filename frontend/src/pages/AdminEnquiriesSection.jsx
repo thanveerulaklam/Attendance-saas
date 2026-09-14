@@ -269,6 +269,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [addSaving, setAddSaving] = useState(false);
+  const [duplicateLead, setDuplicateLead] = useState(null);
+  const [duplicateMatchCount, setDuplicateMatchCount] = useState(0);
 
   const [detailLead, setDetailLead] = useState(null);
   const [detailForm, setDetailForm] = useState(null);
@@ -589,9 +591,26 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         adminKey
       );
       const text = await res.text();
+      let json = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = {};
+      }
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (res.status === 409 && json.data?.existing) {
+        setDuplicateLead(json.data.existing);
+        setDuplicateMatchCount(Number(json.data.match_count || 1));
+        return;
+      }
       if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
       setAddOpen(false);
       setAddForm(emptyAddForm());
+      setDuplicateLead(null);
+      setDuplicateMatchCount(0);
       setStatusFilter('open');
       setPage(1);
       refreshAll();
@@ -819,6 +838,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               type="button"
               onClick={() => {
                 setAddForm(emptyAddForm());
+                setDuplicateLead(null);
+                setDuplicateMatchCount(0);
                 setAddOpen(true);
                 loadSourceSuggestions();
               }}
@@ -1036,7 +1057,13 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             </p>
             <button
               type="button"
-              onClick={() => setAddOpen(true)}
+              onClick={() => {
+                setAddForm(emptyAddForm());
+                setDuplicateLead(null);
+                setDuplicateMatchCount(0);
+                setAddOpen(true);
+                loadSourceSuggestions();
+              }}
               className="mt-4 rounded-lg bg-violet-700 px-4 py-2 text-sm font-medium text-white hover:bg-violet-800"
             >
               Add your first lead
@@ -1238,6 +1265,52 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               <p className="text-xs text-slate-500 mt-0.5">Manual entry for calls, referrals, events, etc.</p>
             </div>
             <form onSubmit={handleAddSubmit} className="p-5 space-y-3">
+              {duplicateLead ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-3">
+                  <p className="text-sm font-semibold text-amber-950">This mobile number is already on the CRM</p>
+                  <p className="text-xs text-amber-900/80 mt-0.5">
+                    A new lead was not added. Open the existing record instead.
+                    {duplicateMatchCount > 1 ? ` ${duplicateMatchCount} leads share this number; showing the latest.` : ''}
+                  </p>
+                  <div className="mt-2 rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800">
+                    <p className="font-medium text-slate-900">
+                      {duplicateLead.full_name || '—'}
+                      {duplicateLead.business_name ? ` · ${duplicateLead.business_name}` : ''}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      {[
+                        duplicateLead.phone_number,
+                        [duplicateLead.city, duplicateLead.state].filter(Boolean).join(', '),
+                        duplicateLead.email,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || '—'}
+                    </p>
+                    <p className="text-xs text-slate-600 mt-1">
+                      {demoEnquiryStatusLabel(duplicateLead.status)}
+                      {duplicateLead.source ? ` · ${leadSourceLabel(duplicateLead.source)}` : ''}
+                      {duplicateLead.created_at ? ` · Added ${formatDateTime(duplicateLead.created_at)}` : ''}
+                    </p>
+                    {duplicateLead.notes ? (
+                      <p className="text-xs text-slate-500 mt-1 line-clamp-2">{duplicateLead.notes}</p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const existing = duplicateLead;
+                      setAddOpen(false);
+                      setAddForm(emptyAddForm());
+                      setDuplicateLead(null);
+                      setDuplicateMatchCount(0);
+                      openDetail(existing);
+                    }}
+                    className="mt-2 rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900"
+                  >
+                    Open existing lead
+                  </button>
+                </div>
+              ) : null}
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block sm:col-span-2">
                   <span className="text-xs font-medium text-slate-700">Contact name *</span>
@@ -1286,7 +1359,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   <input
                     name="phone_number"
                     value={addForm.phone_number}
-                    onChange={(e) => setAddForm((p) => ({ ...p, phone_number: e.target.value }))}
+                    onChange={(e) => {
+                      setDuplicateLead(null);
+                      setDuplicateMatchCount(0);
+                      setAddForm((p) => ({ ...p, phone_number: e.target.value }));
+                    }}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                     required
                   />
@@ -1383,14 +1460,18 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setAddOpen(false)}
+                  onClick={() => {
+                    setAddOpen(false);
+                    setDuplicateLead(null);
+                    setDuplicateMatchCount(0);
+                  }}
                   className="rounded-lg border border-slate-300 px-4 py-2 text-sm"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={addSaving}
+                  disabled={addSaving || Boolean(duplicateLead)}
                   className="rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   {addSaving ? 'Saving…' : 'Add lead'}
