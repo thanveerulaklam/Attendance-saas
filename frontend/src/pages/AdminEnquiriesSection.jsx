@@ -1690,7 +1690,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           const skipped = summary.skipped || 0;
           const failed = summary.failed || 0;
           setToast?.({
-            type: created > 0 && failed === 0 ? 'success' : failed > 0 ? 'error' : 'success',
+            type: failed > 0 && created === 0 ? 'error' : 'success',
             message: `Imported ${created} lead${created === 1 ? '' : 's'}. ${skipped} skipped, ${failed} failed.`,
           });
         }}

@@ -26,6 +26,23 @@ test('parsePastedLeadLines flags lines without a phone', () => {
   assert.equal(rows[1].full_name, '9876543210');
 });
 
+test('parsePastedLeadLines accepts spaced WhatsApp numbers and ignores junk', () => {
+  const rows = parsePastedLeadLines(`73583 16229\n\u200E\nRavi 73583 16229\n+91 90660 96888`);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].phone_number, '7358316229');
+  assert.equal(rows[0].full_name, '7358316229');
+  assert.equal(rows[1].full_name, 'Ravi');
+  assert.equal(rows[1].phone_number, '7358316229');
+  assert.equal(rows[2].phone_number, '9066096888');
+  assert.equal(rows[2].full_name, '9066096888');
+});
+
+test('parsePastedLeadLines joins a number split across two lines', () => {
+  const rows = parsePastedLeadLines('73583\n16229');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].phone_number, '7358316229');
+});
+
 test('rowToLeadPayload accepts header aliases and WhatsApp default', () => {
   const row = { Name: 'Meena', Mobile: '9000011111', City: 'Salem' };
   const headerMap = { name: 'Name', mobile: 'Mobile', city: 'City' };

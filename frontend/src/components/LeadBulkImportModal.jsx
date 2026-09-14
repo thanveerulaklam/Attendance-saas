@@ -178,12 +178,13 @@ export default function LeadBulkImportModal({
                 value={pasteText}
                 disabled={submitting}
                 onChange={(ev) => setPasteText(ev.target.value)}
-                placeholder={'Ravi garments 8940040072\nKarthik, 9066096888'}
+                placeholder={'Ravi garments 8940040072\nKarthik, 9066096888\n73583 16229'}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm placeholder:text-slate-400 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500 disabled:bg-slate-50"
               />
               <p className="mt-1 text-[11px] text-slate-500">
                 One lead per line: <span className="font-medium text-slate-700">Name 9876543210</span> or{' '}
-                <span className="font-medium text-slate-700">Name, 9876543210</span>. Blank source becomes
+                <span className="font-medium text-slate-700">Name, 9876543210</span>. A number alone is fine, including
+                spaces like <span className="font-medium text-slate-700">73583 16229</span>. Blank source becomes
                 WhatsApp.
               </p>
             </div>
@@ -279,7 +280,8 @@ export default function LeadBulkImportModal({
                         Row {row.row}
                         {row.full_name ? ` · ${row.full_name}` : ''}
                         {row.phone_number ? ` · ${row.phone_number}` : ''}
-                        : {row.error}
+                        {': '}
+                        {row.error || 'Could not import this row'}
                       </li>
                     ))}
                   </ul>

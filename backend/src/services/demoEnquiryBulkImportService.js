@@ -102,42 +102,107 @@ function parseImportFile(buffer, opts = {}) {
   return { rows, headerMap: buildHeaderMap(rows), sheetName, filename };
 }
 
+function stripInvisible(value) {
+  return String(value || '').replace(/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF\u00AD]/g, '');
+}
+
+function digitsOnly(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function compactMobile(digits) {
+  const raw = digitsOnly(digits);
+  if (raw.length < 10) return '';
+  if (raw.length >= 12 && raw.startsWith('91')) return raw.slice(-10);
+  if (raw.length > 10) return raw.slice(-10);
+  return raw;
+}
+
+function isPhoneOnlyLine(text) {
+  return text.length > 0 && !/[a-zA-Z]/.test(text);
+}
+
 function parsePastedLeadLines(raw) {
-  const text = String(raw || '').replace(/^\uFEFF/, '');
-  const lines = text.split(/\r?\n/);
+  const text = stripInvisible(String(raw || '')).replace(/^\uFEFF/, '');
+  const rawLines = text.split(/\r?\n/).map((line, idx) => ({
+    idx: idx + 1,
+    text: stripInvisible(line).trim(),
+  }));
+
+  const lines = [];
+  for (let i = 0; i < rawLines.length; i += 1) {
+    const cur = rawLines[i];
+    if (!cur.text) continue;
+    if (isPhoneOnlyLine(cur.text) && !compactMobile(cur.text)) {
+      const next = rawLines[i + 1];
+      if (next?.text && isPhoneOnlyLine(next.text)) {
+        const combined = `${cur.text}${next.text}`;
+        if (compactMobile(combined)) {
+          lines.push({ idx: cur.idx, text: combined });
+          i += 1;
+          continue;
+        }
+      }
+      continue;
+    }
+    lines.push(cur);
+  }
+
   const rows = [];
-  lines.forEach((line, idx) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    const match = trimmed.match(/^(.*?)[,;\t ]+(\+?\d[\d\s\-()]{7,}\d)\s*$/);
+  lines.forEach((line) => {
+    const trimmed = line.text;
+    if (isPhoneOnlyLine(trimmed)) {
+      const phone = compactMobile(trimmed);
+      if (phone) {
+        rows.push({
+          full_name: phone,
+          phone_number: phone,
+          business_name: phone,
+          source: 'WhatsApp',
+          _line: line.idx,
+        });
+        return;
+      }
+    }
+
+    const match = trimmed.match(/^(.*?)[,;\t ]+(?:\+91[\s-]*)?(\d[\d\s\-()]{8,}\d)\s*$/i);
     if (match) {
-      const name = match[1]
+      let name = match[1]
         .replace(/^[-•*\d.)\s]+/, '')
         .replace(/[-–—:,\s]+$/, '')
         .trim();
-      const phone = match[2].trim();
+      if (/^\+?91$/i.test(name)) name = '';
+      const phone = compactMobile(match[2]);
+      if (phone) {
+        rows.push({
+          full_name: name || phone,
+          phone_number: phone,
+          business_name: name || phone,
+          source: 'WhatsApp',
+          _line: line.idx,
+        });
+        return;
+      }
+    }
+
+    const trailingPhone = compactMobile(trimmed);
+    if (trailingPhone && /[a-zA-Z]/.test(trimmed)) {
+      const name = trimmed
+        .replace(/(?:\+91[\s-]*)?\d[\d\s\-()]*$/, '')
+        .replace(/[-–—:,\s]+$/, '')
+        .trim();
       rows.push({
-        full_name: name || phone,
-        phone_number: phone,
-        business_name: name || phone,
+        full_name: name || trailingPhone,
+        phone_number: trailingPhone,
+        business_name: name || trailingPhone,
         source: 'WhatsApp',
-        _line: idx + 1,
+        _line: line.idx,
       });
       return;
     }
-    const digits = trimmed.replace(/\D/g, '');
-    if (digits.length >= 10 && digits.length <= 15 && !/[a-zA-Z]/.test(trimmed)) {
-      rows.push({
-        full_name: digits,
-        phone_number: trimmed,
-        business_name: digits,
-        source: 'WhatsApp',
-        _line: idx + 1,
-      });
-      return;
-    }
+
     rows.push({
-      _line: idx + 1,
+      _line: line.idx,
       _parseError: `Could not find a phone number on: ${trimmed.slice(0, 80)}`,
     });
   });
