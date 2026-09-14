@@ -388,6 +388,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [callFollowTime, setCallFollowTime] = useState(DEFAULT_DEMO_TIME);
   const [callReason, setCallReason] = useState('');
   const [callAltPhone, setCallAltPhone] = useState('');
+  const [callLeadForm, setCallLeadForm] = useState(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -548,6 +549,12 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     return sourceSuggestions.filter((s) => s.toLowerCase().includes(q));
   }, [detailForm?.source, sourceSuggestions]);
 
+  const filteredCallSourceSuggestions = useMemo(() => {
+    const q = (callLeadForm?.source || '').trim().toLowerCase();
+    if (!q) return sourceSuggestions;
+    return sourceSuggestions.filter((s) => s.toLowerCase().includes(q));
+  }, [callLeadForm?.source, sourceSuggestions]);
+
   const quickSourcePicks = useMemo(() => {
     const q = addForm.source.trim().toLowerCase();
     const pool = q
@@ -632,8 +639,16 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     setCallFollowTime((t) => t || DEFAULT_DEMO_TIME);
   };
 
+  const closeCallModal = () => {
+    setCallLead(null);
+    setCallRecord(null);
+    setCallDidDial(false);
+    setCallLeadForm(null);
+  };
+
   const beginCallFeedback = async (lead) => {
     setCallLead(lead);
+    setCallLeadForm(editFormFromLead(lead));
     setCallRecord(null);
     setCallOutcome('');
     setCallNotes('');
@@ -642,6 +657,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     resetCallFollowFields();
     setCallDidDial(true);
     setCallSaving(true);
+    loadSourceSuggestions();
     loadCallHistory(lead.id);
     try {
       const res = await adminFetch(
@@ -674,6 +690,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
 
   const editCallFeedback = (lead, call) => {
     setCallLead(lead);
+    setCallLeadForm(editFormFromLead(lead));
     setCallRecord(call || null);
     setCallOutcome(call?.outcome && call.outcome !== 'pending' ? call.outcome : '');
     setCallNotes(call?.notes || '');
@@ -681,15 +698,14 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     setCallAltPhone(call?.extra_phone || '');
     resetCallFollowFields(call?.follow_up_at || (call?.outcome === 'demo_booked' ? lead?.demo_scheduled_at : null));
     setCallDidDial(false);
+    loadSourceSuggestions();
     loadCallHistory(lead.id);
   };
 
   const saveCallOutcome = async ({ skip = false } = {}) => {
     if (!callLead) return;
     if (skip) {
-      setCallLead(null);
-      setCallRecord(null);
-      setCallDidDial(false);
+      closeCallModal();
       return;
     }
     if (!callOutcome) {
@@ -708,8 +724,48 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setToast?.({ type: 'error', message: 'Add a short reason.' });
       return;
     }
+    if (
+      !callLeadForm?.full_name?.trim() ||
+      !callLeadForm?.business_name?.trim() ||
+      !callLeadForm?.phone_number?.trim() ||
+      !callLeadForm?.source?.trim()
+    ) {
+      setToast?.({
+        type: 'error',
+        message: 'Contact name, business name, phone, and lead source are required.',
+      });
+      return;
+    }
     setCallSaving(true);
     try {
+      const detailsRes = await adminFetch(
+        '/demo-enquiry-update',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            enquiry_id: callLead.id,
+            full_name: callLeadForm.full_name,
+            business_name: callLeadForm.business_name,
+            phone_number: callLeadForm.phone_number,
+            email: callLeadForm.email,
+            employees_range: callLeadForm.employees_range,
+            city: callLeadForm.city,
+            state: callLeadForm.state,
+            source: callLeadForm.source,
+            expected_plan: callLeadForm.expected_plan,
+            notes: callLeadForm.notes,
+          }),
+        },
+        adminKey
+      );
+      const detailsJson = await detailsRes.json().catch(() => ({}));
+      if (detailsRes.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (!detailsRes.ok) throw new Error(detailsJson.message || 'Failed to update lead details');
+      if (detailsJson.data?.id) applyEnquiry(detailsJson.data);
+
       const payload = {
         outcome: callOutcome,
         notes: callNotes,
@@ -738,17 +794,23 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       }
       if (!res.ok) throw new Error(json.message || 'Failed to save call outcome');
       if (json.data?.enquiry) applyEnquiry(json.data.enquiry);
-      setCallLead(null);
-      setCallRecord(null);
-      setCallDidDial(false);
-      if (detailLead?.id === callLead.id) {
-        loadCallHistory(callLead.id);
+      const savedId = callLead.id;
+      closeCallModal();
+      if (detailLead?.id === savedId) {
+        loadCallHistory(savedId);
         setDetailForm((prev) =>
-          prev ? { ...prev, status: json.data?.enquiry?.status || prev.status } : prev
+          prev
+            ? editFormFromLead({
+                ...detailLead,
+                ...detailsJson.data,
+                ...json.data?.enquiry,
+              })
+            : prev
         );
       }
       loadStats();
       loadScheduledDemos();
+      loadSourceSuggestions();
       setToast?.({ type: 'success', message: 'Call feedback saved.' });
     } catch (err) {
       setToast?.({ type: 'error', message: err.message || 'Failed to save call outcome' });
@@ -2451,32 +2513,34 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               saveCallOutcome({ skip: true });
               return;
             }
-            setCallLead(null);
-            setCallRecord(null);
-            setCallDidDial(false);
+            closeCallModal();
           }}
         >
-            <div className="w-full max-w-xl rounded-xl bg-white shadow-xl max-h-[92vh] overflow-y-auto"
+            <div className="w-full max-w-2xl rounded-xl bg-white shadow-xl max-h-[92vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b border-slate-200 px-5 py-4 sticky top-0 bg-white z-10">
               <h3 className="text-base font-semibold text-slate-900">Call feedback</h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                {callLead.full_name}
-                {callLead.business_name ? ` · ${callLead.business_name}` : ''}
-                {callLead.phone_number ? ` · ${callLead.phone_number}` : ''}
+                {(callLeadForm?.full_name || callLead.full_name) || 'Lead'}
+                {(callLeadForm?.business_name || callLead.business_name)
+                  ? ` · ${callLeadForm?.business_name || callLead.business_name}`
+                  : ''}
+                {(callLeadForm?.phone_number || callLead.phone_number)
+                  ? ` · ${callLeadForm?.phone_number || callLead.phone_number}`
+                  : ''}
               </p>
             </div>
             <div className="p-5 space-y-4">
-              {callDidDial && callLead.phone_number ? (
+              {callDidDial && (callLeadForm?.phone_number || callLead.phone_number) ? (
                 <p className="text-xs text-slate-600">
                   This should open FaceTime or Phone on your Mac.
-                  {facetimeAudioHref(callLead.phone_number) ? (
+                  {facetimeAudioHref(callLeadForm?.phone_number || callLead.phone_number) ? (
                     <>
                       {' '}
                       If it did not,{' '}
                       <a
-                        href={facetimeAudioHref(callLead.phone_number)}
+                        href={facetimeAudioHref(callLeadForm?.phone_number || callLead.phone_number)}
                         className="font-medium text-emerald-800 hover:underline"
                       >
                         open FaceTime Audio
@@ -2485,6 +2549,120 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     </>
                   ) : null}
                 </p>
+              ) : null}
+              {callLeadForm ? (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                    Lead details
+                  </p>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Contact name *</span>
+                      <input
+                        value={callLeadForm.full_name}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, full_name: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Business name *</span>
+                      <input
+                        value={callLeadForm.business_name}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, business_name: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Phone *</span>
+                      <input
+                        value={callLeadForm.phone_number}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, phone_number: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Email</span>
+                      <input
+                        type="email"
+                        value={callLeadForm.email}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, email: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">City</span>
+                      <SuggestInput
+                        value={callLeadForm.city}
+                        onChange={(city) => setCallLeadForm((p) => ({ ...p, city }))}
+                        suggestions={citySuggestions}
+                        placeholder="e.g. Coimbatore"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">State</span>
+                      <SuggestInput
+                        value={callLeadForm.state}
+                        onChange={(state) => setCallLeadForm((p) => ({ ...p, state }))}
+                        suggestions={stateSuggestions}
+                        placeholder="e.g. Tamil Nadu"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Number of employees</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        inputMode="numeric"
+                        value={callLeadForm.employees_range}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, employees_range: e.target.value }))}
+                        placeholder="e.g. 25"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-xs font-medium text-slate-700">Expected plan</span>
+                      <select
+                        value={callLeadForm.expected_plan}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, expected_plan: e.target.value }))}
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      >
+                        {addPlanOptions.map((p) => (
+                          <option key={p.value} value={p.value}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-700">Lead source *</span>
+                      <input
+                        value={callLeadForm.source}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, source: e.target.value }))}
+                        list="call-lead-source-suggestions"
+                        autoComplete="off"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                      <datalist id="call-lead-source-suggestions">
+                        {filteredCallSourceSuggestions.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
+                    </label>
+                    <label className="block sm:col-span-2">
+                      <span className="text-xs font-medium text-slate-700">Lead notes</span>
+                      <textarea
+                        value={callLeadForm.notes}
+                        onChange={(e) => setCallLeadForm((p) => ({ ...p, notes: e.target.value }))}
+                        rows={2}
+                        placeholder="Anything useful about the business"
+                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                    </label>
+                  </div>
+                </div>
               ) : null}
               {CALL_OUTCOME_GROUPS.map((group) => (
                 <div key={group.id}>
@@ -2551,7 +2729,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                 </p>
               ) : null}
               <label className="block">
-                <span className="text-xs font-medium text-slate-700">Notes (optional)</span>
+                <span className="text-xs font-medium text-slate-700">Call notes (optional)</span>
                 <textarea
                   value={callNotes}
                   onChange={(e) => setCallNotes(e.target.value)}
