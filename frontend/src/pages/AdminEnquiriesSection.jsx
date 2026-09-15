@@ -1572,7 +1572,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {leads.map((q, index) => {
-                  const serial = (page - 1) * PAGE_SIZE + index + 1;
+                  const serial = Math.max(1, total - ((page - 1) * PAGE_SIZE + index));
                   const currentStatus = q.status || 'not_contacted';
                   const isConverted = currentStatus === 'converted' || q.converted_company_id;
                   const busy = busyId === q.id;
