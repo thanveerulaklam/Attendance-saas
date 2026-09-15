@@ -1281,6 +1281,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             {scheduledDemos.map((lead) => {
               const when = lead.next_follow_up_at || lead.demo_scheduled_at;
               const overdue = isDemoOverdue(when);
+              const staffLabel = employeesCountLabel(lead.employees_range);
               return (
                 <li key={lead.id}>
                   <button
@@ -1290,10 +1291,17 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-slate-900 truncate">
-                          {lead.full_name || '—'}
-                          {lead.business_name ? ` · ${lead.business_name}` : ''}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="text-sm font-medium text-slate-900 truncate">
+                            {lead.full_name || '—'}
+                            {lead.business_name ? ` · ${lead.business_name}` : ''}
+                          </p>
+                          {staffLabel !== '—' && (
+                            <span className="shrink-0 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 tabular-nums">
+                              {staffLabel} staff
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] text-slate-500 truncate">
                           {[lead.phone_number, lead.city, lead.state].filter(Boolean).join(' · ') || '—'}
                         </p>
