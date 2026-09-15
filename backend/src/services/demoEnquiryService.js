@@ -438,7 +438,7 @@ async function listDemoEnquiries(
     `SELECT ${ENQUIRY_LIST_COLUMNS}
      ${enquirySelectFrom()}
      ${whereClause}
-     ORDER BY de.created_at DESC
+     ORDER BY de.created_at DESC, de.id DESC
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
     listParams
   );
@@ -1025,6 +1025,18 @@ async function convertEnquiryToCompany(enquiryId, companyPayload) {
   };
 }
 
+async function deleteDemoEnquiry(enquiryId) {
+  const enquiry = await getDemoEnquiryById(enquiryId);
+  const result = await pool.query(
+    `DELETE FROM demo_enquiries WHERE id = $1 RETURNING id, full_name, business_name`,
+    [enquiry.id]
+  );
+  if (result.rowCount === 0) {
+    throw new AppError('Enquiry not found', 404);
+  }
+  return result.rows[0];
+}
+
 module.exports = {
   createDemoEnquiry,
   createAdminLead,
@@ -1042,6 +1054,7 @@ module.exports = {
   logEnquiryCall,
   updateEnquiryCall,
   convertEnquiryToCompany,
+  deleteDemoEnquiry,
   getDemoEnquirySuggestions,
   DEMO_ENQUIRY_STATUSES,
   DEFAULT_LEAD_SOURCE_SUGGESTIONS,

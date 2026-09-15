@@ -14,6 +14,7 @@ const {
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   updateDemoEnquiryDetails,
+  deleteDemoEnquiry,
   listScheduledDemoEnquiries,
   bookDemoEnquiry,
   listDemoEnquiryCalls,
@@ -117,6 +118,7 @@ router.post('/demo-enquiries', createAdminDemoEnquiry);
 router.post('/demo-enquiries-bulk', handleMulterLeadImport, bulkCreateAdminDemoEnquiries);
 router.post('/demo-enquiry-status', updateDemoEnquiryStatus);
 router.post('/demo-enquiry-update', updateDemoEnquiryDetails);
+router.post('/demo-enquiry-delete', deleteDemoEnquiry);
 router.get('/demo-enquiry-scheduled', listScheduledDemoEnquiries);
 router.post('/demo-enquiry-book', bookDemoEnquiry);
 router.get('/demo-enquiry-calls', listDemoEnquiryCalls);

@@ -376,6 +376,25 @@ async function updateDemoEnquiryDetails(req, res, next) {
 }
 
 /**
+ * POST /api/admin/demo-enquiry-delete
+ * Body: { enquiry_id }
+ */
+async function deleteDemoEnquiry(req, res, next) {
+  try {
+    const demoEnquiryService = require('../services/demoEnquiryService');
+    const enquiryId = req.body?.enquiry_id != null ? Number(req.body.enquiry_id) : null;
+    const deleted = await demoEnquiryService.deleteDemoEnquiry(enquiryId);
+    res.status(200).json({
+      success: true,
+      data: deleted,
+      message: 'Lead deleted.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/admin/demo-enquiry-scheduled
  * Upcoming and overdue booked demos for the reminder card.
  */
@@ -1960,6 +1979,7 @@ module.exports = {
   updateDemoEnquiryStatus,
   updateDemoEnquiryNotes,
   updateDemoEnquiryDetails,
+  deleteDemoEnquiry,
   listScheduledDemoEnquiries,
   bookDemoEnquiry,
   listDemoEnquiryCalls,

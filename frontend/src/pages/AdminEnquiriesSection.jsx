@@ -400,6 +400,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [detailLead, setDetailLead] = useState(null);
   const [detailForm, setDetailForm] = useState(null);
   const [detailSaving, setDetailSaving] = useState(false);
+  const [deleteLead, setDeleteLead] = useState(null);
+  const [deleteSaving, setDeleteSaving] = useState(false);
 
   const [convertLead, setConvertLead] = useState(null);
   const [convertForm, setConvertForm] = useState(null);
@@ -947,6 +949,42 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       setToast?.({ type: 'error', message: err.message || 'Failed to save notes' });
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const handleDeleteLead = async () => {
+    if (!deleteLead || deleteSaving) return;
+    setDeleteSaving(true);
+    try {
+      const res = await adminFetch(
+        '/demo-enquiry-delete',
+        { method: 'POST', body: JSON.stringify({ enquiry_id: deleteLead.id }) },
+        adminKey
+      );
+      const text = await res.text();
+      if (res.status === 401) {
+        onAuthError?.();
+        return;
+      }
+      if (!res.ok) throw new Error(messageFromAdminErrorResponse(text, res.status));
+      const id = deleteLead.id;
+      if (detailLead?.id === id) closeDetail();
+      if (callLead?.id === id) {
+        setCallLead(null);
+        setCallLeadForm(null);
+      }
+      if (bookLead?.id === id) setBookLead(null);
+      setDeleteLead(null);
+      setToast?.({ type: 'success', message: 'Lead deleted.' });
+      if (leads.length <= 1 && page > 1) {
+        setPage((p) => Math.max(1, p - 1));
+      } else {
+        refreshAll();
+      }
+    } catch (err) {
+      setToast?.({ type: 'error', message: err.message || 'Failed to delete lead' });
+    } finally {
+      setDeleteSaving(false);
     }
   };
 
@@ -1683,6 +1721,14 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                             <p className="font-medium">Company #{q.converted_company_id}</p>
                             <p className="text-slate-500">{formatDateTime(q.converted_at)}</p>
                             <p className="text-[10px] text-slate-500 mt-1">See Operations → Companies</p>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => setDeleteLead(q)}
+                              className="mt-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                            >
+                              Delete lead
+                            </button>
                           </div>
                         ) : (
                           <div className="space-y-2">
@@ -1707,14 +1753,24 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                                 );
                               })}
                             </div>
-                            <button
-                              type="button"
-                              disabled={busy || currentStatus === 'lost'}
-                              onClick={() => openConvert(q)}
-                              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-                            >
-                              Convert to company
-                            </button>
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                type="button"
+                                disabled={busy || currentStatus === 'lost'}
+                                onClick={() => openConvert(q)}
+                                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                              >
+                                Convert to company
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => setDeleteLead(q)}
+                                className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                              >
+                                Delete
+                              </button>
+                            </div>
                           </div>
                         )}
                       </td>
@@ -2235,6 +2291,14 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                 </label>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={detailSaving || deleteSaving}
+                  onClick={() => setDeleteLead(detailLead)}
+                  className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                >
+                  Delete lead
+                </button>
                 {detailLead.converted_company_id || detailForm.status === 'converted' || detailForm.status === 'lost' ? (
                   <span className="text-[11px] text-slate-500">
                     {detailLead.converted_company_id
@@ -2269,6 +2333,53 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteLead && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-3 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => (deleteSaving ? null : setDeleteLead(null))}
+        >
+          <div
+            className="w-full max-w-md rounded-xl bg-white shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-slate-900">Delete this lead?</h3>
+            <p className="mt-2 text-sm text-slate-600">
+              {deleteLead.full_name || 'This lead'}
+              {deleteLead.business_name ? ` · ${deleteLead.business_name}` : ''}
+              {deleteLead.phone_number ? ` · ${deleteLead.phone_number}` : ''}
+            </p>
+            <p className="mt-2 text-sm text-slate-600">
+              Call history and follow-ups for this lead will be removed. This cannot be undone.
+            </p>
+            {deleteLead.converted_company_id ? (
+              <p className="mt-2 text-sm text-amber-800">
+                This lead was converted to a company. The company itself will not be deleted.
+              </p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={deleteSaving}
+                onClick={() => setDeleteLead(null)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteSaving}
+                onClick={handleDeleteLead}
+                className="rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+              >
+                {deleteSaving ? 'Deleting…' : 'Delete lead'}
+              </button>
+            </div>
           </div>
         </div>
       )}
