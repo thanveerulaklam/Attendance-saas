@@ -1557,6 +1557,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             <table className="w-full min-w-[1200px] text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs">
                 <tr>
+                  <th className="text-right px-3 py-2 font-medium text-slate-700 w-12">#</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Contact</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Business</th>
                   <th className="text-left px-4 py-2 font-medium text-slate-700">Location</th>
@@ -1570,7 +1571,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {leads.map((q) => {
+                {leads.map((q, index) => {
+                  const serial = (page - 1) * PAGE_SIZE + index + 1;
                   const currentStatus = q.status || 'not_contacted';
                   const isConverted = currentStatus === 'converted' || q.converted_company_id;
                   const busy = busyId === q.id;
@@ -1589,6 +1591,9 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                       }`}
                       onClick={() => openDetail(q)}
                     >
+                      <td className="px-3 py-3 text-right text-xs font-medium tabular-nums text-slate-500">
+                        {serial}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-slate-900">{q.full_name || '—'}</div>
                         {q.email && <div className="text-xs text-slate-500">{q.email}</div>}
