@@ -1225,16 +1225,28 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     [stats]
   );
 
+  const openReminders = useMemo(
+    () =>
+      scheduledDemos.filter((lead) => {
+        const status = lead?.status || '';
+        const outcome = lead?.last_call_outcome || '';
+        if (status === 'lost' || status === 'converted') return false;
+        if (outcome === 'lost' || outcome === 'not_interested') return false;
+        return true;
+      }),
+    [scheduledDemos]
+  );
+
   const reminderGroups = useMemo(() => {
     const overdue = [];
     const upcoming = [];
-    for (const lead of scheduledDemos) {
+    for (const lead of openReminders) {
       const when = lead.next_follow_up_at || lead.demo_scheduled_at;
       if (isDemoOverdue(when)) overdue.push(lead);
       else upcoming.push(lead);
     }
     return { overdue, upcoming };
-  }, [scheduledDemos]);
+  }, [openReminders]);
 
   return (
     <div className="space-y-6">
@@ -1312,11 +1324,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
             {reminderGroups.overdue.length} overdue · {reminderGroups.upcoming.length} upcoming
           </p>
         </div>
-        {scheduledDemos.length === 0 ? (
+        {openReminders.length === 0 ? (
           <p className="mt-3 text-sm text-amber-800/70">No demos or call-backs scheduled yet.</p>
         ) : (
           <ul className="mt-3 divide-y divide-amber-100 rounded-lg border border-amber-100 bg-white/80 overflow-hidden">
-            {scheduledDemos.map((lead) => {
+            {openReminders.map((lead) => {
               const when = lead.next_follow_up_at || lead.demo_scheduled_at;
               const overdue = isDemoOverdue(when);
               const staffLabel = employeesCountLabel(lead.employees_range);

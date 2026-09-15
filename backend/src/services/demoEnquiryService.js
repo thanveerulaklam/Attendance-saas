@@ -588,6 +588,7 @@ async function updateDemoEnquiryStatus(enquiryId, status) {
   const result = await pool.query(
     `UPDATE demo_enquiries
      SET status = $2,
+         next_follow_up_at = CASE WHEN $2 = 'lost' THEN NULL ELSE next_follow_up_at END,
          status_updated_at = NOW()
      WHERE id = $1
      RETURNING id`,
@@ -645,7 +646,8 @@ async function listScheduledDemos() {
   const result = await pool.query(
     `SELECT ${ENQUIRY_LIST_COLUMNS}
      ${enquirySelectFrom()}
-     WHERE de.status NOT IN ('converted')
+     WHERE de.status NOT IN ('converted', 'lost')
+       AND (last_call.outcome IS NULL OR last_call.outcome NOT IN ('lost', 'not_interested'))
        AND (
          (de.status = 'demo_booked' AND de.demo_scheduled_at IS NOT NULL)
          OR de.next_follow_up_at IS NOT NULL
