@@ -40,6 +40,7 @@ function statusChipCount(id, stats) {
   if (!stats) return null;
   if (id === 'all') return stats.total ?? 0;
   if (id === 'open') return stats.open ?? 0;
+  if (id === 'in_progress') return stats.in_progress ?? 0;
   return stats.by_status?.[id] ?? 0;
 }
 
@@ -488,6 +489,8 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       });
       if (statusFilter === 'open') {
         params.set('pipeline', 'open');
+      } else if (statusFilter === 'in_progress') {
+        params.set('pipeline', 'in_progress');
       } else if (statusFilter !== 'all') {
         params.set('status', statusFilter);
       }
@@ -1213,6 +1216,27 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     }
   };
 
+  const scrollToLeadRoster = () => {
+    requestAnimationFrame(() => {
+      document.getElementById('lead-roster')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const selectKpiCard = (key) => {
+    const next =
+      key === 'open'
+        ? 'open'
+        : key === 'in_progress'
+          ? 'in_progress'
+          : key === 'hot'
+            ? 'sold'
+            : key;
+    setPage(1);
+    setCallOutcomeFilter('');
+    setStatusFilter(next);
+    scrollToLeadRoster();
+  };
+
   const kpiCards = useMemo(
     () => [
       { key: 'open', label: 'Open pipeline', value: stats?.open ?? '—', tone: 'text-sky-900 bg-sky-50 border-sky-200' },
@@ -1293,23 +1317,24 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {kpiCards.map((card) => (
-          <button
-            key={card.key}
-            type="button"
-            onClick={() => {
-              setPage(1);
-              if (card.key === 'open') setStatusFilter('open');
-              else if (card.key === 'in_progress') setStatusFilter('contacted');
-              else if (card.key === 'hot') setStatusFilter('sold');
-              else setStatusFilter(card.key);
-            }}
-            className={`rounded-xl border p-4 text-left transition-shadow hover:shadow-md ${card.tone}`}
-          >
-            <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">{card.label}</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums">{card.value}</p>
-          </button>
-        ))}
+        {kpiCards.map((card) => {
+          const cardFilter =
+            card.key === 'in_progress' ? 'in_progress' : card.key === 'hot' ? 'sold' : card.key;
+          const selected = statusFilter === cardFilter;
+          return (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => selectKpiCard(card.key)}
+              className={`rounded-xl border p-4 text-left transition-shadow hover:shadow-md ${card.tone} ${
+                selected ? 'ring-2 ring-slate-900/20 ring-offset-1' : ''
+              }`}
+            >
+              <p className="text-[11px] font-medium uppercase tracking-wide opacity-80">{card.label}</p>
+              <p className="mt-1 text-2xl font-semibold tabular-nums">{card.value}</p>
+            </button>
+          );
+        })}
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50/40 p-4 shadow-sm">
@@ -1375,7 +1400,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
         )}
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div id="lead-roster" className="scroll-mt-4 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex flex-col gap-3">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <form
@@ -1468,6 +1493,7 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           <div className="flex flex-wrap gap-1.5">
             {[
               { id: 'open', label: 'Open pipeline' },
+              { id: 'in_progress', label: 'In progress' },
               { id: 'all', label: 'All' },
               ...DEMO_ENQUIRY_PIPELINE_STATUSES.map((s) => ({ id: s, label: demoEnquiryStatusLabel(s) })),
               { id: 'converted', label: 'Converted' },

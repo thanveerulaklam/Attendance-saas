@@ -389,6 +389,8 @@ async function listDemoEnquiries(
 
   if (pipeline === 'open') {
     conditions.push(`de.status NOT IN ('lost', 'converted')`);
+  } else if (pipeline === 'in_progress') {
+    conditions.push(`de.status IN ('contacted', 'demo_booked', 'demo_given')`);
   }
 
   const normalizedCallOutcome =
