@@ -29,7 +29,7 @@ import {
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 100;
 
 function chipCount(value) {
   if (value == null) return '—';
