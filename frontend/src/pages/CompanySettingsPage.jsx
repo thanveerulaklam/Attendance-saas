@@ -6,7 +6,13 @@ import {
   PLAN_DISPLAY_NAME,
   planDefaultLimits,
   isAnnualOnlyBilling,
+  isPepmPlan,
   tenantDisplayAmcAmount,
+  pepmMonthlyInr,
+  normalizeIndiaBillingType,
+  isIndiaPrepaidBilling,
+  indiaBillingTypeLabel,
+  softwareFeeLabel,
 } from '../constants/pricingPlans';
 import { countryProfile } from '../constants/countryProfiles';
 import { formatMoneyWithSymbol } from '../utils/formatMoney';
@@ -841,6 +847,23 @@ export default function CompanySettingsPage() {
       ? null
       : tenantDisplayAmcAmount(planSnapshot.plan_code, localeInfo.country_code, planSnapshot.amc_amount);
   const annualOnlyBilling = isAnnualOnlyBilling(localeInfo.country_code);
+  const pepmPlan = isPepmPlan(planSnapshot?.plan_code);
+  const indiaBillingType = normalizeIndiaBillingType(
+    planSnapshot?.billing_cycle,
+    planSnapshot?.plan_code
+  );
+  const prepaidSoftware = annualOnlyBilling || pepmPlan || isIndiaPrepaidBilling(indiaBillingType);
+  const softwareLabel = softwareFeeLabel(
+    localeInfo.country_code,
+    planSnapshot?.billing_cycle,
+    planSnapshot?.plan_code
+  );
+  const pepmMonthly =
+    pepmPlan && planSnapshot?.effective_employee_limit != null
+      ? pepmMonthlyInr(planSnapshot.effective_employee_limit)
+      : pepmPlan && displayAmcAmount
+        ? Math.round(Number(displayAmcAmount) / 12)
+        : null;
 
   return (
     <div className="space-y-4">
@@ -1639,7 +1662,13 @@ export default function CompanySettingsPage() {
         <p className="mt-0.5 text-[11px] text-slate-500">
           {annualOnlyBilling
             ? 'Your annual subscription covers software access for one year. Renewal is due each year on the date shown below. Dates and limits are managed by the service provider—contact support to make changes.'
-            : 'Your one-time fee covers the first year of software access. Annual AMC renews access for each following year; the first AMC is due one year after your one-time payment. Dates and limits are managed by the service provider—contact support to make changes.'}
+            : pepmPlan
+              ? 'Your monthly plan is billed yearly. ₹499/month includes 10 staff; each extra employee is ₹49/month. Dates and limits are managed by the service provider—contact support to make changes.'
+              : isIndiaPrepaidBilling(indiaBillingType)
+                ? indiaBillingType === 'triennial'
+                  ? 'Your 3-year software package covers access for three years. Renewal is due at the end of the term. Dates and limits are managed by the service provider—contact support to make changes.'
+                  : 'Your yearly software subscription covers access for one year. Renewal is due each year on the date shown below. Dates and limits are managed by the service provider—contact support to make changes.'
+                : 'Your one-time fee covers the first year of software access. Annual AMC renews access for each following year; the first AMC is due one year after your one-time payment. Dates and limits are managed by the service provider—contact support to make changes.'}
         </p>
         <div className="mt-4 space-y-3 rounded-lg bg-slate-50 px-4 py-3">
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
@@ -1647,7 +1676,11 @@ export default function CompanySettingsPage() {
               <span className="text-slate-500">Plan</span>
               <span className="ml-2 font-medium text-slate-900">
                 {planSnapshot
-                  ? PLAN_DISPLAY_NAME[planSnapshot.plan_code] || planSnapshot.plan_code
+                  ? `${PLAN_DISPLAY_NAME[planSnapshot.plan_code] || planSnapshot.plan_code}${
+                      annualOnlyBilling
+                        ? ''
+                        : ` · ${indiaBillingTypeLabel(indiaBillingType)}`
+                    }`
                   : '—'}
               </span>
             </div>
@@ -1681,12 +1714,12 @@ export default function CompanySettingsPage() {
             </div>
             <div className="text-sm">
               <span className="text-slate-500">
-                {isAnnualOnlyBilling(localeInfo.country_code) ? 'Renewal due' : 'Next AMC due'}
+                {prepaidSoftware ? 'Renewal due' : 'Next AMC due'}
               </span>
               <div className="font-medium text-slate-900">{formatDateLabel(planSnapshot?.next_amc_due_date)}</div>
             </div>
             {planSnapshot &&
-              !isAnnualOnlyBilling(localeInfo.country_code) &&
+              !prepaidSoftware &&
               planSnapshot.onetime_fee_amount != null &&
               planSnapshot.onetime_fee_amount !== '' &&
               Number(planSnapshot.onetime_fee_amount) > 0 && (
@@ -1700,10 +1733,19 @@ export default function CompanySettingsPage() {
             {displayAmcAmount != null && displayAmcAmount !== '' && (
               <div className="text-sm">
                 <span className="text-slate-500">
-                  {annualOnlyBilling ? 'Annual subscription (excl. VAT)' : 'AMC per year (excl. GST)'}
+                  {annualOnlyBilling
+                    ? 'Annual subscription (excl. VAT)'
+                    : prepaidSoftware
+                      ? `${softwareLabel} (excl. GST)`
+                      : 'AMC per year (excl. GST)'}
                 </span>
                 <div className="font-medium text-slate-900">
                   {formatMoneyWithSymbol(displayAmcAmount, localeInfo.currency)}
+                  {pepmPlan && pepmMonthly != null ? (
+                    <span className="ml-1 text-xs font-normal text-slate-500">
+                      (₹{pepmMonthly}/month)
+                    </span>
+                  ) : null}
                 </div>
               </div>
             )}
@@ -1736,15 +1778,15 @@ export default function CompanySettingsPage() {
           </div>
           {(planSnapshot?.last_onetime_payment_date || planSnapshot?.last_amc_payment_date) && (
             <div className="border-t border-slate-200/80 pt-3 text-[11px] text-slate-500">
-              {!annualOnlyBilling && planSnapshot.last_onetime_payment_date && (
+              {!prepaidSoftware && planSnapshot.last_onetime_payment_date && (
                 <p>
                   Last one-time payment recorded: {formatDateLabel(planSnapshot.last_onetime_payment_date)}
                   {planSnapshot.onetime_payment_status ? ` (${planSnapshot.onetime_payment_status})` : ''}
                 </p>
               )}
               {planSnapshot.last_amc_payment_date && (
-                <p className={annualOnlyBilling ? '' : 'mt-0.5'}>
-                  {annualOnlyBilling ? 'Last subscription payment' : 'Last AMC payment'}:{' '}
+                <p className={prepaidSoftware ? '' : 'mt-0.5'}>
+                  {prepaidSoftware ? 'Last subscription payment' : 'Last AMC payment'}:{' '}
                   {formatDateLabel(planSnapshot.last_amc_payment_date)}
                   {planSnapshot.amc_payment_status ? ` (${planSnapshot.amc_payment_status})` : ''}
                 </p>

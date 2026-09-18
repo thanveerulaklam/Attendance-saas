@@ -11,11 +11,13 @@ const {
 
 // Employee limits per plan (aligned with landing-page pricing). Null = no default cap.
 const PLAN_EMPLOYEE_LIMITS = {
-  base: 10, // Base (micro tier, up to 10)
+  micro: 5, // New yearly/3-year: up to 5
+  base: 10, // Base / up to 10
   starter: 25, // Basic
   growth: 50, // Growth
   business: 100, // Business
   professional: 200, // Professional
+  pepm: 10, // Legacy monthly PEPM
   enterprise: null, // Enterprise 200+
   custom: null,
 };

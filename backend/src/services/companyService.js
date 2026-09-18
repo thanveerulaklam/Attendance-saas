@@ -9,10 +9,11 @@ const {
 } = require('./shiftRotationPolicyService');
 
 /**
- * Next AMC due date:
- * - After an AMC payment: 1 year from last AMC (annual renewal).
- * - Before any AMC: 1 year from one-time fee payment (first year covered by one-time; AMC starts after).
- * - Fallback: 1 year from access start if one-time date not recorded.
+ * Next AMC / subscription due date:
+ * - After a payment: last payment + 1 year (yearly/OTC/pepm) or + 3 years (triennial).
+ * - Yearly / 3-year / pepm, unpaid: due on access start (term is prepaid, not covered by a one-time fee).
+ * - OTC, before any AMC: 1 year from one-time fee payment (first year covered by one-time).
+ * - OTC fallback: 1 year from access start if one-time date not recorded.
  */
 function pad2(n) {
   return String(n).padStart(2, '0');
@@ -46,19 +47,55 @@ function addDaysToIso(iso, days) {
   return `${next.getFullYear()}-${pad2(next.getMonth() + 1)}-${pad2(next.getDate())}`;
 }
 
-function addOneYearIso(dateLike) {
+function addYearsIso(dateLike, years) {
   const iso = toCalendarIso(dateLike);
   if (!iso) return null;
+  const extra = Number(years);
+  const n = Number.isFinite(extra) && extra > 0 ? extra : 1;
   const [y, m, d] = iso.split('-').map(Number);
-  const next = new Date(y + 1, m - 1, d);
+  const next = new Date(y + n, m - 1, d);
   if (next.getMonth() !== m - 1) next.setDate(0);
   return `${next.getFullYear()}-${pad2(next.getMonth() + 1)}-${pad2(next.getDate())}`;
 }
 
+function addOneYearIso(dateLike) {
+  return addYearsIso(dateLike, 1);
+}
+
+const ALLOWED_BILLING_CYCLES = ['monthly', 'annual', 'otc', 'yearly', 'triennial'];
+
+function normalizeBillingCycle(raw, countryCode = 'IN') {
+  if (String(countryCode || 'IN').toUpperCase() === 'AE') return 'annual';
+  const c = String(raw || '').trim().toLowerCase();
+  if (c === 'triennial' || c === '3years' || c === '3year' || c === '3-year') return 'triennial';
+  if (c === 'yearly') return 'yearly';
+  if (c === 'otc') return 'otc';
+  if (ALLOWED_BILLING_CYCLES.includes(c)) return c;
+  return 'yearly';
+}
+
+function billingTermYears(cycle) {
+  return String(cycle || '').toLowerCase() === 'triennial' ? 3 : 1;
+}
+
+function isPrepaidSoftwareCycle(cycle, planCode) {
+  const c = String(cycle || '').toLowerCase();
+  if (c === 'yearly' || c === 'triennial') return true;
+  return String(planCode || '').toLowerCase() === 'pepm';
+}
+
 function computeNextAmcDueDate(company) {
   if (!company) return null;
+  const years = billingTermYears(company.billing_cycle);
   if (company.last_amc_payment_date) {
-    return addOneYearIso(company.last_amc_payment_date);
+    return addYearsIso(company.last_amc_payment_date, years);
+  }
+  if (isPrepaidSoftwareCycle(company.billing_cycle, company.plan_code)) {
+    return (
+      toCalendarIso(company.subscription_start_date) ||
+      toCalendarIso(company.last_onetime_payment_date) ||
+      null
+    );
   }
   if (company.last_onetime_payment_date) {
     return addOneYearIso(company.last_onetime_payment_date);
@@ -518,5 +555,9 @@ module.exports = {
   computeNextAmcDueDate,
   isAmcCollectible,
   branchesAllowedTotal,
+  normalizeBillingCycle,
+  billingTermYears,
+  isPrepaidSoftwareCycle,
+  ALLOWED_BILLING_CYCLES,
 };
 

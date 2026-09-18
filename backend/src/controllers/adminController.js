@@ -1,6 +1,12 @@
 const { pool } = require('../config/database');
 const { getEffectiveEmployeeLimit, PLAN_EMPLOYEE_LIMITS } = require('../services/employeeService');
-const { computeNextAmcDueDate, isAmcCollectible } = require('../services/companyService');
+const {
+  computeNextAmcDueDate,
+  isAmcCollectible,
+  normalizeBillingCycle,
+  billingTermYears,
+  isPrepaidSoftwareCycle,
+} = require('../services/companyService');
 const { recordPaymentsFromBillingChange } = require('../services/paymentLedgerService');
 const auditService = require('../services/auditService');
 const authService = require('../services/authService');
@@ -580,7 +586,7 @@ async function updateCompanyBilling(req, res, next) {
 
     const existingResult = await pool.query(
       `SELECT
-         id, created_at, status, plan_code,
+         id, created_at, status, plan_code, billing_cycle, country_code,
          subscription_start_date, subscription_end_date,
          onetime_fee_paid, onetime_fee_amount, amc_amount,
          onetime_payment_status, amc_payment_status,
@@ -624,8 +630,13 @@ async function updateCompanyBilling(req, res, next) {
         ? new Date(existing.created_at || today)
         : today;
     activationDate.setHours(0, 0, 0, 0);
+
+    const { updateBillingMetadata } = require('../services/companyService');
+    const billingCycle = req.body?.billing_cycle
+      ? normalizeBillingCycle(req.body.billing_cycle, existing.country_code || 'IN')
+      : existing.billing_cycle || 'annual';
     const defaultEndDate = new Date(activationDate);
-    defaultEndDate.setDate(defaultEndDate.getDate() + 365);
+    defaultEndDate.setFullYear(defaultEndDate.getFullYear() + billingTermYears(billingCycle));
 
     const normalizedStart =
       subscription_start_date === '' || subscription_start_date == null
@@ -636,21 +647,21 @@ async function updateCompanyBilling(req, res, next) {
         ? defaultEndDate
         : subscription_end_date;
 
-    const { updateBillingMetadata } = require('../services/companyService');
+    const prepaid = isPrepaidSoftwareCycle(billingCycle, plan_code || existing.plan_code);
     const updated = await updateBillingMetadata(companyId, {
       plan_code,
-      billing_cycle: 'annual',
+      billing_cycle: billingCycle,
       next_billing_date: normalizedEnd,
       last_payment_date,
       payment_status,
-      onetime_payment_status,
+      onetime_payment_status: prepaid ? 'paid' : onetime_payment_status,
       amc_payment_status,
       billing_notes,
       subscription_start_date: normalizedStart,
       subscription_end_date: normalizedEnd,
       is_active,
-      onetime_fee_paid,
-      onetime_fee_amount,
+      onetime_fee_paid: prepaid ? true : onetime_fee_paid,
+      onetime_fee_amount: prepaid ? 0 : onetime_fee_amount,
       amc_amount,
       last_amc_payment_date,
       last_onetime_payment_date,
@@ -694,7 +705,17 @@ async function approveCompany(req, res, next) {
       });
     }
 
-    const allowedPlanCodes = ['base', 'starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
+    const allowedPlanCodes = [
+      'micro',
+      'base',
+      'starter',
+      'growth',
+      'business',
+      'professional',
+      'pepm',
+      'enterprise',
+      'custom',
+    ];
     const allowedPaymentStatuses = ['trial', 'paid', 'pending', 'overdue', 'unpaid'];
 
     const plan_code =
@@ -772,9 +793,12 @@ async function approveCompany(req, res, next) {
       d.setHours(0, 0, 0, 0);
       endDate = d;
     } else {
+      const billingCycleForDates = normalizeBillingCycle(req.body?.billing_cycle || 'otc', 'IN');
       endDate = new Date(startDate);
-      endDate.setFullYear(endDate.getFullYear() + 1);
+      endDate.setFullYear(endDate.getFullYear() + billingTermYears(billingCycleForDates));
     }
+
+    const billingCycle = normalizeBillingCycle(req.body?.billing_cycle || 'otc', 'IN');
 
     let normalizedLastPaymentDate = null;
     if (last_payment_date) {
@@ -791,11 +815,15 @@ async function approveCompany(req, res, next) {
     const branch_limit_override = Math.max(0, branchesAllowed - 1);
     const employee_limit_override = staffsAllowed;
 
-    const onetime_fee_paid = req.body.onetime_fee_paid === true;
+    let onetime_fee_paid = req.body.onetime_fee_paid === true;
     let onetime_fee_amount = null;
     if (req.body.onetime_fee_amount != null && req.body.onetime_fee_amount !== '') {
       const n = Number(req.body.onetime_fee_amount);
       if (Number.isFinite(n) && n >= 0) onetime_fee_amount = n;
+    }
+    if (isPrepaidSoftwareCycle(billingCycle, plan_code)) {
+      onetime_fee_paid = true;
+      onetime_fee_amount = 0;
     }
     let amc_amount = null;
     if (req.body.amc_amount != null && req.body.amc_amount !== '') {
@@ -826,7 +854,7 @@ async function approveCompany(req, res, next) {
        SET status = 'active',
            is_active = TRUE,
            plan_code = $2,
-           billing_cycle = 'annual',
+           billing_cycle = $16,
            next_billing_date = $3::date,
            payment_status = $4,
            last_payment_date = $5::date,
@@ -863,6 +891,7 @@ async function approveCompany(req, res, next) {
         onetimePayStatus,
         amcPayStatus,
         lastOnetimePayDate,
+        billingCycle,
       ]
     );
     if (result.rowCount === 0) {

@@ -24,8 +24,17 @@ import {
   adminPlanFormDefaults,
   applyAdminPlanFields,
   planOptionsForAdminSelect,
+  withCurrentPlanOption,
   pricingSymbolForCountry,
+  isPepmPlan,
+  hidesOnetimeFee,
+  syncPepmFormAmounts,
+  PEPM_ADMIN_HINT,
+  INDIA_BILLING_TYPE_OPTIONS,
+  INDIA_BILLING_TYPE_YEARLY,
   isAnnualOnlyBilling,
+  accessEndFromStart,
+  softwareFeeLabel,
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 
@@ -324,10 +333,9 @@ function editFormFromLead(lead) {
 function convertFormFromLead(lead) {
   const plan = lead?.expected_plan || 'base';
   const countryCode = DEFAULT_COUNTRY_CODE;
-  const planDefaults = adminPlanFormDefaults(plan, countryCode);
+  const billingType = INDIA_BILLING_TYPE_YEARLY;
+  const planDefaults = adminPlanFormDefaults(plan, countryCode, { billingType });
   const today = new Date().toISOString().slice(0, 10);
-  const end = new Date(today);
-  end.setFullYear(end.getFullYear() + 1);
   const email = (lead?.email || '').trim();
   const adminEmail =
     email ||
@@ -335,7 +343,9 @@ function convertFormFromLead(lead) {
       ? `admin+${String(lead.phone_number).replace(/\D/g, '').slice(-10)}@client.local`
       : '');
 
-  return {
+  const fromLead = Number(employeesFormValue(lead?.employees_range));
+  const staffFromLead = Number.isInteger(fromLead) && fromLead >= 1 ? fromLead : null;
+  const form = {
     company_name: lead?.business_name || '',
     company_email: email,
     phone: lead?.phone_number || '',
@@ -344,16 +354,24 @@ function convertFormFromLead(lead) {
     admin_email: adminEmail,
     admin_password: '',
     plan_code: planDefaults.plan_code,
+    billing_cycle: planDefaults.billing_cycle || billingType,
     subscription_start_date: today,
-    subscription_end_date: end.toISOString().slice(0, 10),
+    subscription_end_date: accessEndFromStart(
+      today,
+      planDefaults.billing_cycle || billingType,
+      countryCode,
+      planDefaults.plan_code
+    ),
     branches_allowed: planDefaults.branches_allowed,
-    staffs_allowed: planDefaults.staffs_allowed ?? 10,
+    staffs_allowed: staffFromLead || planDefaults.staffs_allowed ?? 10,
     onetime_fee_amount: planDefaults.onetime_fee_amount,
     amc_amount: planDefaults.amc_amount,
     onetime_fee_paid: planDefaults.onetime_fee_paid,
     last_amc_payment_date: '',
     country_code: DEFAULT_COUNTRY_CODE,
   };
+  syncPepmFormAmounts(form, countryCode);
+  return form;
 }
 
 export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast, onCompanyCreated }) {
@@ -416,13 +434,33 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
   const [stateSuggestions, setStateSuggestions] = useState(DEFAULT_STATE_SUGGESTIONS);
   const [sourceSuggestionsLoading, setSourceSuggestionsLoading] = useState(false);
 
-  const addPlanOptions = useMemo(() => planOptionsForAdminSelect(DEFAULT_COUNTRY_CODE), []);
+  const addPlanOptions = useMemo(
+    () => planOptionsForAdminSelect(DEFAULT_COUNTRY_CODE, INDIA_BILLING_TYPE_YEARLY),
+    []
+  );
   const convertPlanOptions = useMemo(
-    () => planOptionsForAdminSelect(convertForm?.country_code || DEFAULT_COUNTRY_CODE),
-    [convertForm?.country_code]
+    () =>
+      withCurrentPlanOption(
+        planOptionsForAdminSelect(
+          convertForm?.country_code || DEFAULT_COUNTRY_CODE,
+          convertForm?.billing_cycle
+        ),
+        convertForm?.plan_code
+      ),
+    [convertForm?.country_code, convertForm?.billing_cycle, convertForm?.plan_code]
   );
   const convertMoneySymbol = pricingSymbolForCountry(convertForm?.country_code || DEFAULT_COUNTRY_CODE);
-  const convertIsAnnualOnly = isAnnualOnlyBilling(convertForm?.country_code);
+  const convertHidesOnetime = hidesOnetimeFee(
+    convertForm?.plan_code,
+    convertForm?.country_code,
+    convertForm?.billing_cycle
+  );
+  const convertIsPepm = isPepmPlan(convertForm?.plan_code);
+  const convertSoftwareLabel = softwareFeeLabel(
+    convertForm?.country_code,
+    convertForm?.billing_cycle,
+    convertForm?.plan_code
+  );
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -1126,16 +1164,30 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
     setConvertForm((prev) => {
       const next = { ...prev, [name]: type === 'checkbox' ? checked : value };
       const countryCode = name === 'country_code' ? value : prev.country_code || DEFAULT_COUNTRY_CODE;
-      if (name === 'plan_code' || name === 'country_code') {
+      if (name === 'plan_code' || name === 'country_code' || name === 'billing_cycle') {
         const plan = name === 'plan_code' ? value : prev.plan_code;
-        applyAdminPlanFields(next, plan, countryCode);
+        const billingType =
+          name === 'billing_cycle'
+            ? value
+            : name === 'country_code'
+              ? INDIA_BILLING_TYPE_YEARLY
+              : prev.billing_cycle;
+        if (name === 'country_code' && !isAnnualOnlyBilling(value)) next.billing_cycle = billingType;
+        applyAdminPlanFields(next, plan, countryCode, { billingType });
+        const end = accessEndFromStart(
+          next.subscription_start_date,
+          next.billing_cycle,
+          countryCode,
+          next.plan_code
+        );
+        if (end) next.subscription_end_date = end;
+      }
+      if (name === 'staffs_allowed') {
+        syncPepmFormAmounts(next, countryCode);
       }
       if (name === 'subscription_start_date' && value) {
-        const d = new Date(value);
-        if (!Number.isNaN(d.getTime())) {
-          d.setFullYear(d.getFullYear() + 1);
-          next.subscription_end_date = d.toISOString().slice(0, 10);
-        }
+        const end = accessEndFromStart(value, next.billing_cycle, countryCode, next.plan_code);
+        if (end) next.subscription_end_date = end;
       }
       return next;
     });
@@ -1172,13 +1224,14 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
               password: convertForm.admin_password,
             },
             plan_code: convertForm.plan_code,
+            billing_cycle: convertForm.billing_cycle,
             subscription_start_date: convertForm.subscription_start_date,
             subscription_end_date: convertForm.subscription_end_date,
             branches_allowed: Number(convertForm.branches_allowed),
             staffs_allowed: Number(convertForm.staffs_allowed),
-            payment_status: convertIsAnnualOnly ? 'unpaid' : convertForm.onetime_fee_paid ? 'paid' : 'unpaid',
-            onetime_fee_paid: convertIsAnnualOnly ? true : convertForm.onetime_fee_paid === true,
-            onetime_fee_amount: convertIsAnnualOnly
+            payment_status: convertHidesOnetime ? 'unpaid' : convertForm.onetime_fee_paid ? 'paid' : 'unpaid',
+            onetime_fee_paid: convertHidesOnetime ? true : convertForm.onetime_fee_paid === true,
+            onetime_fee_amount: convertHidesOnetime
               ? 0
               : convertForm.onetime_fee_amount
                 ? Number(convertForm.onetime_fee_amount)
@@ -2518,6 +2571,30 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                     <span className="text-xs font-medium text-slate-700">Admin password *</span>
                     <input name="admin_password" type="password" value={convertForm.admin_password} onChange={handleConvertChange} minLength={8} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" required />
                   </label>
+                  <label className="block sm:col-span-2">
+                    <span className="text-xs font-medium text-slate-700">Billing type</span>
+                    {!isAnnualOnlyBilling(convertForm.country_code) ? (
+                      <>
+                        <select
+                          name="billing_cycle"
+                          value={convertForm.billing_cycle || INDIA_BILLING_TYPE_YEARLY}
+                          onChange={handleConvertChange}
+                          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                        >
+                          {INDIA_BILLING_TYPE_OPTIONS.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          New deals: yearly or 3-year. Keep OTC + AMC for existing customers and a few pipeline quotes.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-1 text-sm text-slate-700">UAE yearly subscription</p>
+                    )}
+                  </label>
                   <label className="block">
                     <span className="text-xs font-medium text-slate-700">Plan</span>
                     <select name="plan_code" value={convertForm.plan_code} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
@@ -2533,11 +2610,14 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   <label className="block">
                     <span className="text-xs font-medium text-slate-700">Staff limit</span>
                     <input name="staffs_allowed" type="number" min={1} value={convertForm.staffs_allowed} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
+                    {convertIsPepm && <p className="mt-1 text-[11px] text-slate-500">{PEPM_ADMIN_HINT}</p>}
                   </label>
-                  {convertIsAnnualOnly ? (
+                  {convertHidesOnetime ? (
                     <label className="block sm:col-span-2">
                       <span className="text-xs font-medium text-slate-700">
-                        Annual subscription ({convertMoneySymbol}/year, excl. VAT)
+                        {convertIsPepm
+                          ? `Yearly (${convertMoneySymbol}, excl. GST)`
+                          : `${convertSoftwareLabel} (${convertMoneySymbol}, ${isAnnualOnlyBilling(convertForm.country_code) ? 'excl. VAT' : 'excl. GST'})`}
                       </span>
                       <input name="amc_amount" value={convertForm.amc_amount} onChange={handleConvertChange} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm" />
                     </label>

@@ -3,7 +3,7 @@ const { pool } = require('../config/database');
 const { signToken } = require('../middleware/auth');
 const { AppError } = require('../utils/AppError');
 const { resolveLocaleFromCountryCode, validateCountryCode } = require('../config/region');
-const { getCompanyLocale } = require('./companyService');
+const { getCompanyLocale, normalizeBillingCycle, billingTermYears, isPrepaidSoftwareCycle } = require('./companyService');
 
 /**
  * Register a new company and its first admin user.
@@ -98,7 +98,17 @@ async function createCompanyProvisionedBySuperadmin(payload) {
   }
 
   const plan_code = typeof payload.plan_code === 'string' ? payload.plan_code.trim().toLowerCase() : 'starter';
-  const allowedPlans = ['base', 'starter', 'growth', 'business', 'professional', 'enterprise', 'custom'];
+  const allowedPlans = [
+    'micro',
+    'base',
+    'starter',
+    'growth',
+    'business',
+    'professional',
+    'pepm',
+    'enterprise',
+    'custom',
+  ];
   if (!allowedPlans.includes(plan_code)) {
     throw new AppError(`plan_code must be one of: ${allowedPlans.join(', ')}`, 400);
   }
@@ -131,7 +141,7 @@ async function createCompanyProvisionedBySuperadmin(payload) {
     endDate.setHours(0, 0, 0, 0);
   } else {
     endDate = new Date(startDate);
-    endDate.setFullYear(endDate.getFullYear() + 1);
+    endDate.setHours(0, 0, 0, 0);
   }
 
   let lastAmc = null;
@@ -156,6 +166,11 @@ async function createCompanyProvisionedBySuperadmin(payload) {
   );
   const locale = resolveLocaleFromCountryCode(countryCode);
   const annualOnlyBilling = countryCode === 'AE';
+  const billingCycle = normalizeBillingCycle(payload.billing_cycle, countryCode);
+
+  if (!payload.subscription_end_date) {
+    endDate.setFullYear(endDate.getFullYear() + billingTermYears(billingCycle));
+  }
 
   let onetimeFeePaid = payload.onetime_fee_paid === true;
   let onetimeAmt =
@@ -165,7 +180,7 @@ async function createCompanyProvisionedBySuperadmin(payload) {
   let amcAmt =
     payload.amc_amount != null && payload.amc_amount !== '' ? Number(payload.amc_amount) : null;
 
-  if (annualOnlyBilling) {
+  if (annualOnlyBilling || isPrepaidSoftwareCycle(billingCycle, plan_code)) {
     onetimeFeePaid = true;
     onetimeAmt = 0;
   }
@@ -196,7 +211,7 @@ async function createCompanyProvisionedBySuperadmin(payload) {
        )
        VALUES (
          $1, $2, $3, $4, 'active',
-         $5, 'annual', $6,
+         $5, $18, $6,
          $7::date, $8::date, $8::date,
          TRUE,
          $9, $10,
@@ -225,6 +240,7 @@ async function createCompanyProvisionedBySuperadmin(payload) {
         locale.country_code,
         locale.timezone,
         locale.currency,
+        billingCycle,
       ]
     );
     const companyRow = companyResult.rows[0];

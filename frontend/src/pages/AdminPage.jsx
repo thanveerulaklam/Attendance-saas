@@ -3,12 +3,27 @@ import { Link } from 'react-router-dom';
 import {
   PLAN_EMPLOYEE_CAP,
   PLAN_DISPLAY_NAME,
+  PEPM_ADMIN_HINT,
   adminPlanFormDefaults,
   applyAdminPlanFields,
   planDefaultLimits,
   planOptionsForAdminSelect,
+  withCurrentPlanOption,
   pricingSymbolForCountry,
   isAnnualOnlyBilling,
+  isPepmPlan,
+  hidesOnetimeFee,
+  syncPepmFormAmounts,
+  INDIA_BILLING_TYPE_OPTIONS,
+  INDIA_BILLING_TYPE_YEARLY,
+  INDIA_BILLING_TYPE_OTC,
+  normalizeIndiaBillingType,
+  isIndiaPrepaidBilling,
+  indiaBillingTypeLabel,
+  indiaBillingTermYears,
+  addCalendarYearsIso,
+  accessEndFromStart,
+  softwareFeeLabel,
 } from '../constants/pricingPlans';
 import { COUNTRY_OPTIONS, DEFAULT_COUNTRY_CODE, countryProfile } from '../constants/countryProfiles';
 import { formatMoneyWithSymbol } from '../utils/formatMoney';
@@ -85,16 +100,21 @@ function deriveSubscriptionDates(company) {
   if (end && Number.isNaN(end.getTime())) end = null;
   if (!end && start) {
     end = new Date(start);
-    end.setDate(end.getDate() + 365);
+    const years = indiaBillingTermYears(normalizeIndiaBillingType(company?.billing_cycle, company?.plan_code));
+    end.setFullYear(end.getFullYear() + years);
   }
   return { start, end };
 }
 
+function defaultBillingTypeForForm(countryCode, { pipeline = false } = {}) {
+  if (isAnnualOnlyBilling(countryCode)) return 'annual';
+  return pipeline ? INDIA_BILLING_TYPE_OTC : INDIA_BILLING_TYPE_YEARLY;
+}
+
 function buildCreateFormState(countryCode = DEFAULT_COUNTRY_CODE) {
   const t = new Date().toISOString().slice(0, 10);
-  const e = new Date(t);
-  e.setFullYear(e.getFullYear() + 1);
-  const planDefaults = adminPlanFormDefaults('base', countryCode);
+  const billingType = defaultBillingTypeForForm(countryCode);
+  const planDefaults = adminPlanFormDefaults('base', countryCode, { billingType });
   return {
     company_name: '',
     company_email: '',
@@ -104,8 +124,9 @@ function buildCreateFormState(countryCode = DEFAULT_COUNTRY_CODE) {
     admin_email: '',
     admin_password: '',
     plan_code: planDefaults.plan_code,
+    billing_cycle: planDefaults.billing_cycle || billingType,
     subscription_start_date: t,
-    subscription_end_date: e.toISOString().slice(0, 10),
+    subscription_end_date: accessEndFromStart(t, planDefaults.billing_cycle || billingType, countryCode),
     branches_allowed: planDefaults.branches_allowed,
     staffs_allowed: planDefaults.staffs_allowed ?? 10,
     onetime_fee_amount: planDefaults.onetime_fee_amount,
@@ -118,16 +139,17 @@ function buildCreateFormState(countryCode = DEFAULT_COUNTRY_CODE) {
 
 function buildApproveFormState(countryCode = DEFAULT_COUNTRY_CODE) {
   const todayStr = new Date().toISOString().slice(0, 10);
-  const defaultEnd = (() => {
-    const d = new Date(todayStr);
-    d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().slice(0, 10);
-  })();
-  const planDefaults = adminPlanFormDefaults('base', countryCode);
+  const billingType = defaultBillingTypeForForm(countryCode, { pipeline: true });
+  const planDefaults = adminPlanFormDefaults('base', countryCode, { billingType });
   return {
     plan_code: planDefaults.plan_code,
+    billing_cycle: planDefaults.billing_cycle || billingType,
     subscription_start_date: todayStr,
-    subscription_end_date: defaultEnd,
+    subscription_end_date: accessEndFromStart(
+      todayStr,
+      planDefaults.billing_cycle || billingType,
+      countryCode
+    ),
     branches_allowed: planDefaults.branches_allowed,
     staffs_allowed: planDefaults.staffs_allowed ?? 10,
     onetime_fee_amount: planDefaults.onetime_fee_amount,
@@ -140,6 +162,9 @@ function buildApproveFormState(countryCode = DEFAULT_COUNTRY_CODE) {
 function formatPlanWithLimits(c) {
   const plan = (c.plan_code || 'starter').toLowerCase();
   const planLabel = PLAN_DISPLAY_NAME[plan] || plan.charAt(0).toUpperCase() + plan.slice(1);
+  const billingLabel = isAnnualOnlyBilling(c.country_code)
+    ? 'Yearly'
+    : indiaBillingTypeLabel(normalizeIndiaBillingType(c.billing_cycle, c.plan_code));
   const staffCap =
     c.employee_limit_override != null && c.employee_limit_override !== ''
       ? Number(c.employee_limit_override)
@@ -147,7 +172,7 @@ function formatPlanWithLimits(c) {
   const staffLabel = staffCap == null ? 'No default cap' : `${staffCap} staff max`;
   const branchTotal =
     c.branch_limit_override == null ? '—' : String(1 + Number(c.branch_limit_override || 0));
-  return `${planLabel} · ${staffLabel} · ${branchTotal} branch(es)`;
+  return `${planLabel} · ${billingLabel} · ${staffLabel} · ${branchTotal} branch(es)`;
 }
 
 function paymentStatusBadgeClass(status) {
@@ -296,7 +321,9 @@ function getBillingAttentionReasons(company) {
   else if (access.isUrgent && access.daysLeft != null) reasons.push(`Access ends in ${access.daysLeft}d`);
   if (amcDue.level === 'critical') reasons.push(`AMC overdue (${amcDue.text})`);
   else if (amcDue.level === 'warn') reasons.push(`AMC due soon (${amcDue.text})`);
-  if (paymentNeedsAttention(otc)) reasons.push(`One-time ${otc}`);
+  if (paymentNeedsAttention(otc) && !hidesOnetimeFee(company.plan_code, company.country_code, company.billing_cycle)) {
+    reasons.push(`One-time ${otc}`);
+  }
   if (amcPaymentNeedsAttention(company)) reasons.push(`AMC ${amc}`);
   if (company.status === 'locked') reasons.push('Account locked');
   return reasons;
@@ -308,18 +335,29 @@ function companyNeedsBillingAttention(company) {
 
 function computeNextAmcDueDateClient(company) {
   if (!company) return null;
-  const addYear = (dateLike) => {
+  const years = isAnnualOnlyBilling(company.country_code)
+    ? 1
+    : indiaBillingTermYears(normalizeIndiaBillingType(company.billing_cycle, company.plan_code));
+  const addYears = (dateLike) => {
     const iso = toCalendarIso(dateLike);
     if (!iso) return null;
-    const [y, m, d] = iso.split('-').map(Number);
-    const next = new Date(y + 1, m - 1, d);
-    if (next.getMonth() !== m - 1) next.setDate(0);
-    return `${next.getFullYear()}-${padDatePart(next.getMonth() + 1)}-${padDatePart(next.getDate())}`;
+    return addCalendarYearsIso(iso, years) || null;
   };
-  if (company.last_amc_payment_date) return addYear(company.last_amc_payment_date);
-  if (company.last_onetime_payment_date) return addYear(company.last_onetime_payment_date);
-  if (company.subscription_start_date) return addYear(company.subscription_start_date);
+  if (company.last_amc_payment_date) return addYears(company.last_amc_payment_date);
+  if (
+    isPepmPlan(company.plan_code) ||
+    isIndiaPrepaidBilling(normalizeIndiaBillingType(company.billing_cycle, company.plan_code))
+  ) {
+    return toCalendarIso(company.subscription_start_date) || toCalendarIso(company.last_onetime_payment_date);
+  }
+  if (company.last_onetime_payment_date) return addYears(company.last_onetime_payment_date);
+  if (company.subscription_start_date) return addYears(company.subscription_start_date);
   return null;
+}
+
+function resolvedCompanyBillingCycle(company) {
+  if (isAnnualOnlyBilling(company?.country_code)) return 'annual';
+  return normalizeIndiaBillingType(company?.billing_cycle, company?.plan_code);
 }
 
 function buildBillingPayloadFromCompany(company, patch = {}) {
@@ -327,6 +365,7 @@ function buildBillingPayloadFromCompany(company, patch = {}) {
   return {
     company_id: company.id,
     plan_code: company.plan_code || 'starter',
+    billing_cycle: resolvedCompanyBillingCycle(company),
     billing_notes: company.billing_notes || '',
     subscription_start_date: toDateInputValue(company.subscription_start_date || derived.start),
     subscription_end_date: toDateInputValue(company.subscription_end_date || derived.end),
@@ -352,6 +391,29 @@ function PaymentStatusPill({ status, label }) {
     >
       {label || (status === 'not_due' ? 'not due yet' : status) || 'unpaid'}
     </span>
+  );
+}
+
+function IndiaBillingTypeSelect({ value, onChange, name = 'billing_cycle' }) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-700 mb-1">Billing type</label>
+      <select
+        name={name}
+        value={value || INDIA_BILLING_TYPE_YEARLY}
+        onChange={onChange}
+        className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
+      >
+        {INDIA_BILLING_TYPE_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 text-[11px] text-slate-500">
+        New deals: yearly or 3-year. Keep OTC + AMC for existing customers and a few pipeline quotes.
+      </p>
+    </div>
   );
 }
 
@@ -419,22 +481,80 @@ export default function AdminPage() {
   const [createForm, setCreateForm] = useState(() => buildCreateFormState());
 
   const createPlanOptions = useMemo(
-    () => planOptionsForAdminSelect(createForm.country_code || DEFAULT_COUNTRY_CODE),
-    [createForm.country_code]
+    () =>
+      withCurrentPlanOption(
+        planOptionsForAdminSelect(createForm.country_code || DEFAULT_COUNTRY_CODE, createForm.billing_cycle),
+        createForm.plan_code
+      ),
+    [createForm.country_code, createForm.billing_cycle, createForm.plan_code]
   );
   const approvePlanOptions = useMemo(
-    () => planOptionsForAdminSelect(approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE),
-    [approveModalCompany?.country_code]
+    () =>
+      withCurrentPlanOption(
+        planOptionsForAdminSelect(
+          approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE,
+          approveForm.billing_cycle
+        ),
+        approveForm.plan_code
+      ),
+    [approveModalCompany?.country_code, approveForm.billing_cycle, approveForm.plan_code]
   );
   const approveMoneySymbol = pricingSymbolForCountry(approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE);
   const createMoneySymbol = pricingSymbolForCountry(createForm.country_code || DEFAULT_COUNTRY_CODE);
-  const createIsAnnualOnly = isAnnualOnlyBilling(createForm.country_code);
+  const createHidesOnetime = hidesOnetimeFee(
+    createForm.plan_code,
+    createForm.country_code,
+    createForm.billing_cycle
+  );
+  const createIsPepm = isPepmPlan(createForm.plan_code);
   const billingPlanOptions = useMemo(
-    () => planOptionsForAdminSelect(detailsCompany?.country_code || 'IN'),
-    [detailsCompany?.country_code]
+    () =>
+      withCurrentPlanOption(
+        planOptionsForAdminSelect(detailsCompany?.country_code || 'IN', billingForm.billing_cycle),
+        billingForm.plan_code
+      ),
+    [detailsCompany?.country_code, billingForm.billing_cycle, billingForm.plan_code]
   );
   const billingMoneySymbol = pricingSymbolForCountry(detailsCompany?.country_code || 'IN');
   const billingIsAnnualOnly = isAnnualOnlyBilling(detailsCompany?.country_code);
+  const billingHidesOnetime = hidesOnetimeFee(
+    billingForm.plan_code,
+    detailsCompany?.country_code,
+    billingForm.billing_cycle
+  );
+  const billingIsPepm = isPepmPlan(billingForm.plan_code);
+  const billingSoftwareLabel = softwareFeeLabel(
+    detailsCompany?.country_code,
+    billingForm.billing_cycle,
+    billingForm.plan_code
+  );
+  const detailsHidesOnetime = hidesOnetimeFee(
+    detailsCompany?.plan_code,
+    detailsCompany?.country_code,
+    detailsCompany?.billing_cycle
+  );
+  const detailsIsPepm = isPepmPlan(detailsCompany?.plan_code);
+  const detailsSoftwareLabel = softwareFeeLabel(
+    detailsCompany?.country_code,
+    detailsCompany?.billing_cycle,
+    detailsCompany?.plan_code
+  );
+  const approveHidesOnetime = hidesOnetimeFee(
+    approveForm.plan_code,
+    approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE,
+    approveForm.billing_cycle
+  );
+  const approveIsPepm = isPepmPlan(approveForm.plan_code);
+  const approveSoftwareLabel = softwareFeeLabel(
+    approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE,
+    approveForm.billing_cycle,
+    approveForm.plan_code
+  );
+  const createSoftwareLabel = softwareFeeLabel(
+    createForm.country_code,
+    createForm.billing_cycle,
+    createForm.plan_code
+  );
 
   const loadPending = useCallback(async () => {
     if (!adminKey) return;
@@ -568,7 +688,7 @@ export default function AdminPage() {
       value ? new Date(value).toISOString().slice(0, 10) : '';
     setBillingForm({
       plan_code: company.plan_code || 'starter',
-      billing_cycle: 'annual',
+      billing_cycle: resolvedCompanyBillingCycle(company),
       next_billing_date: toDateInput(company.subscription_end_date || company.next_billing_date),
       onetime_payment_status: company.onetime_payment_status || 'unpaid',
       amc_payment_status: company.amc_payment_status || 'unpaid',
@@ -651,16 +771,30 @@ export default function AdminPage() {
     setCreateForm((prev) => {
       const next = { ...prev, [name]: type === 'checkbox' ? checked : value };
       if (name === 'subscription_start_date' && value) {
-        const d = new Date(value);
-        if (!Number.isNaN(d.getTime())) {
-          d.setFullYear(d.getFullYear() + 1);
-          next.subscription_end_date = d.toISOString().slice(0, 10);
-        }
+        const end = accessEndFromStart(value, next.billing_cycle, next.country_code || DEFAULT_COUNTRY_CODE, next.plan_code);
+        if (end) next.subscription_end_date = end;
       }
-      if (name === 'country_code' || name === 'plan_code') {
+      if (name === 'country_code' || name === 'plan_code' || name === 'billing_cycle') {
         const country = name === 'country_code' ? value : prev.country_code || DEFAULT_COUNTRY_CODE;
+        const billingType =
+          name === 'billing_cycle'
+            ? value
+            : name === 'country_code'
+              ? defaultBillingTypeForForm(value)
+              : prev.billing_cycle;
+        if (name === 'country_code') next.billing_cycle = billingType;
         const plan = name === 'plan_code' ? value : prev.plan_code || 'base';
-        applyAdminPlanFields(next, plan, country);
+        applyAdminPlanFields(next, plan, country, { billingType });
+        const end = accessEndFromStart(
+          next.subscription_start_date,
+          next.billing_cycle,
+          country,
+          next.plan_code
+        );
+        if (end) next.subscription_end_date = end;
+      }
+      if (name === 'staffs_allowed') {
+        syncPepmFormAmounts(next, next.country_code);
       }
       return next;
     });
@@ -681,11 +815,12 @@ export default function AdminPage() {
     try {
       const end =
         createForm.subscription_end_date ||
-        (() => {
-          const d = new Date(createForm.subscription_start_date);
-          d.setFullYear(d.getFullYear() + 1);
-          return d.toISOString().slice(0, 10);
-        })();
+        accessEndFromStart(
+          createForm.subscription_start_date,
+          createForm.billing_cycle,
+          createForm.country_code,
+          createForm.plan_code
+        );
       const res = await adminFetch(
         '/create-company',
         {
@@ -703,13 +838,14 @@ export default function AdminPage() {
               password: createForm.admin_password,
             },
             plan_code: createForm.plan_code,
+            billing_cycle: createForm.billing_cycle,
             subscription_start_date: createForm.subscription_start_date,
             subscription_end_date: end,
             branches_allowed: Number(createForm.branches_allowed),
             staffs_allowed: Number(createForm.staffs_allowed),
             payment_status: 'unpaid',
-            onetime_fee_paid: createIsAnnualOnly ? true : createForm.onetime_fee_paid === true,
-            onetime_fee_amount: createIsAnnualOnly
+            onetime_fee_paid: createHidesOnetime ? true : createForm.onetime_fee_paid === true,
+            onetime_fee_amount: createHidesOnetime
               ? 0
               : createForm.onetime_fee_amount
                 ? Number(createForm.onetime_fee_amount)
@@ -764,24 +900,27 @@ export default function AdminPage() {
 
   const handleApproveFormChange = (e) => {
     const { name, value, type, checked } = e.target;
+    const country = approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE;
     setApproveForm((prev) => {
       const next = { ...prev, [name]: type === 'checkbox' ? checked : value };
-      if (name === 'subscription_start_date') {
-        const start = value;
-        if (start) {
-          const d = new Date(start);
-          if (!Number.isNaN(d.getTime())) {
-            d.setFullYear(d.getFullYear() + 1);
-            next.subscription_end_date = d.toISOString().slice(0, 10);
-          }
-        }
+      if (name === 'subscription_start_date' && value) {
+        const end = accessEndFromStart(value, next.billing_cycle, country, next.plan_code);
+        if (end) next.subscription_end_date = end;
       }
-      if (name === 'plan_code') {
-        applyAdminPlanFields(
-          next,
-          value,
-          approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE
+      if (name === 'plan_code' || name === 'billing_cycle') {
+        applyAdminPlanFields(next, name === 'plan_code' ? value : next.plan_code, country, {
+          billingType: name === 'billing_cycle' ? value : next.billing_cycle,
+        });
+        const end = accessEndFromStart(
+          next.subscription_start_date,
+          next.billing_cycle,
+          country,
+          next.plan_code
         );
+        if (end) next.subscription_end_date = end;
+      }
+      if (name === 'staffs_allowed') {
+        syncPepmFormAmounts(next, country);
       }
       return next;
     });
@@ -821,11 +960,12 @@ export default function AdminPage() {
       const start = approveForm.subscription_start_date;
       const computedEnd =
         approveForm.subscription_end_date ||
-        (() => {
-          const d = new Date(start);
-          d.setFullYear(d.getFullYear() + 1);
-          return d.toISOString().slice(0, 10);
-        })();
+        accessEndFromStart(
+          start,
+          approveForm.billing_cycle,
+          approveModalCompany?.country_code,
+          approveForm.plan_code
+        );
 
       const res = await adminFetch(
         '/approve-company',
@@ -834,15 +974,17 @@ export default function AdminPage() {
           body: JSON.stringify({
             company_id: approveModalCompany.id,
             plan_code: approveForm.plan_code,
+            billing_cycle: approveForm.billing_cycle,
             payment_status: 'unpaid',
             subscription_start_date: start,
             subscription_end_date: computedEnd,
             last_payment_date: null,
             branches_allowed: branchesAllowed,
             staffs_allowed: staffsAllowed,
-            onetime_fee_paid: approveForm.onetime_fee_paid === true,
-            onetime_fee_amount:
-              approveForm.onetime_fee_amount === '' || approveForm.onetime_fee_amount == null
+            onetime_fee_paid: approveHidesOnetime ? true : approveForm.onetime_fee_paid === true,
+            onetime_fee_amount: approveHidesOnetime
+              ? 0
+              : approveForm.onetime_fee_amount === '' || approveForm.onetime_fee_amount == null
                 ? null
                 : Number(approveForm.onetime_fee_amount),
             amc_amount:
@@ -1052,11 +1194,13 @@ export default function AdminPage() {
     const { name, value, type, checked } = e.target;
     if (name === 'subscription_start_date') {
       if (value) {
-        const start = new Date(value);
-        if (!Number.isNaN(start.getTime())) {
-          const end = new Date(start);
-          end.setFullYear(end.getFullYear() + 1);
-          const endStr = end.toISOString().slice(0, 10);
+        const endStr = accessEndFromStart(
+          value,
+          billingForm.billing_cycle,
+          detailsCompany?.country_code,
+          billingForm.plan_code
+        );
+        if (endStr) {
           setBillingForm((prev) => ({
             ...prev,
             subscription_start_date: value,
@@ -1089,10 +1233,29 @@ export default function AdminPage() {
       });
       return;
     }
-    if (name === 'plan_code' && detailsCompany?.country_code) {
+    if ((name === 'plan_code' || name === 'billing_cycle') && detailsCompany?.country_code) {
       setBillingForm((prev) => {
-        const next = { ...prev, plan_code: value };
-        applyAdminPlanFields(next, value, detailsCompany.country_code, { updateStaffCap: false });
+        const next = { ...prev, [name]: value };
+        const override = detailsCompany.employee_limit_override;
+        const staffCount =
+          override != null && override !== ''
+            ? Number(override)
+            : PLAN_EMPLOYEE_CAP[(detailsCompany.plan_code || 'starter').toLowerCase()];
+        applyAdminPlanFields(next, next.plan_code, detailsCompany.country_code, {
+          updateStaffCap: false,
+          staffCount,
+          billingType: next.billing_cycle,
+        });
+        const endStr = accessEndFromStart(
+          next.subscription_start_date,
+          next.billing_cycle,
+          detailsCompany.country_code,
+          next.plan_code
+        );
+        if (endStr && name === 'billing_cycle') {
+          next.subscription_end_date = endStr;
+          next.next_billing_date = endStr;
+        }
         return next;
       });
       return;
@@ -1109,16 +1272,17 @@ export default function AdminPage() {
     const computedStart = billingForm.subscription_start_date || new Date().toISOString().slice(0, 10);
     const computedEnd =
       billingForm.subscription_end_date ||
-      (() => {
-        const d = new Date(computedStart);
-        d.setDate(d.getDate() + 365);
-        return d.toISOString().slice(0, 10);
-      })();
+      accessEndFromStart(
+        computedStart,
+        billingForm.billing_cycle,
+        detailsCompany?.country_code,
+        billingForm.plan_code
+      );
     setBillingSaving(true);
     try {
-      const otcStatus = billingIsAnnualOnly ? 'paid' : billingForm.onetime_payment_status || 'unpaid';
+      const otcStatus = billingHidesOnetime ? 'paid' : billingForm.onetime_payment_status || 'unpaid';
       const amcStatus = billingForm.amc_payment_status || 'unpaid';
-      const onetimeAmt = billingIsAnnualOnly
+      const onetimeAmt = billingHidesOnetime
         ? 0
         : billingForm.onetime_fee_amount === '' || billingForm.onetime_fee_amount == null
           ? null
@@ -1133,7 +1297,7 @@ export default function AdminPage() {
           body: JSON.stringify({
             company_id: detailsCompany.id,
             plan_code: billingForm.plan_code || 'starter',
-            billing_cycle: 'annual',
+            billing_cycle: billingForm.billing_cycle || resolvedCompanyBillingCycle(detailsCompany),
             billing_notes: billingForm.billing_notes ?? '',
             subscription_start_date: computedStart,
             subscription_end_date: computedEnd,
@@ -1464,7 +1628,11 @@ export default function AdminPage() {
       const u = getDateUrgency(c.next_amc_due_date, 30);
       return u.level === 'critical' || u.level === 'warn';
     }).length,
-    unpaidOtc: customers.filter((c) => paymentNeedsAttention(c.onetime_payment_status)).length,
+    unpaidOtc: customers.filter(
+      (c) =>
+        !hidesOnetimeFee(c.plan_code, c.country_code, c.billing_cycle) &&
+        paymentNeedsAttention(c.onetime_payment_status)
+    ).length,
     unpaidAmc: customers.filter((c) => amcPaymentNeedsAttention(c)).length,
   };
 
@@ -1682,8 +1850,8 @@ export default function AdminPage() {
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Billing & renewals</h2>
               <p className="text-xs text-slate-600 mt-0.5 max-w-2xl">
-                One-time fee unlocks the first year; AMC renews access each year after that. Use the action queue
-                below to collect payments and extend access.
+                New India deals are yearly or 3-year prepaid. Existing customers and a few pipeline quotes stay on
+                OTC + AMC. Use the action queue below to collect payments and extend access.
               </p>
             </div>
             <button
@@ -1868,7 +2036,7 @@ export default function AdminPage() {
                             >
                               AMC received
                             </button>
-                            {!isOnetimePaid(q) && (
+                            {!hidesOnetimeFee(q.plan_code, q.country_code, q.billing_cycle) && !isOnetimePaid(q) && (
                               <button
                                 type="button"
                                 disabled={busy}
@@ -2045,7 +2213,7 @@ export default function AdminPage() {
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Company</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Access</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">One-time fee</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">AMC (annual)</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-slate-700">Subscription / AMC</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700">Plan</th>
                     <th className="text-left px-4 py-2.5 font-medium text-slate-700 min-w-[200px]">Actions</th>
                   </tr>
@@ -2302,7 +2470,9 @@ export default function AdminPage() {
                     <div>
                       <h3 className="text-sm font-semibold text-slate-900">Payments & renewal snapshot</h3>
                       <p className="mt-0.5 text-xs text-slate-600">
-                        One-time covers year one; AMC renews each following year.
+                        {detailsHidesOnetime
+                          ? `${detailsSoftwareLabel} is due at the start of each term.`
+                          : 'One-time covers year one; AMC renews each following year.'}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2320,9 +2490,9 @@ export default function AdminPage() {
                         onClick={() => quickMarkAmcPaid(detailsCompany)}
                         className="rounded-lg border border-emerald-300 bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                       >
-                        AMC received today
+                        AMC / fee received today
                       </button>
-                      {!isOnetimePaid(detailsCompany) && (
+                      {!detailsHidesOnetime && !isOnetimePaid(detailsCompany) && (
                         <button
                           type="button"
                           disabled={billingQuickBusyId === detailsCompany.id}
@@ -2347,7 +2517,7 @@ export default function AdminPage() {
                         Started {formatDateShort(detailsCompany.subscription_start_date)}
                       </p>
                     </div>
-                    {!billingIsAnnualOnly && (
+                    {!detailsHidesOnetime && (
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">One-time fee</p>
                       <div className="mt-1 flex items-center gap-2">
@@ -2363,7 +2533,7 @@ export default function AdminPage() {
                     )}
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                        {billingIsAnnualOnly ? 'Annual subscription' : 'AMC (annual)'}
+                        {detailsSoftwareLabel}
                       </p>
                       <div className="mt-1 flex items-center gap-2">
                         <PaymentStatusPill status={displayAmcPaymentStatus(detailsCompany)} />
@@ -2372,12 +2542,12 @@ export default function AdminPage() {
                         </span>
                       </div>
                       <p className={`text-xs mt-1 ${urgencyTextClass(getDateUrgency(detailsCompany.next_amc_due_date, 30).level)}`}>
-                        {billingIsAnnualOnly ? 'Renewal due' : 'Next due'} {formatDateShort(detailsCompany.next_amc_due_date)}
+                        {detailsHidesOnetime ? 'Renewal due' : 'Next due'} {formatDateShort(detailsCompany.next_amc_due_date)}
                         {' · '}
                         {getDateUrgency(detailsCompany.next_amc_due_date, 30).text}
                       </p>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        {billingIsAnnualOnly ? 'Last paid' : 'Last AMC'} {formatDateShort(detailsCompany.last_amc_payment_date)}
+                        {detailsHidesOnetime ? 'Last paid' : 'Last AMC'} {formatDateShort(detailsCompany.last_amc_payment_date)}
                       </p>
                     </div>
                   </div>
@@ -2439,12 +2609,18 @@ export default function AdminPage() {
                 <section className="rounded-xl border border-indigo-200 bg-indigo-50/30 p-4 shadow-sm">
                   <h3 className="text-sm font-semibold text-slate-900">Billing & access</h3>
                   <p className="mt-0.5 text-xs text-slate-600">
-                    Plan, access window (annual), one-time and AMC payments, and internal notes.
+                    Billing type (OTC, yearly, or 3-year), plan slab, access window, and payments.
                   </p>
                   <p className="mt-2 text-xs text-slate-500">
                     Saved profile: {formatPlanWithLimits(detailsCompany)}
                   </p>
                   <form onSubmit={handleBillingSubmit} className="mt-4 space-y-4">
+                    {!billingIsAnnualOnly && (
+                      <IndiaBillingTypeSelect
+                        value={billingForm.billing_cycle}
+                        onChange={handleBillingChange}
+                      />
+                    )}
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">Plan</label>
                       <select
@@ -2473,7 +2649,11 @@ export default function AdminPage() {
                         />
                         Access active
                       </label>
-                      <span className="text-xs text-slate-500">Renewal cycle: annual · editing start date sets valid till +1 year</span>
+                      <span className="text-xs text-slate-500">
+                        {billingIsAnnualOnly
+                          ? 'UAE: yearly subscription · editing start date sets valid till +1 year'
+                          : `India: ${indiaBillingTypeLabel(normalizeIndiaBillingType(billingForm.billing_cycle, billingForm.plan_code))} · start date sets valid till +${indiaBillingTermYears(normalizeIndiaBillingType(billingForm.billing_cycle, billingForm.plan_code))} year(s)`}
+                      </span>
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -2506,7 +2686,7 @@ export default function AdminPage() {
                       </div>
                     </div>
 
-                    {!billingIsAnnualOnly && (
+                    {!billingHidesOnetime && (
                     <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-4">
                       <p className="text-xs font-semibold text-slate-800">One-time fee</p>
                       <div>
@@ -2555,7 +2735,7 @@ export default function AdminPage() {
 
                     <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-3">
                       <p className="text-xs font-semibold text-slate-800">
-                        {billingIsAnnualOnly ? 'Annual subscription' : 'AMC (annual)'}
+                        {billingSoftwareLabel}
                       </p>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">Payment status</label>
@@ -2579,9 +2759,7 @@ export default function AdminPage() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          {billingIsAnnualOnly
-                            ? `Annual subscription (${billingMoneySymbol}/year, excl. VAT)`
-                            : `AMC amount (${billingMoneySymbol})`}
+                          {`${billingSoftwareLabel} (${billingMoneySymbol}${billingIsAnnualOnly ? '/year, excl. VAT' : ', excl. GST'})`}
                         </label>
                         <input
                           type="number"
@@ -2591,12 +2769,12 @@ export default function AdminPage() {
                           value={billingForm.amc_amount}
                           onChange={handleBillingChange}
                           className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
-                          placeholder={billingIsAnnualOnly ? 'Yearly subscription' : 'Annual maintenance'}
+                          placeholder={billingSoftwareLabel}
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          {billingIsAnnualOnly ? 'Last subscription paid on' : 'Last AMC payment date'}
+                          {billingHidesOnetime ? 'Last subscription paid on' : 'Last AMC payment date'}
                         </label>
                         <input
                           type="date"
@@ -2606,15 +2784,15 @@ export default function AdminPage() {
                           className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
                         />
                         <p className="mt-1 text-[11px] text-slate-500">
-                          {billingIsAnnualOnly
-                            ? 'Renewal due = this date + 1 year.'
-                            : 'Next AMC due in the customer list is this date + 1 year.'}
+                          {billingIsPepm
+                            ? PEPM_ADMIN_HINT
+                            : `Next due = this date + ${indiaBillingTermYears(normalizeIndiaBillingType(billingForm.billing_cycle, billingForm.plan_code))} year(s).`}
                         </p>
                       </div>
                       {detailsCompany.next_amc_due_date && (
                         <p className="text-xs text-slate-600">
                           <span className="font-medium text-slate-700">
-                            {billingIsAnnualOnly ? 'Renewal due: ' : 'Next AMC due: '}
+                            {billingHidesOnetime ? 'Renewal due: ' : 'Next AMC due: '}
                           </span>
                           {new Date(detailsCompany.next_amc_due_date).toLocaleDateString(undefined, {
                             dateStyle: 'medium',
@@ -2729,6 +2907,11 @@ export default function AdminPage() {
                           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
                           placeholder="e.g. 50"
                         />
+                        {detailsIsPepm && (
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            {PEPM_ADMIN_HINT} After changing staff cap, set yearly in Billing to match.
+                          </p>
+                        )}
                       </div>
                     </div>
                     <button
@@ -3000,10 +3183,17 @@ export default function AdminPage() {
                 Approve company – {approveModalCompany.name || `Company #${approveModalCompany.id}`}
               </h2>
               <p className="text-xs text-slate-500 mb-4">
-                Fill these required details. Renewal auto-updates to 1 year from subscription start (editable).
+                Pipeline signups default to OTC + AMC. Switch to yearly or 3-year for new pricing. Access end follows the
+                billing term (editable).
               </p>
 
               <form onSubmit={handleApproveSubmit} className="space-y-4">
+                {!isAnnualOnlyBilling(approveModalCompany?.country_code) && (
+                  <IndiaBillingTypeSelect
+                    value={approveForm.billing_cycle}
+                    onChange={handleApproveFormChange}
+                  />
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-slate-700 mb-1">Pack chosen</label>
@@ -3084,10 +3274,48 @@ export default function AdminPage() {
                       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
                       required
                     />
+                    {approveIsPepm && (
+                      <p className="mt-1 text-[11px] text-slate-500">{PEPM_ADMIN_HINT}</p>
+                    )}
                   </div>
                 </div>
 
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 space-y-3">
+                  {approveHidesOnetime ? (
+                    <>
+                      <p className="text-xs font-semibold text-slate-800">
+                        {approveIsPepm
+                          ? 'Monthly plan — billed yearly (excl. GST)'
+                          : `${approveSoftwareLabel} (${isAnnualOnlyBilling(approveModalCompany?.country_code) ? 'excl. VAT' : 'excl. GST'})`}
+                      </p>
+                      {approveIsPepm && <p className="text-[11px] text-slate-500">{PEPM_ADMIN_HINT}</p>}
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          {approveSoftwareLabel} ({approveMoneySymbol})
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          name="amc_amount"
+                          value={approveForm.amc_amount}
+                          onChange={handleApproveFormChange}
+                          className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Last yearly paid on</label>
+                        <input
+                          type="date"
+                          name="last_amc_payment_date"
+                          value={approveForm.last_amc_payment_date}
+                          onChange={handleApproveFormChange}
+                          className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <>
                   <p className="text-xs font-semibold text-slate-800">One-time fee & AMC</p>
                   <label className="flex items-center gap-2 text-xs text-slate-700">
                     <input
@@ -3140,6 +3368,8 @@ export default function AdminPage() {
                       Next AMC due = this date + 1 year (shown in the customer list).
                     </p>
                   </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2">
@@ -3272,6 +3502,14 @@ export default function AdminPage() {
                 </div>
                 <div className="border-t border-slate-200 pt-3 mt-1">
                   <p className="text-xs font-semibold text-slate-800 mb-2">Plan & access window</p>
+                  {!isAnnualOnlyBilling(createForm.country_code) && (
+                    <div className="mb-3">
+                      <IndiaBillingTypeSelect
+                        value={createForm.billing_cycle}
+                        onChange={handleCreateFormChange}
+                      />
+                    </div>
+                  )}
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">Pack</label>
@@ -3333,16 +3571,23 @@ export default function AdminPage() {
                         className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm"
                         required
                       />
+                      {createIsPepm && (
+                        <p className="mt-1 text-[11px] text-slate-500">{PEPM_ADMIN_HINT}</p>
+                      )}
                     </div>
                   </div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-                  {createIsAnnualOnly ? (
+                  {createHidesOnetime ? (
                     <>
-                      <p className="text-xs font-semibold text-slate-800">Annual subscription (excl. VAT)</p>
+                      <p className="text-xs font-semibold text-slate-800">
+                        {createIsPepm
+                          ? 'Monthly plan — billed yearly (excl. GST)'
+                          : `${createSoftwareLabel} (${isAnnualOnlyBilling(createForm.country_code) ? 'excl. VAT' : 'excl. GST'})`}
+                      </p>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Yearly amount ({createMoneySymbol})
+                          {createSoftwareLabel} ({createMoneySymbol})
                         </label>
                         <input
                           type="number"
