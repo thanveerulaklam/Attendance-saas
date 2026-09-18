@@ -363,7 +363,7 @@ function convertFormFromLead(lead) {
       planDefaults.plan_code
     ),
     branches_allowed: planDefaults.branches_allowed,
-    staffs_allowed: staffFromLead || planDefaults.staffs_allowed ?? 10,
+    staffs_allowed: staffFromLead || planDefaults.staffs_allowed || 10,
     onetime_fee_amount: planDefaults.onetime_fee_amount,
     amc_amount: planDefaults.amc_amount,
     onetime_fee_paid: planDefaults.onetime_fee_paid,
