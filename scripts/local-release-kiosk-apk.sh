@@ -144,6 +144,20 @@ if needle in text and "REQUEST_INSTALL_PACKAGES" not in text:
 PY
 fi
 
+python3 - "$MOBILE/app.json" "$MOBILE/android/app/build.gradle" <<'PY'
+import json, re, sys
+from pathlib import Path
+app = json.loads(Path(sys.argv[1]).read_text())
+version = str(app["expo"]["version"])
+code = int(app["expo"]["android"]["versionCode"])
+gradle = Path(sys.argv[2])
+text = gradle.read_text()
+text = re.sub(r"versionCode \d+", f"versionCode {code}", text, count=1)
+text = re.sub(r'versionName "[^"]*"', f'versionName "{version}"', text, count=1)
+gradle.write_text(text)
+print(f"Android version set to {version} ({code})")
+PY
+
 echo "==> Building release APK"
 cd android
 ./gradlew assembleRelease --no-daemon
