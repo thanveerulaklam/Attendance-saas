@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 function maskKey(apiKey) {
   if (!apiKey || typeof apiKey !== 'string') return '';
@@ -26,6 +27,8 @@ function isRecentlyOnline(lastSeenAt) {
 }
 
 export default function DevicesPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -38,10 +41,37 @@ export default function DevicesPage() {
   const [branches, setBranches] = useState([]);
   const [newBranchId, setNewBranchId] = useState('');
   const [admsInputs, setAdmsInputs] = useState({});
+  const [isupInputs, setIsupInputs] = useState({});
+  const [isupInfo, setIsupInfo] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteStep, setDeleteStep] = useState(1);
   const [deleteTypedName, setDeleteTypedName] = useState('');
   const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
+  const [mobileSaving, setMobileSaving] = useState(false);
+  const [mobileToast, setMobileToast] = useState(null);
+  const [kioskBusyBranchId, setKioskBusyBranchId] = useState(null);
+  const [kioskReveal, setKioskReveal] = useState(null);
+  const [kioskSettingsPins, setKioskSettingsPins] = useState({});
+  const [apkDownloading, setApkDownloading] = useState(false);
+  const [kioskError, setKioskError] = useState(null);
+  const [kioskSuccess, setKioskSuccess] = useState(null);
+
+  const normalizeKioskPinInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 6);
+
+  const setBranchKioskPin = (branchId, value) => {
+    setKioskSettingsPins((prev) => ({
+      ...prev,
+      [branchId]: normalizeKioskPinInput(value),
+    }));
+  };
+
+  const kioskPayload = (branchId, branchName) => {
+    const pin = kioskSettingsPins[branchId] || '';
+    return {
+      label: `${branchName} tablet`,
+      ...(pin ? { settings_pin: pin } : {}),
+    };
+  };
 
   const branchNameById = useMemo(() => {
     const m = {};
@@ -57,6 +87,174 @@ export default function DevicesPage() {
       .then((json) => setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled)))
       .catch(() => setMobileAttendanceEnabled(false));
   }, []);
+
+  const handleToggleMobileAttendance = async (nextEnabled) => {
+    if (!nextEnabled && mobileAttendanceEnabled) {
+      const ok = window.confirm(
+        'Turn off mobile attendance? Employees will no longer be able to punch from the mobile app. Biometric devices are not affected.'
+      );
+      if (!ok) return;
+    }
+    try {
+      setMobileSaving(true);
+      setMobileToast(null);
+      const res = await authFetch('/api/company/mobile-settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile_attendance_enabled: nextEnabled }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save mobile settings');
+      setMobileAttendanceEnabled(Boolean(json.data?.mobile_attendance_enabled));
+      setMobileToast({
+        type: 'success',
+        message: nextEnabled ? 'Mobile attendance enabled.' : 'Mobile attendance disabled.',
+      });
+    } catch (err) {
+      setMobileToast({ type: 'error', message: err.message || 'Failed to save' });
+    } finally {
+      setMobileSaving(false);
+    }
+  };
+
+  const handleDownloadKioskApk = async () => {
+    if (apkDownloading) return;
+    try {
+      setApkDownloading(true);
+      setMobileToast(null);
+      const res = await authFetch('/api/company/kiosk-apk');
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.message || 'Unable to download APK');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'PunchPay-Kiosk.apk';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setMobileToast({
+        type: 'success',
+        message:
+          'APK downloaded. On Android: open the file → Allow install from this source → Install.',
+      });
+    } catch (err) {
+      setMobileToast({
+        type: 'error',
+        message: err.message || 'Failed to download APK',
+      });
+    } finally {
+      setApkDownloading(false);
+    }
+  };
+
+  const handleGenerateKioskCode = async (branchId, branchName) => {
+    if (kioskBusyBranchId) return;
+    try {
+      setKioskBusyBranchId(branchId);
+      setKioskError(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(kioskPayload(branchId, branchName)),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to create kiosk code');
+      setKioskReveal({
+        branchId,
+        branchName,
+        token: json.data?.token,
+        settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
+      });
+      setKioskSuccess(json.message || 'Kiosk code ready for this branch.');
+    } catch (err) {
+      setKioskError(err.message || 'Failed to generate kiosk code');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleSaveKioskPin = async (branchId, branchName) => {
+    if (kioskBusyBranchId) return;
+    const pin = kioskSettingsPins[branchId] || '';
+    if (!/^\d{6}$/.test(pin)) {
+      setKioskError(`Settings PIN for ${branchName} must be exactly 6 digits.`);
+      return;
+    }
+    try {
+      setKioskBusyBranchId(branchId);
+      setKioskError(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk/pin`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings_pin: pin }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save Settings PIN');
+      setKioskReveal((prev) =>
+        prev?.branchId === branchId
+          ? { ...prev, settingsPinConfigured: true }
+          : prev
+      );
+      setKioskSuccess(`Settings PIN saved for ${branchName}.`);
+    } catch (err) {
+      setKioskError(err.message || 'Failed to save Settings PIN');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleRegenerateKioskCode = async (branchId, branchName) => {
+    if (kioskBusyBranchId) return;
+    if (
+      !window.confirm(
+        `Generate a new kiosk code for ${branchName}? The tablet will need to be activated again with the new code.`
+      )
+    ) {
+      return;
+    }
+    try {
+      setKioskBusyBranchId(branchId);
+      setKioskError(null);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...kioskPayload(branchId, branchName), regenerate: true }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to regenerate kiosk code');
+      setKioskReveal({
+        branchId,
+        branchName,
+        token: json.data?.token,
+        settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
+      });
+      setKioskSuccess(json.message || 'New kiosk code generated.');
+    } catch (err) {
+      setKioskError(err.message || 'Failed to regenerate kiosk code');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
+
+  const handleRevokeKioskCode = async (branchId) => {
+    if (!window.confirm('Revoke kiosk access for this branch? The tablet will need a new code.')) return;
+    try {
+      setKioskBusyBranchId(branchId);
+      const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, { method: 'DELETE' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to revoke kiosk');
+      setKioskReveal(null);
+      setKioskSuccess('Kiosk access revoked.');
+    } catch (err) {
+      setKioskError(err.message || 'Failed to revoke kiosk');
+    } finally {
+      setKioskBusyBranchId(null);
+    }
+  };
 
   const loadBranches = async () => {
     try {
@@ -95,6 +293,15 @@ export default function DevicesPage() {
         });
         return next;
       });
+      setIsupInputs((prev) => {
+        const next = { ...prev };
+        list.forEach((d) => {
+          if (next[d.id] == null) {
+            next[d.id] = d.isup_device_id || '';
+          }
+        });
+        return next;
+      });
     } catch (err) {
       setError(err.message || 'Unable to load devices');
     } finally {
@@ -105,6 +312,10 @@ export default function DevicesPage() {
   useEffect(() => {
     loadDevices();
     loadBranches();
+    authFetch('/api/device/isup-info', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setIsupInfo(json?.data || null))
+      .catch(() => setIsupInfo(null));
   }, []);
 
   const handleCreate = async (event) => {
@@ -279,11 +490,60 @@ export default function DevicesPage() {
       }
       const json = await res.json();
       const updated = json.data;
-      setDevices((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === updated.id
+            ? {
+                ...d,
+                ...updated,
+                isup_device_id:
+                  updated.isup_device_id !== undefined ? updated.isup_device_id : d.isup_device_id,
+              }
+            : d
+        )
+      );
       setAdmsInputs((prev) => ({ ...prev, [device.id]: updated.adms_sn || '' }));
       setToast({ type: 'success', message: 'ADMS serial saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed to save ADMS serial' });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSaveIsupDeviceId = async (device, generate = false) => {
+    try {
+      setBusyId(device.id);
+      const body = generate
+        ? { generate: true }
+        : { isup_device_id: String(isupInputs[device.id] || '').trim() };
+      const res = await authFetch(`/api/device/${device.id}/isup-id`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message || 'Failed to save Hikvision Device ID');
+      }
+      const json = await res.json();
+      const updated = json.data;
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === updated.id
+            ? { ...d, ...updated, adms_sn: updated.adms_sn ?? d.adms_sn }
+            : d
+        )
+      );
+      setIsupInputs((prev) => ({ ...prev, [device.id]: updated.isup_device_id || '' }));
+      setToast({
+        type: 'success',
+        message: updated.isup_device_id
+          ? 'Hikvision Device ID saved.'
+          : 'Hikvision ISUP cleared for this device.',
+      });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to save Hikvision Device ID' });
     } finally {
       setBusyId(null);
     }
@@ -385,18 +645,159 @@ export default function DevicesPage() {
         </p>
       </header>
 
-      {mobileAttendanceEnabled && (
-        <div className="rounded-lg border border-violet-100 bg-violet-50 px-4 py-3 text-xs text-violet-900">
-          Mobile attendance is enabled for your company. Biometric devices on this page continue to
-          work independently. Configure geofence and QR display in{' '}
-          <Link to="/settings/company" className="font-medium underline hover:text-violet-700">
-            Company settings
-          </Link>
-          .{' '}
-          <Link to="/mobile-punch-log" className="font-medium underline hover:text-violet-700">
-            Punch log
-          </Link>
-        </div>
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Face attendance (office tablet)</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Install the PunchPay Kiosk app on a reception tablet. Employees punch by face — no personal phone or login needed.
+          </p>
+          {mobileToast && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-[11px] ${
+                mobileToast.type === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-700'
+                  : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {mobileToast.message}
+            </div>
+          )}
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={mobileAttendanceEnabled}
+              onChange={(e) => handleToggleMobileAttendance(e.target.checked)}
+              disabled={mobileSaving}
+            />
+            <span>
+              <span className="font-medium">Enable mobile attendance</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                When off, mobile punch APIs return an error. Existing biometric punches are unchanged.
+              </span>
+            </span>
+          </label>
+          {mobileAttendanceEnabled && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+              <p className="text-xs font-semibold text-slate-900">Install office tablet app</p>
+              <p className="mt-1 text-[11px] text-slate-600">
+                Download the PunchPay Kiosk APK, install it on the branch Android tablet, then create the
+                permanent 8-character kiosk code below and activate the tablet once. On Android: open the downloaded file → allow
+                install from Files/Chrome → Install.
+              </p>
+              <button
+                type="button"
+                disabled={apkDownloading}
+                onClick={handleDownloadKioskApk}
+                className="mt-3 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {apkDownloading ? 'Downloading…' : 'Download Android APK'}
+              </button>
+            </div>
+          )}
+          {mobileAttendanceEnabled && branches.length > 0 && (
+            <p className="mt-3 text-[11px] text-slate-600">
+              For each branch: set a <strong>6-digit Settings PIN</strong>, create the{' '}
+              <strong>8-character kiosk code</strong>, enter the code once on the office tablet, then enroll employee faces.{' '}
+              <Link to="/mobile-punch-log" className="font-medium text-indigo-600 underline">
+                View punch log
+              </Link>
+            </p>
+          )}
+          {kioskError && (
+            <div className="mt-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+              {kioskError}
+            </div>
+          )}
+          {kioskSuccess && (
+            <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
+              {kioskSuccess}
+            </div>
+          )}
+          {kioskReveal?.token && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-[11px] text-amber-950">
+              <p className="font-semibold">Kiosk code for {kioskReveal.branchName}</p>
+              <p className="mt-1 break-all font-mono text-xs">{kioskReveal.token}</p>
+              <p className="mt-2 text-amber-800">
+                {kioskReveal.settingsPinConfigured
+                  ? 'Settings PIN is configured for this branch. Use that branch PIN on the tablet.'
+                  : 'Save a Settings PIN for this branch before opening Settings on the tablet.'}
+              </p>
+            </div>
+          )}
+          {mobileAttendanceEnabled && branches.length > 0 && (
+            <ul className="mt-4 space-y-3 border-t border-slate-100 pt-4 text-sm text-slate-700">
+              {branches.map((b) => (
+                <li key={b.id} className="space-y-2 border-b border-slate-100 pb-3 last:border-0 last:pb-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-slate-900">{b.name}</span>
+                    <span className="text-[10px] text-slate-400">ID {b.id}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleGenerateKioskCode(b.id, b.name)}
+                      disabled={kioskBusyBranchId === b.id}
+                      className="ml-auto text-[11px] font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+                    >
+                      {kioskBusyBranchId === b.id ? 'Working…' : 'Show kiosk code'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRegenerateKioskCode(b.id, b.name)}
+                      disabled={kioskBusyBranchId === b.id}
+                      className="text-[11px] font-medium text-amber-700 hover:text-amber-800 disabled:opacity-50"
+                    >
+                      New code
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeKioskCode(b.id)}
+                      disabled={kioskBusyBranchId === b.id}
+                      className="text-[11px] font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                    >
+                      Revoke kiosk
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                    <label className="text-[11px] font-medium text-slate-700">
+                      Settings PIN
+                    </label>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={6}
+                      value={kioskSettingsPins[b.id] || ''}
+                      onChange={(e) => setBranchKioskPin(b.id, e.target.value)}
+                      placeholder="6 digits"
+                      disabled={kioskBusyBranchId === b.id}
+                      className="w-[120px] rounded-md border border-slate-200 bg-white px-2 py-1.5 font-mono text-xs tracking-[0.25em] text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-1 focus:ring-primary-300 disabled:opacity-50"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveKioskPin(b.id, b.name)}
+                      disabled={kioskBusyBranchId === b.id}
+                      className="rounded-md bg-violet-600 px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-violet-700 disabled:opacity-50"
+                    >
+                      {kioskBusyBranchId === b.id ? 'Saving…' : 'Save PIN'}
+                    </button>
+                    <span className="text-[10px] text-slate-500">
+                      PIN for this branch tablet only
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {mobileAttendanceEnabled && branches.length === 0 && (
+            <p className="mt-3 text-[11px] text-slate-600">
+              Add a branch in{' '}
+              <Link to="/settings/company" className="font-medium text-indigo-600 underline">
+                Company settings
+              </Link>{' '}
+              before creating a kiosk code.
+            </p>
+          )}
+        </section>
       )}
 
       <section className="rounded-xl border border-slate-100 bg-white px-4 sm:px-5 py-4 shadow-soft">
@@ -575,6 +976,55 @@ export default function DevicesPage() {
                         For ADMS devices, set this to the device SN shown in system info.
                       </p>
                     </div>
+
+                    <details className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
+                      <summary className="cursor-pointer text-[10px] font-medium text-slate-700">
+                        Hikvision ISUP
+                      </summary>
+                      <div className="mt-2 space-y-1.5">
+                        <p className="text-[10px] text-slate-500">
+                          Use this only for a Hikvision terminal that dials out. Leave Hik-Connect off.
+                          On the device open Communication, then ISUP, and enter the values below.
+                          The person&apos;s User ID must match their employee code.
+                        </p>
+                        <p className="font-mono text-[10px] text-slate-700">
+                          Server {isupInfo?.serverHost || 'punchpay.in'} · port {isupInfo?.cmsPort || 7660}
+                          {' '}· alarm {isupInfo?.alarmPort || 7663}
+                        </p>
+                        <p className="font-mono text-[10px] text-slate-700">
+                          Key {isupInfo?.encryptionKey || 'Set ISUP_ENCRYPTION_KEY on the server'}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={isupInputs[device.id] ?? device.isup_device_id ?? ''}
+                            onChange={(e) =>
+                              setIsupInputs((prev) => ({
+                                ...prev,
+                                [device.id]: e.target.value.toUpperCase(),
+                              }))
+                            }
+                            placeholder="Device ID"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-mono text-slate-800"
+                          />
+                          <button
+                            type="button"
+                            disabled={busyId === device.id}
+                            onClick={() => handleSaveIsupDeviceId(device, false)}
+                            className="rounded border border-slate-300 bg-white px-2 py-1 text-[9px] text-slate-700 disabled:opacity-50"
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busyId === device.id}
+                            onClick={() => handleSaveIsupDeviceId(device, true)}
+                            className="rounded border border-slate-300 bg-white px-2 py-1 text-[9px] text-slate-700 disabled:opacity-50"
+                          >
+                            Generate
+                          </button>
+                        </div>
+                      </div>
+                    </details>
 
                     <div className="flex items-center justify-between">
                       <span className="text-slate-500">Last sync</span>

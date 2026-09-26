@@ -98,8 +98,8 @@ export default function MobilePunchAttemptsPage() {
     <div className="space-y-4">
       <header>
         <p className="text-xs text-slate-500">
-          <Link to="/settings/company" className="text-primary-600 hover:underline">
-            Company settings
+          <Link to="/devices" className="text-primary-600 hover:underline">
+            Devices
           </Link>
           {' · '}
           Mobile attendance

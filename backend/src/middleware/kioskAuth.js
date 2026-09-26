@@ -32,7 +32,7 @@ async function authenticateKioskSettings(req, res, next) {
     const pin = String(req.headers['x-kiosk-settings-pin'] || '').trim();
     if (!req.kiosk?.settings_pin_hash) {
       throw new AppError(
-        'Set a Settings PIN for this branch kiosk in Company settings.',
+        'Set a Settings PIN for this branch kiosk on the Devices page.',
         403,
         'KIOSK_SETTINGS_PIN_NOT_SET'
       );

@@ -100,7 +100,7 @@ export default function MobileQrDisplayPage() {
           <h1 className="text-lg font-semibold">{branchName}</h1>
         </div>
         <Link
-          to="/settings/company"
+          to="/devices"
           className="text-xs text-slate-400 hover:text-white underline"
         >
           Settings
@@ -147,7 +147,7 @@ export default function MobileQrDisplayPage() {
 
         {!qrPayloadText && !loading && (
           <p className="mt-4 text-xs text-amber-400">
-            Enable mobile attendance in Company settings if this page shows an error.
+            Enable mobile attendance on the Devices page if this page shows an error.
           </p>
         )}
       </main>

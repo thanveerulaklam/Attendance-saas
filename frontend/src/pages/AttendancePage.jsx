@@ -672,13 +672,13 @@ export default function AttendancePage() {
             <>
               <span>
                 Face attendance kiosk is enabled. Generate a branch kiosk code in{' '}
-                <Link to="/settings/company" className="font-medium underline">
-                  Company settings
+                <Link to="/devices" className="font-medium underline">
+                  Devices
                 </Link>
                 , install the PunchPay Kiosk app on the office tablet, and enroll employee faces.
               </span>
               <Link
-                to="/settings/company"
+                to="/devices"
                 className="inline-flex shrink-0 items-center justify-center rounded-lg bg-emerald-700 px-3 py-1.5 text-[11px] font-medium text-white"
               >
                 Set up kiosk

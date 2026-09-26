@@ -1485,7 +1485,7 @@ export default function LoginPage() {
             </div>
 
             <p style={{ textAlign: 'center', fontSize: 11.5, color: 'rgba(255,255,255,0.35)', marginTop: 20, lineHeight: 1.6 }}>
-              After login: <strong style={{ color: 'var(--pp-gold-dim)' }}>Company Settings</strong> → enable face attendance →{' '}
+              After login: <strong style={{ color: 'var(--pp-gold-dim)' }}>Devices</strong> → enable face attendance →{' '}
               <strong style={{ color: 'var(--pp-gold-dim)' }}>Download Android APK</strong> → generate a kiosk code for your branch.
             </p>
           </div>
@@ -1696,7 +1696,7 @@ export default function LoginPage() {
                       </p>
                       <p style={{ fontSize: 12, color: 'var(--pp-white-dim)', lineHeight: 1.65, marginTop: 6 }}>
                         Use the free <strong style={{ color: 'var(--pp-white)' }}>PunchPay Kiosk</strong> Android app on any office tablet.
-                        After you sign in, open <strong style={{ color: 'var(--pp-white)' }}>Company Settings</strong> to download the APK and set up face attendance.
+                        After you sign in, open <strong style={{ color: 'var(--pp-white)' }}>Devices</strong> to download the APK and set up face attendance.
                       </p>
                       <button
                         type="button"
