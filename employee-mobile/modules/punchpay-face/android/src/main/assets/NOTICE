@@ -1,0 +1,10 @@
+mobilefacenet_sface_v1.tflite
+
+MobileFaceNet weights trained with the SFace loss.
+Converted locally from face_recognition_sface_2021dec.onnx.
+
+Source: https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface
+The OpenCV Zoo model directory is licensed under the Apache License, Version 2.0.
+http://www.apache.org/licenses/LICENSE-2.0
+
+Copyright the OpenCV authors and the SFace contributors.

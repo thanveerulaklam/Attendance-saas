@@ -98,7 +98,15 @@ async function listBranchFaceCandidates(companyId, branchId) {
 async function listBranchEmployeeEnrollments(companyId, branchId) {
   const result = await pool.query(
     `SELECT e.id, e.name, e.employee_code, e.status,
-            f.id AS face_enrollment_id, f.enrolled_at,
+            CASE
+              WHEN f.recognition_model = 'mobilefacenet_sface_v1' THEN f.id
+              ELSE NULL
+            END AS face_enrollment_id,
+            CASE
+              WHEN f.recognition_model = 'mobilefacenet_sface_v1' THEN f.enrolled_at
+              ELSE NULL
+            END AS enrolled_at,
+            f.recognition_model,
             f.photo_mime,
             CASE WHEN f.photo_data IS NOT NULL
               THEN encode(f.photo_data, 'base64')
@@ -114,10 +122,116 @@ async function listBranchEmployeeEnrollments(companyId, branchId) {
   return result.rows;
 }
 
+const MOBILEFACE_MODEL = 'mobilefacenet_sface_v1';
+const MOBILEFACE_DIMENSION = 128;
+const MOBILEFACE_MATCH_THRESHOLD = Number(process.env.KIOSK_MOBILEFACE_MATCH_THRESHOLD || 0.363);
+
+function assertMobileFaceProfile(body) {
+  if (!body || body.model !== MOBILEFACE_MODEL) {
+    throw new AppError('Unsupported face recognition model', 400, 'FACE_MODEL_MISMATCH');
+  }
+  const dimension = Number(body.dimension);
+  if (dimension !== MOBILEFACE_DIMENSION) {
+    throw new AppError('Unexpected face embedding size', 400, 'FACE_MODEL_MISMATCH');
+  }
+  const embeddings = body.embeddings;
+  if (!Array.isArray(embeddings) || embeddings.length < 3 || embeddings.length > 5) {
+    throw new AppError('Register 3 to 5 face samples', 422, 'FACE_SAMPLES_INVALID');
+  }
+  for (const vector of embeddings) {
+    if (!Array.isArray(vector) || vector.length !== dimension) {
+      throw new AppError('A face sample has the wrong size', 422, 'FACE_SAMPLES_INVALID');
+    }
+    let sum = 0;
+    for (const value of vector) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
+        throw new AppError('A face sample is invalid', 422, 'FACE_SAMPLES_INVALID');
+      }
+      sum += value * value;
+    }
+    const norm = Math.sqrt(sum);
+    if (norm < 0.9 || norm > 1.1) {
+      throw new AppError('A face sample was not normalized', 422, 'FACE_SAMPLES_INVALID');
+    }
+  }
+  return {
+    model: MOBILEFACE_MODEL,
+    dimension,
+    embeddings,
+  };
+}
+
+async function saveMobileFaceProfile(companyId, employeeId, body, enrolledBy = null) {
+  const emp = await pool.query(
+    `SELECT id, name, branch_id, status FROM employees WHERE company_id = $1 AND id = $2`,
+    [companyId, employeeId]
+  );
+  if (emp.rowCount === 0) {
+    throw new AppError('Employee not found', 404);
+  }
+  if (String(emp.rows[0].status) !== 'active') {
+    throw new AppError('Employee is not active', 400);
+  }
+  const profile = assertMobileFaceProfile(body);
+  const result = await pool.query(
+    `INSERT INTO employee_face_enrollments (
+       company_id, employee_id, embedding, recognition_model, embedding_dimension, embeddings, enrolled_by
+     )
+     VALUES ($1, $2, NULL, $3, $4, $5::jsonb, $6)
+     ON CONFLICT (employee_id) DO UPDATE SET
+       recognition_model = EXCLUDED.recognition_model,
+       embedding_dimension = EXCLUDED.embedding_dimension,
+       embeddings = EXCLUDED.embeddings,
+       enrolled_at = NOW(),
+       enrolled_by = EXCLUDED.enrolled_by
+     RETURNING id, employee_id, company_id, enrolled_at, recognition_model, embedding_dimension`,
+    [
+      companyId,
+      employeeId,
+      profile.model,
+      profile.dimension,
+      JSON.stringify(profile.embeddings),
+      enrolledBy,
+    ]
+  );
+  return {
+    enrollment: result.rows[0],
+    employee: emp.rows[0],
+  };
+}
+
+async function listMobileFaceProfiles(companyId, branchId) {
+  const result = await pool.query(
+    `SELECT e.id AS employee_id, e.name AS employee_name, e.employee_code,
+            f.embedding_dimension, f.embeddings
+     FROM employees e
+     INNER JOIN employee_face_enrollments f ON f.employee_id = e.id AND f.company_id = e.company_id
+     WHERE e.company_id = $1
+       AND e.branch_id = $2
+       AND e.status = 'active'
+       AND f.recognition_model = $3
+       AND f.embeddings IS NOT NULL`,
+    [companyId, branchId, MOBILEFACE_MODEL]
+  );
+  return result.rows.map((row) => ({
+    employee_id: row.employee_id,
+    employee_name: row.employee_name,
+    employee_code: row.employee_code,
+    dimension: row.embedding_dimension,
+    embeddings: row.embeddings,
+  }));
+}
+
 module.exports = {
+  MOBILEFACE_MODEL,
+  MOBILEFACE_DIMENSION,
+  MOBILEFACE_MATCH_THRESHOLD,
+  assertMobileFaceProfile,
   getEnrollment,
   enrollEmployeeFace,
+  saveMobileFaceProfile,
   removeEmployeeFace,
   listBranchFaceCandidates,
+  listMobileFaceProfiles,
   listBranchEmployeeEnrollments,
 };

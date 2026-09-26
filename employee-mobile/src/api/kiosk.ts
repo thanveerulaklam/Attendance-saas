@@ -256,6 +256,39 @@ export async function createKioskEmployee(body: {
   return res;
 }
 
+export async function fetchMobileFaceProfiles() {
+  const res = await kioskFetch<{
+    success: boolean;
+    data: {
+      model: string;
+      dimension: number;
+      match_threshold: number;
+      employees: Array<{
+        employee_id: number;
+        name: string;
+        employee_code?: string;
+        embeddings: number[][];
+      }>;
+    };
+  }>('/api/kiosk/face-profiles');
+  return res.data;
+}
+
+export async function enrollKioskFaceProfile(
+  employeeId: number,
+  profile: { model: string; dimension: number; embeddings: number[][] }
+) {
+  const res = await kioskFetch<{
+    success: boolean;
+    data: { id: number; enrolled_at: string };
+    message?: string;
+  }>(`/api/kiosk/employees/${employeeId}/face-profile`, {
+    method: 'POST',
+    body: JSON.stringify(profile),
+  });
+  return res;
+}
+
 export async function enrollKioskEmployeeFace(employeeId: number, imageBase64: string) {
   const res = await kioskFetch<{
     success: boolean;

@@ -1,0 +1,28 @@
+{
+  "model": "mobilefacenet_sface_v1",
+  "source": "https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface",
+  "sourceFile": "face_recognition_sface_2021dec.onnx",
+  "license": "Apache-2.0",
+  "architecture": "MobileFaceNet trained with SFace loss",
+  "inputShape": [
+    1,
+    112,
+    112,
+    3
+  ],
+  "inputType": "float32",
+  "layout": "NHWC",
+  "color": "RGB",
+  "valueRange": [
+    0,
+    255
+  ],
+  "outputShape": [
+    1,
+    128
+  ],
+  "outputType": "float32",
+  "embeddingDimension": 128,
+  "embeddingAlreadyNormalized": false,
+  "onnxAgreementMaxAbs": 3.039836883544922e-06
+}

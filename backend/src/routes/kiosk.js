@@ -8,6 +8,8 @@ const {
   updateKioskPreferencesHandler,
   kioskFaceRecognize,
   kioskFaceGallery,
+  kioskFaceProfiles,
+  enrollKioskFaceProfile,
   kioskMarkPunch,
   kioskFacePunch,
   listKioskEmployees,
@@ -102,6 +104,13 @@ router.patch(
   updateKioskPreferencesHandler
 );
 router.get('/face-gallery', authenticateKiosk, kioskFaceGallery);
+router.get('/face-profiles', authenticateKiosk, kioskFaceProfiles);
+router.post(
+  '/employees/:employeeId/face-profile',
+  authenticateKiosk,
+  authenticateKioskSettings,
+  enrollKioskFaceProfile
+);
 router.post(
   '/recognize',
   authenticateKiosk,

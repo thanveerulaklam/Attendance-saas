@@ -185,6 +185,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'demo_enquiry_calls' AND column_name = 'follow_up_at'
   )`,
+  '094_mobileface_profiles.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'employee_face_enrollments' AND column_name = 'recognition_model'
+  )`,
 };
 
 async function hasExistingSchema(client) {

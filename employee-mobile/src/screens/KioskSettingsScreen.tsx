@@ -9,10 +9,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import FaceCalibrateCamera from './FaceCalibrateCamera';
+import FaceEnrollCamera from './FaceEnrollCamera';
 import {
   createKioskEmployee,
-  enrollKioskEmployeeFace,
   fetchKioskAttendanceLogs,
   fetchKioskEmployees,
   fetchKioskPreferences,
@@ -74,8 +74,6 @@ function rangeDates(range: Range, customFrom: string, customTo: string) {
 
 export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskAppUpdate }) {
   const { session, refresh, signOut } = useKiosk();
-  const cameraRef = useRef<CameraView>(null);
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [section, setSection] = useState<Section>('employees');
   const [employees, setEmployees] = useState<KioskEmployee[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
@@ -87,8 +85,8 @@ export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskApp
   const [newJoinDate, setNewJoinDate] = useState(() => dateInput(new Date()));
   const [addBusy, setAddBusy] = useState(false);
   const codeEdited = useRef(false);
-  const [enrollBusy, setEnrollBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
 
   const [range, setRange] = useState<Range>('week');
   const [customFrom, setCustomFrom] = useState(() => {
@@ -264,28 +262,6 @@ export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskApp
     }
   };
 
-  const captureEnrollment = async () => {
-    if (!selectedEmployee || !cameraRef.current || enrollBusy) return;
-    try {
-      setEnrollBusy(true);
-      setMessage('Checking face…');
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.65,
-        skipProcessing: false,
-      });
-      if (!photo?.base64) throw new Error('Could not capture photo');
-      await enrollKioskEmployeeFace(selectedEmployee.id, photo.base64);
-      setSelectedEmployee(null);
-      setMessage(`Face saved for ${selectedEmployee.name}`);
-      await Promise.all([loadEmployees(), refresh()]);
-    } catch (err) {
-      setMessage((err as Error).message || 'Face enrollment failed');
-    } finally {
-      setEnrollBusy(false);
-    }
-  };
-
   const removeFace = async (employee: KioskEmployee) => {
     try {
       setMessage(null);
@@ -297,51 +273,23 @@ export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskApp
     }
   };
 
+  if (__DEV__ && calibrating) {
+    return <FaceCalibrateCamera onClose={() => setCalibrating(false)} />;
+  }
+
   if (selectedEmployee) {
-    if (!cameraPermission) {
-      return (
-        <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} />
-        </View>
-      );
-    }
-    if (!cameraPermission.granted) {
-      return (
-        <View style={styles.center}>
-          <Text style={styles.help}>Camera permission is required to enroll a face.</Text>
-          <Pressable style={styles.primaryButton} onPress={requestCameraPermission}>
-            <Text style={styles.primaryButtonText}>Allow camera</Text>
-          </Pressable>
-          <Pressable onPress={() => setSelectedEmployee(null)}>
-            <Text style={styles.link}>Cancel</Text>
-          </Pressable>
-        </View>
-      );
-    }
     return (
-      <View style={styles.cameraContainer}>
-        <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" />
-        <View style={styles.cameraHeader}>
-          <Text style={styles.cameraTitle}>Enroll {selectedEmployee.name}</Text>
-          <Text style={styles.cameraSub}>Employee code: {selectedEmployee.employee_code}</Text>
-          <Text style={styles.cameraSub}>Face forward · remove glasses · use good light</Text>
-        </View>
-        <View style={styles.cameraFooter}>
-          {enrollBusy && <ActivityIndicator color="#fff" />}
-          <Pressable
-            style={styles.captureButton}
-            disabled={enrollBusy}
-            onPress={captureEnrollment}
-          >
-            <Text style={styles.captureButtonText}>
-              {enrollBusy ? 'Processing…' : 'Take enrollment photo'}
-            </Text>
-          </Pressable>
-          <Pressable disabled={enrollBusy} onPress={() => setSelectedEmployee(null)}>
-            <Text style={styles.cameraCancel}>Cancel</Text>
-          </Pressable>
-        </View>
-      </View>
+      <FaceEnrollCamera
+        employeeId={selectedEmployee.id}
+        employeeName={selectedEmployee.name}
+        employeeCode={selectedEmployee.employee_code}
+        onCancel={() => setSelectedEmployee(null)}
+        onDone={async (text) => {
+          setSelectedEmployee(null);
+          setMessage(text);
+          await Promise.all([loadEmployees(), refresh()]);
+        }}
+      />
     );
   }
 
@@ -455,8 +403,13 @@ export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskApp
             </Pressable>
           </View>
 
+          {__DEV__ ? (
+            <Pressable onPress={() => setCalibrating(true)}>
+              <Text style={styles.actionLink}>Recognition check</Text>
+            </Pressable>
+          ) : null}
           <Text style={styles.sectionTitle}>
-            Employees ({employees.length}) · Faces enrolled (
+            Employees ({employees.length}) · Faces registered (
             {employees.filter((item) => item.face_enrollment_id).length})
           </Text>
 
@@ -486,13 +439,13 @@ export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskApp
                         employee.face_enrollment_id ? styles.enrolled : styles.notEnrolled
                       }
                     >
-                      {employee.face_enrollment_id ? 'Face enrolled' : 'Not enrolled'}
+                      {employee.face_enrollment_id ? 'Face registered' : 'Face registration required'}
                     </Text>
                   </View>
                   <View style={styles.rowActions}>
                     <Pressable onPress={() => setSelectedEmployee(employee)}>
                       <Text style={styles.actionLink}>
-                        {employee.face_enrollment_id ? 'Retake' : 'Add face'}
+                        {employee.face_enrollment_id ? 'Register again' : 'Register face'}
                       </Text>
                     </Pressable>
                     {employee.face_enrollment_id ? (

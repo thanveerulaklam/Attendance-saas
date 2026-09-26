@@ -8,7 +8,12 @@ const {
   listBranchFaceCandidates,
   listBranchEmployeeEnrollments,
   enrollEmployeeFace,
+  saveMobileFaceProfile,
+  listMobileFaceProfiles,
   removeEmployeeFace,
+  MOBILEFACE_MODEL,
+  MOBILEFACE_DIMENSION,
+  MOBILEFACE_MATCH_THRESHOLD,
 } = require('../services/faceEnrollmentService');
 const { modelsInstalled, MATCH_THRESHOLD } = require('../services/faceRecognitionService');
 const {
@@ -115,6 +120,45 @@ const kioskFaceGallery = asyncHandler(async (req, res) => {
         embedding: row.embedding,
       })),
     },
+  });
+});
+
+const kioskFaceProfiles = asyncHandler(async (req, res) => {
+  const rows = await listMobileFaceProfiles(req.kiosk.company_id, req.kiosk.branch_id);
+  return res.json({
+    success: true,
+    data: {
+      model: MOBILEFACE_MODEL,
+      dimension: MOBILEFACE_DIMENSION,
+      match_threshold: MOBILEFACE_MATCH_THRESHOLD,
+      employees: rows.map((row) => ({
+        employee_id: row.employee_id,
+        name: row.employee_name,
+        employee_code: row.employee_code,
+        embeddings: row.embeddings,
+      })),
+    },
+  });
+});
+
+const enrollKioskFaceProfile = asyncHandler(async (req, res) => {
+  const employeeId = Number(req.params.employeeId);
+  if (!employeeId) throw new AppError('Invalid employee id', 400);
+  await assertEmployeeAtKioskBranch(
+    req.kiosk.company_id,
+    req.kiosk.branch_id,
+    employeeId
+  );
+  const result = await saveMobileFaceProfile(
+    req.kiosk.company_id,
+    employeeId,
+    req.body || {},
+    null
+  );
+  return res.status(201).json({
+    success: true,
+    data: result.enrollment,
+    message: `Face registered for ${result.employee.name}`,
   });
 });
 
@@ -231,6 +275,8 @@ module.exports = {
   updateKioskPreferencesHandler,
   kioskFaceRecognize,
   kioskFaceGallery,
+  kioskFaceProfiles,
+  enrollKioskFaceProfile,
   kioskMarkPunch,
   kioskFacePunch,
   listKioskEmployees,

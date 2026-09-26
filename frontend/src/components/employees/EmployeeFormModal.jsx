@@ -1177,7 +1177,7 @@ export default function EmployeeFormModal({
             <div className="rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-3 space-y-3">
               <p className="text-xs font-semibold text-violet-900">Face attendance (office tablet)</p>
               <p className="text-[11px] text-slate-600">
-                Upload a clear front-facing photo. The employee can then punch at the branch kiosk — no personal phone or password needed.
+                The latest office tablet registers each face on the device. A photo uploaded here is kept for older kiosk versions and is not used by the new on-device recognizer.
               </p>
               {faceLoading ? (
                 <p className="text-[11px] text-slate-500">Checking enrollment…</p>
