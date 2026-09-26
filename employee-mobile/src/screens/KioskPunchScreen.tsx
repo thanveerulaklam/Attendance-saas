@@ -21,7 +21,21 @@ import KioskUpdateNotice from '../components/KioskUpdateNotice';
 import type { KioskAppUpdate } from '../updates/useKioskAppUpdate';
 import { colors } from '../theme';
 
-const SCAN_INTERVAL_MS = 1000;
+const SCAN_INTERVAL_MS = 400;
+
+function choosePictureSize(sizes: string[]): string | undefined {
+  const parsed = sizes
+    .map((size) => {
+      const [width, height] = size.split('x').map((part) => Number(part));
+      return { size, long: Math.max(width || 0, height || 0) };
+    })
+    .filter((item) => item.long > 0);
+  const near = parsed
+    .filter((item) => item.long >= 480 && item.long <= 960)
+    .sort((a, b) => Math.abs(a.long - 640) - Math.abs(b.long - 640));
+  if (near[0]) return near[0].size;
+  return parsed.sort((a, b) => a.long - b.long)[0]?.size;
+}
 
 type Props = {
   active: boolean;
@@ -48,6 +62,7 @@ export default function KioskPunchScreen({
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [cameraReady, setCameraReady] = useState(false);
+  const [pictureSize, setPictureSize] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(
     enrolledCount > 0 ? 'Ready — look at the camera' : 'Open Settings and enroll employees first'
@@ -62,6 +77,7 @@ export default function KioskPunchScreen({
   const galleryRef = useRef<FaceGallery | null>(null);
   const [gallery, setGallery] = useState<FaceGallery | null>(null);
   const unknownUntilRef = useRef(0);
+  const faceWatchRef = useRef(0);
   const successPauseMs = Math.max(6000, Number(duplicatePunchSeconds || 90) * 1000);
   const requiredHoldMs = Math.max(0, Number(minRecognizeSeconds || 0) * 1000);
 
@@ -95,33 +111,51 @@ export default function KioskPunchScreen({
       }
 
       const photo = await cameraRef.current.takePictureAsync({
-        base64: false,
-        quality: 0.65,
+        base64: true,
+        quality: 0.5,
         skipProcessing: false,
       });
-      if (!photo?.uri) return;
+      if (!photo?.uri || !photo.base64) return;
       tempUris.push(photo.uri);
-      const resized = await ImageManipulator.manipulateAsync(
-        photo.uri,
-        [{ resize: { width: 800 } }],
-        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-      );
-      if (resized.uri) tempUris.push(resized.uri);
-      if (!resized.base64) return;
+      const longEdge = Math.max(photo.width || 0, photo.height || 0);
+      const sized = longEdge > 1000
+        ? await ImageManipulator.manipulateAsync(
+          photo.uri,
+          [{ resize: { width: 640 } }],
+          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        )
+        : photo;
+      if (sized.uri && sized.uri !== photo.uri) tempUris.push(sized.uri);
+      if (!sized.base64) return;
 
       let facePresent = false;
+      let faceBox: { x: number; y: number; width: number; height: number } | undefined;
       try {
         const detectUri = Platform.OS === 'android'
-          ? await FileSystem.getContentUriAsync(resized.uri)
-          : resized.uri;
+          ? await FileSystem.getContentUriAsync(sized.uri)
+          : sized.uri;
         const faces = await FaceDetection.detect(detectUri, {
           performanceMode: 'fast',
           landmarkMode: 'none',
           contourMode: 'none',
           classificationMode: 'none',
-          minFaceSize: 0.15,
+          minFaceSize: 0.1,
         });
-        facePresent = Array.isArray(faces) && faces.length > 0;
+        const largest = (faces || []).reduce<(typeof faces)[number] | null>((best, face) => {
+          if (!best) return face;
+          return face.frame.width * face.frame.height > best.frame.width * best.frame.height
+            ? face
+            : best;
+        }, null);
+        facePresent = Boolean(largest);
+        if (largest) {
+          faceBox = {
+            x: largest.frame.left,
+            y: largest.frame.top,
+            width: largest.frame.width,
+            height: largest.frame.height,
+          };
+        }
       } catch (detectErr) {
         const detectMessage = detectErr instanceof Error ? detectErr.message : '';
         if (detectMessage.includes("doesn't seem to be linked")) throw detectErr;
@@ -129,6 +163,7 @@ export default function KioskPunchScreen({
       }
 
       if (!facePresent) {
+        faceWatchRef.current += 1;
         unknownUntilRef.current = 0;
         if (holdRef.current) {
           resetHold();
@@ -166,13 +201,17 @@ export default function KioskPunchScreen({
 
       setBusy(true);
       setMessage('Recognizing…');
-      const recognized = await matcherRef.current?.match(resized.base64);
+      const seenAt = Date.now();
+      const watch = faceWatchRef.current;
+      const recognized = await matcherRef.current?.match(sized.base64, faceBox);
+      if (faceWatchRef.current !== watch) return;
       if (!recognized) {
         unknownUntilRef.current = Date.now() + 8000;
         setMessage('Face not recognized — try again');
         return;
       }
-      if (requiredHoldMs <= 0) {
+      const heldFor = Date.now() - seenAt;
+      if (requiredHoldMs <= 0 || heldFor >= requiredHoldMs) {
         setMessage('Marking attendance…');
         const result = await markKioskPunch(recognized.employeeId);
         resetHold();
@@ -189,7 +228,7 @@ export default function KioskPunchScreen({
       holdRef.current = {
         employeeId: recognized.employeeId,
         name: recognized.name,
-        startedAt: now,
+        startedAt: seenAt,
       };
       setHoldProgress(0);
       setMessage(`Hi ${recognized.name} — hold still…`);
@@ -307,7 +346,15 @@ export default function KioskPunchScreen({
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing="front"
-        onCameraReady={() => setCameraReady(true)}
+        pictureSize={pictureSize}
+        animateShutter={false}
+        onCameraReady={() => {
+          setCameraReady(true);
+          cameraRef.current?.getAvailablePictureSizesAsync().then((sizes) => {
+            const next = choosePictureSize(sizes || []);
+            if (next) setPictureSize(next);
+          }).catch(() => undefined);
+        }}
       />
 
       <View style={[styles.header, { top: Math.max(insets.top, 16) + 8 }]}>

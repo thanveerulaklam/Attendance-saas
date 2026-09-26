@@ -20,8 +20,10 @@ export type FaceGallery = {
   }>;
 };
 
+export type FaceBox = { x: number; y: number; width: number; height: number };
+
 export type LocalFaceMatcherHandle = {
-  match: (imageBase64: string) => Promise<LocalFaceMatch | null>;
+  match: (imageBase64: string, faceBox?: FaceBox) => Promise<LocalFaceMatch | null>;
 };
 
 type Props = {
@@ -60,30 +62,72 @@ function distance(a, b) {
   }
   return Math.sqrt(sum);
 }
-window.__match = function (requestId, imageBase64) {
+function bestPerson(desc) {
+  if (!desc) return null;
+  var list = Array.from(desc);
+  var best = null;
+  var people = window.__gallery || [];
+  for (var i = 0; i < people.length; i++) {
+    var person = people[i];
+    var dist = distance(list, person.embedding);
+    if (dist <= window.__threshold && (!best || dist < best.distance)) {
+      best = {
+        employeeId: person.employee_id,
+        name: person.name,
+        employeeCode: person.employee_code,
+        distance: dist
+      };
+    }
+  }
+  return best;
+}
+function expandBox(box, imgW, imgH) {
+  var padX = box.width * 0.35;
+  var padY = box.height * 0.45;
+  var x = Math.max(0, box.x - padX);
+  var y = Math.max(0, box.y - padY);
+  var width = Math.min(imgW - x, box.width + padX * 2);
+  var height = Math.min(imgH - y, box.height + padY * 2);
+  if (width < 20 || height < 20) return null;
+  return { x: x, y: y, width: width, height: height };
+}
+function descriptorFromBox(img, box) {
+  var expanded = expandBox(box, img.width, img.height);
+  if (!expanded) return Promise.reject(new Error('box'));
+  var Rect = faceapi.Rect || faceapi.Box;
+  var rect = new Rect(expanded.x, expanded.y, expanded.width, expanded.height);
+  return faceapi.extractFaces(img, [rect]).then(function (crops) {
+    if (!crops || !crops[0]) throw new Error('no crop');
+    return faceapi.detectFaceLandmarks(crops[0]);
+  }).then(function (landmarks) {
+    var aligned = landmarks && landmarks.align ? landmarks.align() : landmarks;
+    return faceapi.computeFaceDescriptor(aligned);
+  });
+}
+function descriptorFull(img) {
+  return faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+    .withFaceLandmarks()
+    .withFaceDescriptor()
+    .then(function (det) { return det ? det.descriptor : null; });
+}
+window.__match = function (requestId, imageBase64, box) {
   var img = new Image();
   img.onload = function () {
-    faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 })).withFaceLandmarks().withFaceDescriptor().then(function (det) {
-      if (!det) {
-        post({ type: 'match', requestId: requestId, match: null });
-        return;
+    var fast = (box && box.width > 20)
+      ? descriptorFromBox(img, box)
+      : Promise.reject(new Error('no box'));
+    fast.then(function (desc) {
+      var hit = bestPerson(desc);
+      if (hit) {
+        post({ type: 'match', requestId: requestId, match: hit });
+        return 'done';
       }
-      var desc = Array.from(det.descriptor);
-      var best = null;
-      var people = window.__gallery || [];
-      for (var i = 0; i < people.length; i++) {
-        var person = people[i];
-        var dist = distance(desc, person.embedding);
-        if (dist <= window.__threshold && (!best || dist < best.distance)) {
-          best = {
-            employeeId: person.employee_id,
-            name: person.name,
-            employeeCode: person.employee_code,
-            distance: dist
-          };
-        }
-      }
-      post({ type: 'match', requestId: requestId, match: best });
+      return descriptorFull(img);
+    }).catch(function () {
+      return descriptorFull(img);
+    }).then(function (desc) {
+      if (desc === 'done') return;
+      post({ type: 'match', requestId: requestId, match: desc ? bestPerson(desc) : null });
     }).catch(function (err) {
       post({ type: 'match', requestId: requestId, error: String(err && err.message || err) });
     });
@@ -106,6 +150,13 @@ function boot() {
     return faceapi.nets.faceLandmark68Net.loadFromUri(${JSON.stringify(modelUrl)});
   }).then(function () {
     return faceapi.nets.faceRecognitionNet.loadFromUri(${JSON.stringify(modelUrl)});
+  }).then(function () {
+    var canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 160;
+    return faceapi.detectFaceLandmarks(canvas).then(function (landmarks) {
+      return faceapi.computeFaceDescriptor(landmarks.align ? landmarks.align() : canvas);
+    }).catch(function () { return null; });
   }).then(function () {
     post({ type: 'ready' });
   }).catch(function (err) {
@@ -145,7 +196,7 @@ const LocalFaceMatcher = forwardRef<LocalFaceMatcherHandle, Props>(function Loca
   }, [gallery, ready]);
 
   useImperativeHandle(ref, () => ({
-    match(imageBase64: string) {
+    match(imageBase64: string, faceBox?: FaceBox) {
       return new Promise((resolve, reject) => {
         if (!ready || !webRef.current) {
           reject(new Error('Face matching is still loading'));
@@ -169,7 +220,7 @@ const LocalFaceMatcher = forwardRef<LocalFaceMatcherHandle, Props>(function Loca
           },
         });
         webRef.current.injectJavaScript(
-          `window.__match(${requestId}, ${JSON.stringify(imageBase64)}); true;`
+          `window.__match(${requestId}, ${JSON.stringify(imageBase64)}, ${JSON.stringify(faceBox || null)}); true;`
         );
       });
     },
