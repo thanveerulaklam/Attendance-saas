@@ -50,7 +50,7 @@ export default function DevicesPage() {
   const [mobileSaving, setMobileSaving] = useState(false);
   const [mobileToast, setMobileToast] = useState(null);
   const [kioskBusyBranchId, setKioskBusyBranchId] = useState(null);
-  const [kioskReveal, setKioskReveal] = useState(null);
+  const [kioskByBranch, setKioskByBranch] = useState({});
   const [kioskSettingsPins, setKioskSettingsPins] = useState({});
   const [apkDownloading, setApkDownloading] = useState(false);
   const [kioskError, setKioskError] = useState(null);
@@ -62,6 +62,17 @@ export default function DevicesPage() {
     setKioskSettingsPins((prev) => ({
       ...prev,
       [branchId]: normalizeKioskPinInput(value),
+    }));
+  };
+
+  const rememberKiosk = (branchId, branchName, token, settingsPinConfigured) => {
+    setKioskByBranch((prev) => ({
+      ...prev,
+      [branchId]: {
+        branchName,
+        token: token || '',
+        settingsPinConfigured: Boolean(settingsPinConfigured),
+      },
     }));
   };
 
@@ -163,12 +174,12 @@ export default function DevicesPage() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Failed to create kiosk code');
-      setKioskReveal({
+      rememberKiosk(
         branchId,
         branchName,
-        token: json.data?.token,
-        settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
-      });
+        json.data?.token,
+        json.data?.settings_pin_configured
+      );
       setKioskSuccess(json.message || 'Kiosk code ready for this branch.');
     } catch (err) {
       setKioskError(err.message || 'Failed to generate kiosk code');
@@ -194,11 +205,13 @@ export default function DevicesPage() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Failed to save Settings PIN');
-      setKioskReveal((prev) =>
-        prev?.branchId === branchId
-          ? { ...prev, settingsPinConfigured: true }
-          : prev
-      );
+      setKioskByBranch((prev) => ({
+        ...prev,
+        [branchId]: {
+          ...(prev[branchId] || { branchName, token: '' }),
+          settingsPinConfigured: true,
+        },
+      }));
       setKioskSuccess(`Settings PIN saved for ${branchName}.`);
     } catch (err) {
       setKioskError(err.message || 'Failed to save Settings PIN');
@@ -226,12 +239,12 @@ export default function DevicesPage() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Failed to regenerate kiosk code');
-      setKioskReveal({
+      rememberKiosk(
         branchId,
         branchName,
-        token: json.data?.token,
-        settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
-      });
+        json.data?.token,
+        json.data?.settings_pin_configured
+      );
       setKioskSuccess(json.message || 'New kiosk code generated.');
     } catch (err) {
       setKioskError(err.message || 'Failed to regenerate kiosk code');
@@ -247,7 +260,10 @@ export default function DevicesPage() {
       const res = await authFetch(`/api/company/branches/${branchId}/kiosk`, { method: 'DELETE' });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Failed to revoke kiosk');
-      setKioskReveal(null);
+      setKioskByBranch((prev) => ({
+        ...prev,
+        [branchId]: { ...(prev[branchId] || {}), token: '', settingsPinConfigured: false },
+      }));
       setKioskSuccess('Kiosk access revoked.');
     } catch (err) {
       setKioskError(err.message || 'Failed to revoke kiosk');
@@ -308,6 +324,32 @@ export default function DevicesPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!isAdmin || !mobileAttendanceEnabled || branches.length === 0) return undefined;
+    let cancelled = false;
+    Promise.all(
+      branches.map(async (branch) => {
+        const res = await authFetch(`/api/company/branches/${branch.id}/kiosk`);
+        const json = await res.json().catch(() => ({}));
+        return [
+          branch.id,
+          {
+            branchName: branch.name,
+            token: json.data?.token || '',
+            settingsPinConfigured: Boolean(json.data?.settings_pin_configured),
+          },
+        ];
+      })
+    )
+      .then((entries) => {
+        if (!cancelled) setKioskByBranch(Object.fromEntries(entries));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, mobileAttendanceEnabled, branches]);
 
   useEffect(() => {
     loadDevices();
@@ -681,9 +723,7 @@ export default function DevicesPage() {
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
               <p className="text-xs font-semibold text-slate-900">Install office tablet app</p>
               <p className="mt-1 text-[11px] text-slate-600">
-                Download the PunchPay Kiosk APK, install it on the branch Android tablet, then create the
-                permanent 8-character kiosk code below and activate the tablet once. On Android: open the downloaded file → allow
-                install from Files/Chrome → Install.
+                On Android: open the downloaded file, allow install from Files or Chrome, then Install.
               </p>
               <button
                 type="button"
@@ -696,13 +736,40 @@ export default function DevicesPage() {
             </div>
           )}
           {mobileAttendanceEnabled && branches.length > 0 && (
-            <p className="mt-3 text-[11px] text-slate-600">
-              For each branch: set a <strong>6-digit Settings PIN</strong>, create the{' '}
-              <strong>8-character kiosk code</strong>, enter the code once on the office tablet, then enroll employee faces.{' '}
-              <Link to="/mobile-punch-log" className="font-medium text-indigo-600 underline">
-                View punch log
-              </Link>
-            </p>
+            <div className="mt-4">
+              {branches.map((branch) => {
+                const code = kioskByBranch[branch.id]?.token;
+                return (
+                  <div key={branch.id} className="mt-3 first:mt-0">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                      {branches.length > 1 ? `${branch.name} kiosk code` : 'Kiosk code'}
+                    </p>
+                    <p className="mt-1 font-mono text-3xl font-bold tracking-[0.28em] text-slate-900">
+                      {code || '—'}
+                    </p>
+                    {!code && (
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Use Show kiosk code below to create this branch code.
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+              <ol className="mt-4 list-decimal space-y-1 pl-5 text-xs leading-5 text-slate-700">
+                <li>Download and install the app.</li>
+                <li>Enter the kiosk code shown above.</li>
+                <li>Create a Settings PIN.</li>
+                <li>
+                  Open Settings on the tablet and add the face. Add the employee&apos;s main details on the website.
+                </li>
+                <li>Start attendance.</li>
+              </ol>
+              <p className="mt-3 text-[11px] text-slate-500">
+                <Link to="/mobile-punch-log" className="font-medium text-indigo-600 underline">
+                  View punch log
+                </Link>
+              </p>
+            </div>
           )}
           {kioskError && (
             <div className="mt-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
@@ -712,17 +779,6 @@ export default function DevicesPage() {
           {kioskSuccess && (
             <div className="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-700">
               {kioskSuccess}
-            </div>
-          )}
-          {kioskReveal?.token && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-[11px] text-amber-950">
-              <p className="font-semibold">Kiosk code for {kioskReveal.branchName}</p>
-              <p className="mt-1 break-all font-mono text-xs">{kioskReveal.token}</p>
-              <p className="mt-2 text-amber-800">
-                {kioskReveal.settingsPinConfigured
-                  ? 'Settings PIN is configured for this branch. Use that branch PIN on the tablet.'
-                  : 'Save a Settings PIN for this branch before opening Settings on the tablet.'}
-              </p>
             </div>
           )}
           {mobileAttendanceEnabled && branches.length > 0 && (
