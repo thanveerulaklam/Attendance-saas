@@ -46,14 +46,16 @@ function MobileFacePunchScreen({
   const [message, setMessage] = useState('Preparing face recognition…');
   const [success, setSuccess] = useState<string | null>(null);
   const [profileCount, setProfileCount] = useState(0);
-  const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
   const [timings, setTimings] = useState('');
   const [holdProgress, setHoldProgress] = useState(0);
   const holdRef = useRef<{ employeeId: number; name: string; startedAt: number } | null>(null);
   const punchingRef = useRef(false);
-  const successPauseMs = Math.max(6000, Number(duplicatePunchSeconds || 90) * 1000);
+  const cooldownUntilRef = useRef(new Map<number, number>());
+  const resultUntilRef = useRef(0);
+  const resultTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requiredHoldMs = Math.max(0, Number(minRecognizeSeconds || 0) * 1000);
+  const duplicateWindowMs = Math.max(1, Number(duplicatePunchSeconds || 90)) * 1000;
 
   const loadProfiles = useCallback(async () => {
     let json = '';
@@ -98,6 +100,22 @@ function MobileFacePunchScreen({
     return () => clearInterval(timer);
   }, [active, loadProfiles]);
 
+  useEffect(() => () => {
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+  }, []);
+
+  const showResult = useCallback((status: string, detail: string | null) => {
+    setMessage(status);
+    setSuccess(detail);
+    resultUntilRef.current = Date.now() + 2500;
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+    resultTimerRef.current = setTimeout(() => {
+      resultUntilRef.current = 0;
+      setSuccess(null);
+      setMessage((current) => (current === status ? 'Ready — look at the camera' : current));
+    }, 2500);
+  }, []);
+
   useEffect(() => {
     if (!active) return undefined;
     flushPunchQueue().catch(() => undefined);
@@ -109,24 +127,33 @@ function MobileFacePunchScreen({
 
   const finishPunch = useCallback(async (employeeId: number, name: string) => {
     if (punchingRef.current) return;
+    const cooldownUntil = cooldownUntilRef.current.get(employeeId) || 0;
+    if (Date.now() < cooldownUntil) {
+      if (Date.now() >= resultUntilRef.current) {
+        showResult('Attendance already marked — next employee please', null);
+      }
+      return;
+    }
     punchingRef.current = true;
     setBusy(true);
-    setPaused(true);
     try {
       const outcome = await markKioskPunchOrQueue(employeeId);
       holdRef.current = null;
       setHoldProgress(0);
+      cooldownUntilRef.current.set(employeeId, Date.now() + duplicateWindowMs);
       if (outcome.queued) {
-        setSuccess(`${name} — saved on this tablet. It will sync when the network is back.`);
-        setMessage('Attendance saved offline');
+        showResult(
+          'Attendance saved offline',
+          `${name} — saved on this tablet. It will sync when the network is back.`
+        );
       } else if (outcome.data) {
         const punch = outcome.data.punch;
-        setSuccess(
+        showResult(
+          'Attendance marked — next employee please',
           `${outcome.data.employee.name} — ${punch.punch_type.toUpperCase()} at ${new Date(
             punch.punch_time
           ).toLocaleTimeString()}`
         );
-        setMessage('Attendance marked — next employee please');
         onPunchRecorded?.();
       }
     } catch (err) {
@@ -134,27 +161,23 @@ function MobileFacePunchScreen({
       holdRef.current = null;
       setHoldProgress(0);
       if (error.code === 'DUPLICATE_PUNCH') {
-        setMessage('Attendance already marked — next employee please');
+        cooldownUntilRef.current.set(employeeId, Date.now() + duplicateWindowMs);
+        showResult('Attendance already marked — next employee please', null);
       } else {
+        resultUntilRef.current = 0;
+        setSuccess(null);
         setMessage(error.message || 'Could not mark attendance');
-        setPaused(false);
-        setBusy(false);
-        punchingRef.current = false;
-        return;
       }
-    }
-    setTimeout(() => {
-      setSuccess(null);
-      setPaused(false);
+    } finally {
       setBusy(false);
       punchingRef.current = false;
-      setMessage('Ready — look at the camera');
-    }, successPauseMs);
-  }, [onPunchRecorded, successPauseMs]);
+    }
+  }, [duplicateWindowMs, onPunchRecorded, showResult]);
 
   const onRecognition = useCallback((event: { nativeEvent: FaceRecognitionEvent }) => {
     const payload = event.nativeEvent;
     if (payload.type === 'status' && payload.message && !punchingRef.current) {
+      if (Date.now() < resultUntilRef.current) return;
       if (!holdRef.current) setMessage(payload.message);
       if (payload.message.startsWith('Ready') || payload.message.startsWith('Only one')) {
         holdRef.current = null;
@@ -221,9 +244,9 @@ function MobileFacePunchScreen({
     <View style={styles.container}>
       <FaceCameraView
         style={StyleSheet.absoluteFill}
-        active={active && !paused && profileCount > 0}
+        active={active && profileCount > 0}
         mode="recognize"
-        paused={paused || profileCount === 0}
+        paused={profileCount === 0}
         onRecognition={onRecognition}
       />
       <View style={[styles.header, { top: Math.max(insets.top, 16) + 8 }]}>
