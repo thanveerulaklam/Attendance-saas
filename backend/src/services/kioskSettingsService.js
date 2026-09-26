@@ -1,5 +1,7 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { createEmployee } = require('./employeeService');
+const { suggestNextEmployeeCode } = require('../utils/employeeCode');
 
 function parseDate(value, label) {
   const date = new Date(value);
@@ -77,7 +79,75 @@ async function listKioskAttendanceLogs(companyId, branchId, options = {}) {
   };
 }
 
+async function listCompanyEmployeeCodes(companyId) {
+  const result = await pool.query(
+    `SELECT employee_code FROM employees WHERE company_id = $1`,
+    [companyId]
+  );
+  return result.rows.map((row) => row.employee_code);
+}
+
+function parseKioskEmployeeBody(body = {}) {
+  const name = String(body.name || '').trim();
+  const employeeCode = String(body.employee_code || '').trim();
+  const salary = Number(body.basic_salary);
+  const joinDate = String(body.join_date || '').trim();
+  const salaryType = String(body.salary_type || 'monthly').toLowerCase();
+
+  if (name.length < 2) {
+    throw new AppError('Name must be at least 2 characters.', 400);
+  }
+  if (!employeeCode) {
+    throw new AppError('Employee code is required.', 400);
+  }
+  if (employeeCode.length > 50) {
+    throw new AppError('Employee code must be 50 characters or fewer.', 400);
+  }
+  if (!Number.isFinite(salary) || salary <= 0) {
+    throw new AppError('Basic salary must be a positive number.', 400);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(joinDate) || Number.isNaN(new Date(`${joinDate}T00:00:00`).getTime())) {
+    throw new AppError('Join date must be YYYY-MM-DD.', 400);
+  }
+  if (salaryType !== 'monthly' && salaryType !== 'per_day') {
+    throw new AppError('Salary type must be monthly or per day.', 400);
+  }
+
+  return { name, employeeCode, salary, joinDate, salaryType };
+}
+
+async function createKioskEmployee(kiosk, body) {
+  const parsed = parseKioskEmployeeBody(body);
+  const shift = await pool.query(
+    `SELECT id FROM shifts WHERE company_id = $1 ORDER BY id ASC LIMIT 1`,
+    [kiosk.company_id]
+  );
+
+  return createEmployee(
+    kiosk.company_id,
+    {
+      name: parsed.name,
+      employee_code: parsed.employeeCode,
+      basic_salary: parsed.salary,
+      join_date: parsed.joinDate,
+      status: 'active',
+      branch_id: kiosk.branch_id,
+      payroll_frequency: 'monthly',
+      salary_type: parsed.salaryType,
+      ...(shift.rowCount ? { shift_id: Number(shift.rows[0].id) } : {}),
+    },
+    { role: 'admin' }
+  );
+}
+
+async function suggestKioskEmployeeCode(companyId) {
+  const codes = await listCompanyEmployeeCodes(companyId);
+  return suggestNextEmployeeCode(codes);
+}
+
 module.exports = {
   assertEmployeeAtKioskBranch,
   listKioskAttendanceLogs,
+  createKioskEmployee,
+  suggestKioskEmployeeCode,
 };

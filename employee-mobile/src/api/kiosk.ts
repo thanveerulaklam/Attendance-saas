@@ -224,9 +224,36 @@ export async function submitKioskPunch(imageBase64: string) {
 export async function fetchKioskEmployees() {
   const res = await kioskFetch<{
     success: boolean;
-    data: { items: KioskEmployee[] };
+    data: { items: KioskEmployee[]; suggested_employee_code?: string };
   }>('/api/kiosk/employees');
-  return res.data.items;
+  return {
+    items: res.data.items,
+    suggestedEmployeeCode: res.data.suggested_employee_code || '',
+  };
+}
+
+export async function createKioskEmployee(body: {
+  name: string;
+  employeeCode: string;
+  basicSalary: number;
+  joinDate: string;
+  salaryType: 'monthly' | 'per_day';
+}) {
+  const res = await kioskFetch<{
+    success: boolean;
+    message?: string;
+    data: { id: number; name: string; employee_code: string; status: string };
+  }>('/api/kiosk/employees', {
+    method: 'POST',
+    body: JSON.stringify({
+      name: body.name,
+      employee_code: body.employeeCode,
+      basic_salary: body.basicSalary,
+      join_date: body.joinDate,
+      salary_type: body.salaryType,
+    }),
+  });
+  return res;
 }
 
 export async function enrollKioskEmployeeFace(employeeId: number, imageBase64: string) {

@@ -53,8 +53,42 @@ function buildEmployeeMapForDeviceCodes(rows, deviceCodes) {
   return map;
 }
 
+/**
+ * Next code for a new hire. Follows an all-numeric or single-prefix pattern
+ * ("17" → "18", "EMP-001" → "EMP-002"). Mixed patterns return "" so the
+ * operator types a code.
+ */
+function suggestNextEmployeeCode(codes) {
+  const trimmed = (codes || [])
+    .map((code) => trimCode(code))
+    .filter(Boolean);
+  if (trimmed.length === 0) return '1';
+
+  if (trimmed.every((code) => /^\d+$/.test(code))) {
+    const width = Math.max(...trimmed.map((code) => code.length));
+    const next = Math.max(...trimmed.map((code) => Number(code))) + 1;
+    return String(next).padStart(width, '0');
+  }
+
+  const parsed = trimmed.map((code) => /^([A-Za-z]+-?)(\d+)$/.exec(code));
+  if (parsed.every(Boolean)) {
+    const prefix = parsed[0][1];
+    const samePrefix = parsed.every(
+      (match) => match[1].toLowerCase() === prefix.toLowerCase()
+    );
+    if (samePrefix) {
+      const width = Math.max(...parsed.map((match) => match[2].length));
+      const next = Math.max(...parsed.map((match) => Number(match[2]))) + 1;
+      return `${prefix}${String(next).padStart(width, '0')}`;
+    }
+  }
+
+  return '';
+}
+
 module.exports = {
   trimCode,
   numericEmployeeCodeKey,
   buildEmployeeMapForDeviceCodes,
+  suggestNextEmployeeCode,
 };

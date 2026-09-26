@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
+  createKioskEmployee,
   enrollKioskEmployeeFace,
   fetchKioskAttendanceLogs,
   fetchKioskEmployees,
@@ -76,8 +77,14 @@ export default function KioskSettingsScreen() {
   const [section, setSection] = useState<Section>('employees');
   const [employees, setEmployees] = useState<KioskEmployee[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(true);
-  const [employeeCode, setEmployeeCode] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState<KioskEmployee | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newCode, setNewCode] = useState('');
+  const [newSalary, setNewSalary] = useState('');
+  const [salaryType, setSalaryType] = useState<'monthly' | 'per_day'>('monthly');
+  const [newJoinDate, setNewJoinDate] = useState(() => dateInput(new Date()));
+  const [addBusy, setAddBusy] = useState(false);
+  const codeEdited = useRef(false);
   const [enrollBusy, setEnrollBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -99,7 +106,9 @@ export default function KioskSettingsScreen() {
   const loadEmployees = useCallback(async () => {
     try {
       setEmployeesLoading(true);
-      setEmployees(await fetchKioskEmployees());
+      const data = await fetchKioskEmployees();
+      setEmployees(data.items);
+      if (!codeEdited.current) setNewCode(data.suggestedEmployeeCode);
     } catch (err) {
       setMessage((err as Error).message || 'Could not load employees');
     } finally {
@@ -199,17 +208,58 @@ export default function KioskSettingsScreen() {
     return Array.from(groups.values());
   }, [logs]);
 
-  const findEmployeeByCode = () => {
-    const normalized = employeeCode.trim().toLowerCase();
-    const employee = employees.find(
-      (item) => String(item.employee_code).trim().toLowerCase() === normalized
-    );
-    if (!employee) {
-      setMessage('Employee code not found at this branch. Add the employee in PunchPay admin first.');
+  const addEmployee = async () => {
+    if (addBusy) return;
+    const name = newName.trim();
+    const employeeCode = newCode.trim();
+    const salary = Number(newSalary);
+    if (name.length < 2) {
+      setMessage('Name must be at least 2 characters.');
       return;
     }
-    setMessage(null);
-    setSelectedEmployee(employee);
+    if (!employeeCode) {
+      setMessage('Employee code is required.');
+      return;
+    }
+    if (!Number.isFinite(salary) || salary <= 0) {
+      setMessage('Basic salary must be a positive number.');
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(newJoinDate.trim())) {
+      setMessage('Join date must be YYYY-MM-DD.');
+      return;
+    }
+    try {
+      setAddBusy(true);
+      setMessage(null);
+      const created = await createKioskEmployee({
+        name,
+        employeeCode,
+        basicSalary: salary,
+        joinDate: newJoinDate.trim(),
+        salaryType,
+      });
+      setNewName('');
+      setNewSalary('');
+      setSalaryType('monthly');
+      setNewJoinDate(dateInput(new Date()));
+      codeEdited.current = false;
+      const data = await fetchKioskEmployees();
+      setEmployees(data.items);
+      setNewCode(data.suggestedEmployeeCode);
+      await refresh();
+      setSelectedEmployee({
+        id: created.data.id,
+        name: created.data.name,
+        employee_code: created.data.employee_code,
+        status: created.data.status || 'active',
+        face_enrollment_id: null,
+      });
+    } catch (err) {
+      setMessage((err as Error).message || 'Could not add employee');
+    } finally {
+      setAddBusy(false);
+    }
   };
 
   const captureEnrollment = async () => {
@@ -225,7 +275,6 @@ export default function KioskSettingsScreen() {
       if (!photo?.base64) throw new Error('Could not capture photo');
       await enrollKioskEmployeeFace(selectedEmployee.id, photo.base64);
       setSelectedEmployee(null);
-      setEmployeeCode('');
       setMessage(`Face saved for ${selectedEmployee.name}`);
       await Promise.all([loadEmployees(), refresh()]);
     } catch (err) {
@@ -328,22 +377,78 @@ export default function KioskSettingsScreen() {
       {section === 'employees' ? (
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Add employee face</Text>
+            <Text style={styles.cardTitle}>Add employee</Text>
             <Text style={styles.help}>
-              Enter an employee code already created for this branch in PunchPay.
+              Creates the employee for this branch. The next screen takes their face photo so they
+              can punch here. Pay details can be updated later in PunchPay.
             </Text>
-            <View style={styles.inputRow}>
-              <TextInput
-                style={styles.input}
-                value={employeeCode}
-                onChangeText={setEmployeeCode}
-                autoCapitalize="characters"
-                placeholder="Employee code"
-              />
-              <Pressable style={styles.primaryButton} onPress={findEmployeeByCode}>
-                <Text style={styles.primaryButtonText}>Continue</Text>
-              </Pressable>
+            <Text style={styles.fieldLabel}>Name</Text>
+            <TextInput
+              style={styles.field}
+              value={newName}
+              onChangeText={setNewName}
+              placeholder="Employee name"
+              editable={!addBusy}
+            />
+            <Text style={styles.fieldLabel}>Employee code</Text>
+            <TextInput
+              style={styles.field}
+              value={newCode}
+              onChangeText={(value) => {
+                codeEdited.current = true;
+                setNewCode(value);
+              }}
+              autoCapitalize="characters"
+              placeholder="e.g. 18 or EMP-015"
+              editable={!addBusy}
+            />
+            <Text style={styles.fieldLabel}>
+              {salaryType === 'per_day' ? 'Daily basic salary' : 'Monthly basic salary'}
+            </Text>
+            <TextInput
+              style={styles.field}
+              value={newSalary}
+              onChangeText={setNewSalary}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 15000"
+              editable={!addBusy}
+            />
+            <View style={styles.presetGrid}>
+              {(
+                [
+                  ['monthly', 'Monthly'],
+                  ['per_day', 'Per day'],
+                ] as const
+              ).map(([value, label]) => (
+                <Pressable
+                  key={value}
+                  disabled={addBusy}
+                  style={[styles.presetButton, salaryType === value && styles.presetButtonActive]}
+                  onPress={() => setSalaryType(value)}
+                >
+                  <Text style={salaryType === value ? styles.presetTextActive : styles.presetText}>
+                    {label}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
+            <Text style={styles.fieldLabel}>Join date</Text>
+            <TextInput
+              style={styles.field}
+              value={newJoinDate}
+              onChangeText={setNewJoinDate}
+              placeholder="YYYY-MM-DD"
+              editable={!addBusy}
+            />
+            <Pressable
+              style={[styles.addButton, addBusy && styles.addButtonDisabled]}
+              disabled={addBusy}
+              onPress={addEmployee}
+            >
+              <Text style={styles.primaryButtonText}>
+                {addBusy ? 'Adding…' : 'Add employee'}
+              </Text>
+            </Pressable>
           </View>
 
           <Text style={styles.sectionTitle}>
@@ -717,6 +822,30 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: '#fff',
   },
+  fieldLabel: {
+    marginTop: 12,
+    marginBottom: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  field: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    color: colors.text,
+  },
+  addButton: {
+    marginTop: 14,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+  },
+  addButtonDisabled: { opacity: 0.6 },
   primaryButton: {
     borderRadius: 8,
     paddingHorizontal: 14,

@@ -10,6 +10,8 @@ const { modelsInstalled } = require('../services/faceRecognitionService');
 const {
   assertEmployeeAtKioskBranch,
   listKioskAttendanceLogs,
+  createKioskEmployee,
+  suggestKioskEmployeeCode,
 } = require('../services/kioskSettingsService');
 const { AppError } = require('../utils/AppError');
 
@@ -110,11 +112,31 @@ const kioskFacePunch = asyncHandler(async (req, res) => {
 });
 
 const listKioskEmployees = asyncHandler(async (req, res) => {
-  const items = await listBranchEmployeeEnrollments(
-    req.kiosk.company_id,
-    req.kiosk.branch_id
-  );
-  return res.json({ success: true, data: { items } });
+  const [items, suggestedEmployeeCode] = await Promise.all([
+    listBranchEmployeeEnrollments(req.kiosk.company_id, req.kiosk.branch_id),
+    suggestKioskEmployeeCode(req.kiosk.company_id),
+  ]);
+  return res.json({
+    success: true,
+    data: {
+      items,
+      suggested_employee_code: suggestedEmployeeCode,
+    },
+  });
+});
+
+const createKioskEmployeeHandler = asyncHandler(async (req, res) => {
+  const employee = await createKioskEmployee(req.kiosk, req.body || {});
+  return res.status(201).json({
+    success: true,
+    message: `${employee.name} added. Take a face photo so they can punch at this tablet.`,
+    data: {
+      id: employee.id,
+      name: employee.name,
+      employee_code: employee.employee_code,
+      status: employee.status,
+    },
+  });
 });
 
 const enrollKioskEmployeeFace = asyncHandler(async (req, res) => {
@@ -178,6 +200,7 @@ module.exports = {
   kioskFaceRecognize,
   kioskFacePunch,
   listKioskEmployees,
+  createKioskEmployeeHandler,
   enrollKioskEmployeeFace,
   removeKioskEmployeeFace,
   getKioskAttendanceLogs,

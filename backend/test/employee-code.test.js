@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
   numericEmployeeCodeKey,
   buildEmployeeMapForDeviceCodes,
+  suggestNextEmployeeCode,
 } = require('../src/utils/employeeCode');
 
 test('numericEmployeeCodeKey strips leading zeros', () => {
@@ -26,6 +27,14 @@ test('device padded codes map to unpadded PunchPay employees', () => {
   assert.equal(map['04'].id, 2);
   assert.equal(map['040'].id, 3);
   assert.equal(map['001'], undefined);
+});
+
+test('suggestNextEmployeeCode follows numeric and prefixed sequences', () => {
+  assert.equal(suggestNextEmployeeCode([]), '1');
+  assert.equal(suggestNextEmployeeCode(['1', '2', '17']), '18');
+  assert.equal(suggestNextEmployeeCode(['01', '02']), '03');
+  assert.equal(suggestNextEmployeeCode(['EMP-001', 'EMP-014']), 'EMP-015');
+  assert.equal(suggestNextEmployeeCode(['EMP-001', '17']), '');
 });
 
 test('exact match wins over a padded sibling code', () => {

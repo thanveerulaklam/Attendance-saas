@@ -9,6 +9,7 @@ const {
   kioskFaceRecognize,
   kioskFacePunch,
   listKioskEmployees,
+  createKioskEmployeeHandler,
   enrollKioskEmployeeFace,
   removeKioskEmployeeFace,
   getKioskAttendanceLogs,
@@ -54,6 +55,12 @@ router.get(
   authenticateKiosk,
   authenticateKioskSettings,
   listKioskEmployees
+);
+router.post(
+  '/employees',
+  authenticateKiosk,
+  authenticateKioskSettings,
+  createKioskEmployeeHandler
 );
 router.post(
   '/employees/:employeeId/face',
