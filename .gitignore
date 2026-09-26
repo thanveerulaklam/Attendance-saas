@@ -20,6 +20,7 @@ admin-mobile/.expo/
 
 # Kiosk APK binary (place after EAS build; do not commit large binaries)
 backend/downloads/*.apk
+backend/downloads/kiosk-version.json
 employee-mobile/credentials/*.keystore
 employee-mobile/credentials/*.jks
 admin-mobile/credentials/*.keystore

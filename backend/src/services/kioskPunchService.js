@@ -11,7 +11,7 @@ const {
   getEmployeeTodaySummary,
 } = require('./mobilePunchService');
 const { computeFaceDescriptor, matchDescriptor } = require('./faceRecognitionService');
-const { listBranchFaceCandidates } = require('./faceEnrollmentService');
+const { listBranchFaceCandidates, getEnrollment } = require('./faceEnrollmentService');
 const { touchKioskSeen, normalizeDuplicatePunchSeconds, normalizeMinRecognizeSeconds } = require('./kioskDeviceService');
 
 function assertKioskPunchAllowed({ company, branch, employee, kioskBranchId }) {
@@ -69,101 +69,115 @@ async function recognizeKioskFace(kiosk, imageBuffer) {
   };
 }
 
-async function processKioskFacePunch(kiosk, imageBuffer, clientIp) {
+async function recordKioskAttendance({ kiosk, employee, clientIp, matchDistance = null }) {
   const companyId = kiosk.company_id;
   const branchId = kiosk.branch_id;
-  let employeeId = null;
+  const employeeId = employee.id;
+  const punchTime = new Date();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
+    const cooldownSeconds = normalizeDuplicatePunchSeconds(
+      kiosk.duplicate_punch_seconds,
+      Number(process.env.KIOSK_EMPLOYEE_COOLDOWN_SECONDS || 90)
+    );
+    const recentResult = await client.query(
+      `SELECT punch_time
+       FROM attendance_logs
+       WHERE company_id = $1
+         AND employee_id = $2
+         AND device_id = 'kiosk'
+         AND punch_time >= NOW() - ($3::int * INTERVAL '1 second')
+       ORDER BY punch_time DESC
+       LIMIT 1`,
+      [companyId, employeeId, cooldownSeconds]
+    );
+    if (recentResult.rowCount > 0) {
+      throw mobileReject(
+        'DUPLICATE_PUNCH',
+        `Attendance already marked. Wait ${cooldownSeconds} seconds before trying again.`,
+        409
+      );
+    }
+
+    const punchType = await inferNextPunchType(client, companyId, employeeId, punchTime);
+
+    const insertResult = await client.query(
+      `INSERT INTO attendance_logs (
+         company_id, employee_id, punch_time, punch_type, device_id, branch_id, punch_source
+       ) VALUES ($1, $2, $3, $4, 'kiosk', $5, 'kiosk')
+       ON CONFLICT (employee_id, punch_time) DO NOTHING
+       RETURNING id, employee_id, punch_time, punch_type, device_id, punch_source`,
+      [companyId, employeeId, punchTime.toISOString(), punchType, branchId]
+    );
+
+    if (insertResult.rowCount === 0) {
+      throw mobileReject(
+        'DUPLICATE_PUNCH',
+        'A punch already exists at this time. Please wait a moment.',
+        409
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const punch = insertResult.rows[0];
+    await touchKioskSeen(kiosk.id);
+
+    await recordPunchAttempt({
+      companyId,
+      employeeId,
+      branchId,
+      status: 'accepted',
+      rejectReason: null,
+      clientIp,
+    });
+
+    return {
+      punch,
+      employee: {
+        id: employee.id,
+        name: employee.name,
+        employee_code: employee.employee_code,
+      },
+      match_distance: matchDistance,
+      today: await getEmployeeTodaySummary(companyId, employeeId),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    await recordPunchAttempt({
+      companyId,
+      employeeId,
+      branchId,
+      status: 'rejected',
+      rejectReason: err.code || err.message,
+      clientIp,
+    });
+    const audited = err;
+    audited.kioskAudited = true;
+    throw audited;
+  } finally {
+    client.release();
+  }
+}
+
+async function processKioskFacePunch(kiosk, imageBuffer, clientIp) {
   try {
     const recognized = await recognizeKioskFace(kiosk, imageBuffer);
-    employeeId = recognized.employee.id;
-    const employee = await loadEmployeeForMobile(companyId, employeeId);
-
-    const punchTime = new Date();
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const cooldownSeconds = normalizeDuplicatePunchSeconds(
-        kiosk.duplicate_punch_seconds,
-        Number(process.env.KIOSK_EMPLOYEE_COOLDOWN_SECONDS || 90)
-      );
-      const recentResult = await client.query(
-        `SELECT punch_time
-         FROM attendance_logs
-         WHERE company_id = $1
-           AND employee_id = $2
-           AND device_id = 'kiosk'
-           AND punch_time >= NOW() - ($3::int * INTERVAL '1 second')
-         ORDER BY punch_time DESC
-         LIMIT 1`,
-        [companyId, employeeId, cooldownSeconds]
-      );
-      if (recentResult.rowCount > 0) {
-        throw mobileReject(
-          'DUPLICATE_PUNCH',
-          `Attendance already marked. Wait ${cooldownSeconds} seconds before trying again.`,
-          409
-        );
-      }
-
-      const punchType = await inferNextPunchType(client, companyId, employeeId, punchTime);
-
-      const insertResult = await client.query(
-        `INSERT INTO attendance_logs (
-           company_id, employee_id, punch_time, punch_type, device_id, branch_id, punch_source
-         ) VALUES ($1, $2, $3, $4, 'kiosk', $5, 'kiosk')
-         ON CONFLICT (employee_id, punch_time) DO NOTHING
-         RETURNING id, employee_id, punch_time, punch_type, device_id, punch_source`,
-        [companyId, employeeId, punchTime.toISOString(), punchType, branchId]
-      );
-
-      if (insertResult.rowCount === 0) {
-        throw mobileReject(
-          'DUPLICATE_PUNCH',
-          'A punch already exists at this time. Please wait a moment.',
-          409
-        );
-      }
-
-      await client.query('COMMIT');
-
-      const punch = insertResult.rows[0];
-      await touchKioskSeen(kiosk.id);
-
-      await recordPunchAttempt({
-        companyId,
-        employeeId,
-        branchId,
-        status: 'accepted',
-        rejectReason: null,
-        clientIp,
-      });
-
-      return {
-        punch,
-        employee: {
-          id: employee.id,
-          name: employee.name,
-          employee_code: employee.employee_code,
-        },
-        match_distance: recognized.match_distance,
-        today: await getEmployeeTodaySummary(companyId, employeeId),
-      };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    const employee = await loadEmployeeForMobile(kiosk.company_id, recognized.employee.id);
+    return await recordKioskAttendance({
+      kiosk,
+      employee,
+      clientIp,
+      matchDistance: recognized.match_distance,
+    });
   } catch (err) {
-    // Automatic kiosk scanning produces normal "no face" frames. Do not flood
-    // the audit table with those expected frames.
-    if (err.code !== 'FACE_NOT_DETECTED' && err.code !== 'FACE_NOT_RECOGNIZED') {
+    if (err.code !== 'FACE_NOT_DETECTED' && err.code !== 'FACE_NOT_RECOGNIZED' && !err.kioskAudited) {
       await recordPunchAttempt({
-        companyId,
-        employeeId,
-        branchId,
+        companyId: kiosk.company_id,
+        employeeId: null,
+        branchId: kiosk.branch_id,
         status: 'rejected',
         rejectReason: err.code || err.message,
         clientIp,
@@ -173,8 +187,31 @@ async function processKioskFacePunch(kiosk, imageBuffer, clientIp) {
   }
 }
 
+/**
+ * Tablet already matched the face. Store the punch only — same cost as a biometric push.
+ * The employee must already have a face enrolled at this kiosk branch.
+ */
+async function processKioskIdentifiedPunch(kiosk, employeeId, clientIp) {
+  const companyId = kiosk.company_id;
+  const branchId = kiosk.branch_id;
+  const company = await loadCompanyForMobile(companyId);
+  const branch = await loadBranchForMobile(companyId, branchId);
+  const employee = await loadEmployeeForMobile(companyId, employeeId);
+  assertKioskPunchAllowed({ company, branch, employee, kioskBranchId: branchId });
+  const enrollment = await getEnrollment(companyId, employeeId);
+  if (!enrollment) {
+    throw mobileReject(
+      'FACE_NOT_ENROLLED',
+      'Employee face is not enrolled at this branch.',
+      422
+    );
+  }
+  return recordKioskAttendance({ kiosk, employee, clientIp });
+}
+
 module.exports = {
   recognizeKioskFace,
   processKioskFacePunch,
+  processKioskIdentifiedPunch,
   assertKioskPunchAllowed,
 };

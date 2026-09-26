@@ -9,6 +9,7 @@ import KioskSettingsScreen from './src/screens/KioskSettingsScreen';
 import KioskSettingsUnlockScreen from './src/screens/KioskSettingsUnlockScreen';
 import { setActiveKioskSettingsPin } from './src/api/kiosk';
 import { useKioskKeepAwake } from './src/hooks/useKioskKeepAwake';
+import { useKioskAppUpdate } from './src/updates/useKioskAppUpdate';
 import { colors } from './src/theme';
 
 function Root() {
@@ -16,6 +17,7 @@ function Root() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<'attendance' | 'settings'>('attendance');
   const [settingsUnlocked, setSettingsUnlocked] = useState(false);
+  const appUpdate = useKioskAppUpdate(Boolean(token));
 
   if (loading) {
     return (
@@ -42,9 +44,10 @@ function Root() {
             duplicatePunchSeconds={session?.preferences?.duplicate_punch_seconds}
             minRecognizeSeconds={session?.preferences?.min_recognize_seconds}
             onPunchRecorded={refresh}
+            appUpdate={appUpdate}
           />
         ) : settingsUnlocked ? (
-          <KioskSettingsScreen />
+          <KioskSettingsScreen appUpdate={appUpdate} />
         ) : (
           <KioskSettingsUnlockScreen onUnlocked={() => setSettingsUnlocked(true)} />
         )}

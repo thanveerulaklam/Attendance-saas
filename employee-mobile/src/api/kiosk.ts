@@ -325,6 +325,43 @@ export async function updateKioskPreferences(payload: {
   return res.data;
 }
 
+export async function fetchKioskFaceGallery() {
+  const res = await kioskFetch<{
+    success: boolean;
+    data: {
+      match_threshold: number;
+      employees: Array<{
+        employee_id: number;
+        name: string;
+        employee_code?: string;
+        embedding: number[];
+      }>;
+    };
+  }>('/api/kiosk/face-gallery');
+  return {
+    threshold: Number(res.data.match_threshold) || 0.55,
+    employees: res.data.employees || [],
+  };
+}
+
+export async function markKioskPunch(employeeId: number) {
+  const res = await kioskFetch<{
+    success: boolean;
+    data: {
+      punch: {
+        id: number;
+        punch_time: string;
+        punch_type: string;
+      };
+      employee: { id: number; name: string; employee_code?: string };
+    };
+  }>('/api/kiosk/mark', {
+    method: 'POST',
+    body: JSON.stringify({ employee_id: employeeId }),
+  });
+  return res.data;
+}
+
 export async function recognizeKioskFace(imageBase64: string) {
   const res = await kioskFetch<{
     success: boolean;

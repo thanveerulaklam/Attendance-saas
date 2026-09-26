@@ -3,12 +3,22 @@ import {
   ActivityIndicator,
   Pressable,
   StyleSheet,
+  Platform,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { recognizeKioskFace, submitKioskPunch } from '../api/kiosk';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as ImageManipulator from 'expo-image-manipulator';
+import FaceDetection from '@react-native-ml-kit/face-detection';
+import { fetchKioskFaceGallery, markKioskPunch } from '../api/kiosk';
+import LocalFaceMatcher, {
+  type FaceGallery,
+  type LocalFaceMatcherHandle,
+} from '../face/LocalFaceMatcher';
+import KioskUpdateNotice from '../components/KioskUpdateNotice';
+import type { KioskAppUpdate } from '../updates/useKioskAppUpdate';
 import { colors } from '../theme';
 
 const SCAN_INTERVAL_MS = 1000;
@@ -21,6 +31,7 @@ type Props = {
   duplicatePunchSeconds?: number;
   minRecognizeSeconds?: number;
   onPunchRecorded?: () => void;
+  appUpdate?: KioskAppUpdate;
 };
 
 export default function KioskPunchScreen({
@@ -31,6 +42,7 @@ export default function KioskPunchScreen({
   duplicatePunchSeconds = 90,
   minRecognizeSeconds = 2,
   onPunchRecorded,
+  appUpdate,
 }: Props) {
   const insets = useSafeAreaInsets();
   const cameraRef = useRef<CameraView>(null);
@@ -45,6 +57,11 @@ export default function KioskPunchScreen({
   const processingRef = useRef(false);
   const pausedUntilRef = useRef(0);
   const holdRef = useRef<{ employeeId: number; name: string; startedAt: number } | null>(null);
+  const matcherRef = useRef<LocalFaceMatcherHandle>(null);
+  const matcherReadyRef = useRef(false);
+  const galleryRef = useRef<FaceGallery | null>(null);
+  const [gallery, setGallery] = useState<FaceGallery | null>(null);
+  const unknownUntilRef = useRef(0);
   const successPauseMs = Math.max(6000, Number(duplicatePunchSeconds || 90) * 1000);
   const requiredHoldMs = Math.max(0, Number(minRecognizeSeconds || 0) * 1000);
 
@@ -66,75 +83,133 @@ export default function KioskPunchScreen({
     }
 
     processingRef.current = true;
+    const tempUris: string[] = [];
     try {
-      setBusy(true);
-      const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
-        quality: 0.4,
-        skipProcessing: true,
-      });
-      if (!photo?.base64) {
-        throw new Error('Could not capture photo');
-      }
-
-      const recognized = await recognizeKioskFace(photo.base64);
-      const employeeId = Number(recognized.employee.id);
-      const now = Date.now();
-      const hold = holdRef.current;
-
-      if (!hold || hold.employeeId !== employeeId) {
-        holdRef.current = {
-          employeeId,
-          name: recognized.employee.name,
-          startedAt: now,
-        };
-        setHoldProgress(0);
+      if (!matcherReadyRef.current || !galleryRef.current?.employees.length) {
         setMessage(
-          requiredHoldMs > 0
-            ? `Hi ${recognized.employee.name} — hold still…`
-            : `Recognized ${recognized.employee.name}`
+          galleryRef.current && galleryRef.current.employees.length === 0
+            ? 'Open Settings and enroll employees first'
+            : 'Preparing face match on this tablet…'
         );
-        if (requiredHoldMs > 0) {
-          return;
-        }
-      }
-
-      const elapsed = now - (holdRef.current?.startedAt || now);
-      const progress = requiredHoldMs > 0 ? Math.min(1, elapsed / requiredHoldMs) : 1;
-      setHoldProgress(progress);
-
-      if (elapsed < requiredHoldMs) {
-        const remaining = Math.ceil((requiredHoldMs - elapsed) / 1000);
-        setMessage(`Hi ${recognized.employee.name} — hold still ${remaining}s`);
         return;
       }
 
-      setMessage('Marking attendance…');
-      const result = await submitKioskPunch(photo.base64);
-      resetHold();
-      pausedUntilRef.current = Date.now() + successPauseMs;
-      setSuccess(
-        `${result.employee.name} — ${result.punch.punch_type.toUpperCase()} at ${new Date(
-          result.punch.punch_time
-        ).toLocaleTimeString()}`
+      const photo = await cameraRef.current.takePictureAsync({
+        base64: false,
+        quality: 0.65,
+        skipProcessing: false,
+      });
+      if (!photo?.uri) return;
+      tempUris.push(photo.uri);
+      const resized = await ImageManipulator.manipulateAsync(
+        photo.uri,
+        [{ resize: { width: 800 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
-      setMessage('Attendance marked — next employee please');
-      onPunchRecorded?.();
+      if (resized.uri) tempUris.push(resized.uri);
+      if (!resized.base64) return;
+
+      let facePresent = false;
+      try {
+        const detectUri = Platform.OS === 'android'
+          ? await FileSystem.getContentUriAsync(resized.uri)
+          : resized.uri;
+        const faces = await FaceDetection.detect(detectUri, {
+          performanceMode: 'fast',
+          landmarkMode: 'none',
+          contourMode: 'none',
+          classificationMode: 'none',
+          minFaceSize: 0.15,
+        });
+        facePresent = Array.isArray(faces) && faces.length > 0;
+      } catch (detectErr) {
+        const detectMessage = detectErr instanceof Error ? detectErr.message : '';
+        if (detectMessage.includes("doesn't seem to be linked")) throw detectErr;
+        facePresent = false;
+      }
+
+      if (!facePresent) {
+        unknownUntilRef.current = 0;
+        if (holdRef.current) {
+          resetHold();
+          setMessage('Ready — look at the camera');
+        }
+        return;
+      }
+
+      const now = Date.now();
+      const hold = holdRef.current;
+      if (hold) {
+        const elapsed = now - hold.startedAt;
+        setHoldProgress(requiredHoldMs > 0 ? Math.min(1, elapsed / requiredHoldMs) : 1);
+        if (elapsed < requiredHoldMs) {
+          const remaining = Math.ceil((requiredHoldMs - elapsed) / 1000);
+          setMessage(`Hi ${hold.name} — hold still ${remaining}s`);
+          return;
+        }
+        setBusy(true);
+        setMessage('Marking attendance…');
+        const result = await markKioskPunch(hold.employeeId);
+        resetHold();
+        pausedUntilRef.current = Date.now() + successPauseMs;
+        setSuccess(
+          `${result.employee.name} — ${result.punch.punch_type.toUpperCase()} at ${new Date(
+            result.punch.punch_time
+          ).toLocaleTimeString()}`
+        );
+        setMessage('Attendance marked — next employee please');
+        onPunchRecorded?.();
+        return;
+      }
+
+      if (now < unknownUntilRef.current) return;
+
+      setBusy(true);
+      setMessage('Recognizing…');
+      const recognized = await matcherRef.current?.match(resized.base64);
+      if (!recognized) {
+        unknownUntilRef.current = Date.now() + 8000;
+        setMessage('Face not recognized — try again');
+        return;
+      }
+      if (requiredHoldMs <= 0) {
+        setMessage('Marking attendance…');
+        const result = await markKioskPunch(recognized.employeeId);
+        resetHold();
+        pausedUntilRef.current = Date.now() + successPauseMs;
+        setSuccess(
+          `${result.employee.name} — ${result.punch.punch_type.toUpperCase()} at ${new Date(
+            result.punch.punch_time
+          ).toLocaleTimeString()}`
+        );
+        setMessage('Attendance marked — next employee please');
+        onPunchRecorded?.();
+        return;
+      }
+      holdRef.current = {
+        employeeId: recognized.employeeId,
+        name: recognized.name,
+        startedAt: now,
+      };
+      setHoldProgress(0);
+      setMessage(`Hi ${recognized.name} — hold still…`);
     } catch (err) {
       const e = err as Error & { code?: string };
+      resetHold();
       if (e.code === 'FACE_NOT_DETECTED' || e.code === 'FACE_NOT_RECOGNIZED') {
-        resetHold();
-        setMessage('Ready — look at the camera');
+        unknownUntilRef.current = Date.now() + 8000;
+        setMessage('Face not recognized — try again');
       } else if (e.code === 'DUPLICATE_PUNCH') {
-        resetHold();
         setMessage('Attendance already marked — next employee please');
         pausedUntilRef.current = Date.now() + successPauseMs;
       } else {
-        resetHold();
         setMessage(e.message || 'Face not recognized');
         pausedUntilRef.current = Date.now() + 2500;
       }
     } finally {
+      for (const uri of tempUris) {
+        FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
+      }
       setBusy(false);
       processingRef.current = false;
     }
@@ -147,6 +222,30 @@ export default function KioskPunchScreen({
     resetHold,
     successPauseMs,
   ]);
+
+  useEffect(() => {
+    if (!active) return undefined;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const next = await fetchKioskFaceGallery();
+        if (cancelled) return;
+        galleryRef.current = next;
+        setGallery(next);
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Could not load enrolled faces';
+          setMessage(message);
+        }
+      }
+    };
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [active, enrolledCount]);
 
   useEffect(() => {
     if (enrolledCount <= 0) {
@@ -192,6 +291,18 @@ export default function KioskPunchScreen({
 
   return (
     <View style={styles.container}>
+      <LocalFaceMatcher
+        ref={matcherRef}
+        gallery={gallery}
+        onReady={() => {
+          matcherReadyRef.current = true;
+          setMessage('Ready — look at the camera');
+        }}
+        onError={(message) => {
+          matcherReadyRef.current = false;
+          setMessage(message);
+        }}
+      />
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFill}
@@ -215,6 +326,7 @@ export default function KioskPunchScreen({
             <View style={[styles.progressFill, { width: `${Math.round(holdProgress * 100)}%` }]} />
           </View>
         ) : null}
+        {appUpdate ? <KioskUpdateNotice update={appUpdate} variant="banner" /> : null}
         <Text style={success ? styles.success : styles.status}>{message}</Text>
         {success ? <Text style={styles.success}>{success}</Text> : null}
       </View>

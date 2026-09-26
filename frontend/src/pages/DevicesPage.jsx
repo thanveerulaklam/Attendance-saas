@@ -764,6 +764,11 @@ export default function DevicesPage() {
                 </li>
                 <li>Start attendance.</li>
               </ol>
+              <p className="mt-3 text-[11px] leading-5 text-slate-600">
+                If this tablet already has the app, install the download again over it.
+                Android replaces the old app and keeps the kiosk code. Do not uninstall first.
+                After this update, later versions install from Settings on the tablet.
+              </p>
               <p className="mt-3 text-[11px] text-slate-500">
                 <Link to="/mobile-punch-log" className="font-medium text-indigo-600 underline">
                   View punch log

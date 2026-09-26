@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -44,6 +45,7 @@ if (process.env.NODE_ENV !== 'production') {
 // Rate limiting (skip /api/health for load balancer probes)
 app.use('/api/', (req, res, next) => {
   if (req.path === '/health' || req.path.startsWith('/health/')) return next();
+  if (req.path.startsWith('/kiosk-assets/')) return next();
   apiLimiter(req, res, next);
 });
 
@@ -135,6 +137,35 @@ app.use('/api/shift-rotation', shiftRotationRouter);
 app.use('/api/holidays', holidaysRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/employee-app', employeeAppRouter);
+const FACE_MODEL_FILES = new Set([
+  'ssd_mobilenetv1_model-weights_manifest.json',
+  'ssd_mobilenetv1_model.bin',
+  'face_landmark_68_model-weights_manifest.json',
+  'face_landmark_68_model.bin',
+  'face_recognition_model-weights_manifest.json',
+  'face_recognition_model.bin',
+]);
+const faceModelDir = path.join(__dirname, '../models/face-api');
+const faceApiScript = path.join(
+  __dirname,
+  '../node_modules/@vladmandic/face-api/dist/face-api.js'
+);
+
+app.get('/api/kiosk-assets/face-api.js', (_req, res) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=604800');
+  res.sendFile(faceApiScript);
+});
+app.get('/api/kiosk-assets/models/:name', (req, res) => {
+  const name = req.params.name;
+  if (!FACE_MODEL_FILES.has(name)) {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=2592000');
+  return res.sendFile(path.join(faceModelDir, name));
+});
+
 app.use('/api/kiosk', kioskRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/audit', auditRouter);

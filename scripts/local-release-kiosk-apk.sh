@@ -129,6 +129,21 @@ p.write_text("\n".join(fixed_lines) + "\n")
 print("android/app/build.gradle signing config ready")
 PY
 
+MANIFEST="$MOBILE/android/app/src/main/AndroidManifest.xml"
+if [[ -f "$MANIFEST" ]] && ! grep -q REQUEST_INSTALL_PACKAGES "$MANIFEST"; then
+  python3 - "$MANIFEST" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+text = p.read_text()
+needle = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+insert = needle + '\n  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>'
+if needle in text and "REQUEST_INSTALL_PACKAGES" not in text:
+    p.write_text(text.replace(needle, insert, 1))
+    print("Added REQUEST_INSTALL_PACKAGES")
+PY
+fi
+
 echo "==> Building release APK"
 cd android
 ./gradlew assembleRelease --no-daemon
@@ -140,5 +155,15 @@ if [[ -z "$APK_SRC" ]]; then
 fi
 
 cp "$APK_SRC" "$DOWNLOADS/PunchPay-Kiosk.apk"
+node - "$MOBILE/app.json" "$DOWNLOADS/kiosk-version.json" <<'JS'
+const fs = require('fs');
+const app = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const meta = {
+  version: app.expo.version,
+  versionCode: Number(app.expo.android.versionCode),
+};
+fs.writeFileSync(process.argv[3], `${JSON.stringify(meta, null, 2)}\n`);
+console.log(`Wrote ${process.argv[3]}`, meta);
+JS
 echo "==> Published $DOWNLOADS/PunchPay-Kiosk.apk"
 ls -lh "$DOWNLOADS/PunchPay-Kiosk.apk"

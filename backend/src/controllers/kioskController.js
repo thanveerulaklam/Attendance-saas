@@ -1,12 +1,16 @@
 const { resolveKioskFromToken, preferencesFromKiosk, updateKioskPreferences } = require('../services/kioskDeviceService');
-const { processKioskFacePunch, recognizeKioskFace } = require('../services/kioskPunchService');
+const {
+  processKioskFacePunch,
+  processKioskIdentifiedPunch,
+  recognizeKioskFace,
+} = require('../services/kioskPunchService');
 const {
   listBranchFaceCandidates,
   listBranchEmployeeEnrollments,
   enrollEmployeeFace,
   removeEmployeeFace,
 } = require('../services/faceEnrollmentService');
-const { modelsInstalled } = require('../services/faceRecognitionService');
+const { modelsInstalled, MATCH_THRESHOLD } = require('../services/faceRecognitionService');
 const {
   assertEmployeeAtKioskBranch,
   listKioskAttendanceLogs,
@@ -95,6 +99,34 @@ const kioskFaceRecognize = asyncHandler(async (req, res) => {
   }
 
   const result = await recognizeKioskFace(req.kiosk, imageBuffer);
+  return res.json({ success: true, data: result });
+});
+
+const kioskFaceGallery = asyncHandler(async (req, res) => {
+  const rows = await listBranchFaceCandidates(req.kiosk.company_id, req.kiosk.branch_id);
+  return res.json({
+    success: true,
+    data: {
+      match_threshold: MATCH_THRESHOLD,
+      employees: rows.map((row) => ({
+        employee_id: row.employee_id,
+        name: row.employee_name,
+        employee_code: row.employee_code,
+        embedding: row.embedding,
+      })),
+    },
+  });
+});
+
+const kioskMarkPunch = asyncHandler(async (req, res) => {
+  const employeeId = Number(req.body?.employee_id);
+  if (!employeeId) {
+    return res.status(400).json({
+      success: false,
+      message: 'employee_id is required',
+    });
+  }
+  const result = await processKioskIdentifiedPunch(req.kiosk, employeeId, req.ip);
   return res.json({ success: true, data: result });
 });
 
@@ -198,6 +230,8 @@ module.exports = {
   getKioskPreferences,
   updateKioskPreferencesHandler,
   kioskFaceRecognize,
+  kioskFaceGallery,
+  kioskMarkPunch,
   kioskFacePunch,
   listKioskEmployees,
   createKioskEmployeeHandler,

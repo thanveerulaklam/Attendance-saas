@@ -7,6 +7,8 @@ const {
   getKioskPreferences,
   updateKioskPreferencesHandler,
   kioskFaceRecognize,
+  kioskFaceGallery,
+  kioskMarkPunch,
   kioskFacePunch,
   listKioskEmployees,
   createKioskEmployeeHandler,
@@ -18,6 +20,10 @@ const {
   authenticateKiosk,
   authenticateKioskSettings,
 } = require('../middleware/kioskAuth');
+const {
+  getKioskAppRelease,
+  downloadKioskAppRelease,
+} = require('../controllers/kioskApkController');
 
 const router = express.Router();
 
@@ -42,6 +48,8 @@ const kioskPunchLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+router.get('/app-release', authenticateKiosk, getKioskAppRelease);
+router.get('/app-release/apk', authenticateKiosk, downloadKioskAppRelease);
 router.post('/activate', activateKiosk);
 router.get('/status', authenticateKiosk, getKioskStatus);
 router.post(
@@ -93,12 +101,19 @@ router.patch(
   authenticateKioskSettings,
   updateKioskPreferencesHandler
 );
+router.get('/face-gallery', authenticateKiosk, kioskFaceGallery);
 router.post(
   '/recognize',
   authenticateKiosk,
   kioskPunchLimiter,
   upload.single('image'),
   kioskFaceRecognize
+);
+router.post(
+  '/mark',
+  authenticateKiosk,
+  kioskPunchLimiter,
+  kioskMarkPunch
 );
 router.post(
   '/punch',

@@ -24,6 +24,8 @@ import {
 } from '../api/kiosk';
 import { useKiosk } from '../context/KioskContext';
 import { colors } from '../theme';
+import KioskUpdateNotice from '../components/KioskUpdateNotice';
+import type { KioskAppUpdate } from '../updates/useKioskAppUpdate';
 
 type Section = 'employees' | 'logs' | 'preferences';
 type Range = 'week' | 'month' | 'custom';
@@ -70,7 +72,7 @@ function rangeDates(range: Range, customFrom: string, customTo: string) {
   return { from: from.toISOString(), to: now.toISOString() };
 }
 
-export default function KioskSettingsScreen() {
+export default function KioskSettingsScreen({ appUpdate }: { appUpdate: KioskAppUpdate }) {
   const { session, refresh, signOut } = useKiosk();
   const cameraRef = useRef<CameraView>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -351,6 +353,8 @@ export default function KioskSettingsScreen() {
           {session?.company.name} · {session?.branch.name}
         </Text>
       </View>
+
+      <KioskUpdateNotice update={appUpdate} variant="card" />
 
       <View style={styles.segment}>
         {(
