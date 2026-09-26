@@ -22,7 +22,7 @@ internal object FaceEngine {
   private var interpreter: Interpreter? = null
   private var gpuDelegate: GpuDelegate? = null
   private var inputBuffer: ByteBuffer? = null
-  private var output = FloatArray(0)
+  private var output: Array<FloatArray> = arrayOf(FloatArray(0))
   private var layoutNhwc = true
   private var people: List<Person> = emptyList()
   private val timings = linkedMapOf<String, Long>()
@@ -47,8 +47,8 @@ internal object FaceEngine {
       val input = chosen.first.getInputTensor(0)
       val bytes = input.numBytes()
       inputBuffer = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
-      dimension = chosen.first.getOutputTensor(0).numElements()
-      output = FloatArray(dimension)
+      output = allocateOutput(chosen.first)
+      dimension = output[0].size
       if (dimension != contract.getInt("embeddingDimension")) {
         throw IllegalStateException("Face model dimension does not match its contract")
       }
@@ -109,11 +109,12 @@ internal object FaceEngine {
     buffer.rewind()
     synchronized(lock) {
       current.run(buffer, output)
+      val values = output[0]
+      for (value in values) {
+        if (!value.isFinite()) return null
+      }
+      return EmbeddingMath.normalize(values.copyOf())
     }
-    for (value in output) {
-      if (!value.isFinite()) return null
-    }
-    return EmbeddingMath.normalize(output.copyOf())
   }
 
   fun match(embedding: FloatArray): Match? {
@@ -217,9 +218,17 @@ internal object FaceEngine {
     }
   }
 
+  private fun allocateOutput(interpreter: Interpreter): Array<FloatArray> {
+    val shape = interpreter.getOutputTensor(0).shape()
+    check(shape.size == 2 && shape[0] == 1 && shape[1] > 0) {
+      "Face model output must be [1, dimension], got ${shape.contentToString()}"
+    }
+    return Array(shape[0]) { FloatArray(shape[1]) }
+  }
+
   private fun benchmark(interpreter: Interpreter): Long {
     val input = ByteBuffer.allocateDirect(interpreter.getInputTensor(0).numBytes()).order(ByteOrder.nativeOrder())
-    val out = FloatArray(interpreter.getOutputTensor(0).numElements())
+    val out = allocateOutput(interpreter)
     interpreter.run(input, out)
     val started = System.nanoTime()
     interpreter.run(input, out)
