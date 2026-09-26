@@ -81,44 +81,32 @@ function bestPerson(desc) {
   }
   return best;
 }
-function expandBox(box, imgW, imgH) {
-  var padX = box.width * 0.35;
-  var padY = box.height * 0.45;
-  var x = Math.max(0, box.x - padX);
-  var y = Math.max(0, box.y - padY);
-  var width = Math.min(imgW - x, box.width + padX * 2);
-  var height = Math.min(imgH - y, box.height + padY * 2);
-  if (width < 20 || height < 20) return null;
-  return { x: x, y: y, width: width, height: height };
+function photoCanvas(img) {
+  var width = img.naturalWidth || img.width;
+  var height = img.naturalHeight || img.height;
+  if (!width || !height) return null;
+  var maxEdge = 512;
+  var scale = Math.min(1, maxEdge / Math.max(width, height));
+  var canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+  return canvas;
 }
-function descriptorFromBox(img, box) {
-  var expanded = expandBox(box, img.width, img.height);
-  if (!expanded) return Promise.reject(new Error('box'));
-  var Rect = faceapi.Rect || faceapi.Box;
-  var rect = new Rect(expanded.x, expanded.y, expanded.width, expanded.height);
-  return faceapi.extractFaces(img, [rect]).then(function (crops) {
-    if (!crops || !crops[0]) throw new Error('no crop');
-    return faceapi.detectFaceLandmarks(crops[0]);
-  }).then(function (landmarks) {
-    var aligned = landmarks && landmarks.align ? landmarks.align() : landmarks;
-    return faceapi.computeFaceDescriptor(aligned);
+function matchFace(img) {
+  return faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor().then(function (result) {
+    return result ? result.descriptor : null;
   });
 }
-function descriptorOnFace(img) {
-  return faceapi.detectFaceLandmarks(img).then(function (landmarks) {
-    var aligned = landmarks && landmarks.align ? landmarks.align() : img;
-    return faceapi.computeFaceDescriptor(aligned);
-  });
-}
-window.__match = function (requestId, imageBase64, box, faceCrop) {
+window.__match = function (requestId, imageBase64) {
   var img = new Image();
   img.onload = function () {
-    var job = faceCrop
-      ? descriptorOnFace(img)
-      : ((box && box.width > 20) ? descriptorFromBox(img, box) : descriptorOnFace(img));
-    job.catch(function () {
-      return descriptorOnFace(img);
-    }).then(function (desc) {
+    var canvas = photoCanvas(img);
+    if (!canvas) {
+      post({ type: 'match', requestId: requestId, match: null });
+      return;
+    }
+    matchFace(canvas).then(function (desc) {
       post({ type: 'match', requestId: requestId, match: bestPerson(desc) });
     }).catch(function (err) {
       post({ type: 'match', requestId: requestId, error: String(err && err.message || err) });
@@ -146,9 +134,12 @@ function boot() {
     var canvas = document.createElement('canvas');
     canvas.width = 160;
     canvas.height = 160;
-    return faceapi.detectFaceLandmarks(canvas).then(function (landmarks) {
-      return faceapi.computeFaceDescriptor(landmarks.align ? landmarks.align() : canvas);
-    }).catch(function () { return null; });
+    canvas.getContext('2d').fillRect(0, 0, 160, 160);
+    return faceapi.detectSingleFace(canvas).catch(function () { return null; }).then(function () {
+      return faceapi.detectFaceLandmarks(canvas).catch(function () { return null; });
+    }).then(function () {
+      return faceapi.computeFaceDescriptor(canvas).catch(function () { return null; });
+    });
   }).then(function () {
     post({ type: 'ready' });
   }).catch(function (err) {

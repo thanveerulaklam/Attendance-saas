@@ -2,7 +2,7 @@
   "expo": {
     "name": "PunchPay Kiosk",
     "slug": "punchpay-kiosk",
-    "version": "1.0.6",
+    "version": "1.0.7",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -17,7 +17,7 @@
     },
     "android": {
       "package": "com.punchpay.kiosk",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "backgroundColor": "#D4A843",
         "foregroundImage": "./assets/android-icon-foreground.png",
