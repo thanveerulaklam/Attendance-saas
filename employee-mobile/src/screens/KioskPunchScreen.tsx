@@ -111,22 +111,14 @@ export default function KioskPunchScreen({
       }
 
       const photo = await cameraRef.current.takePictureAsync({
-        base64: true,
+        base64: false,
         quality: 0.5,
+        shutterSound: false,
         skipProcessing: false,
       });
-      if (!photo?.uri || !photo.base64) return;
+      if (!photo?.uri) return;
       tempUris.push(photo.uri);
-      const longEdge = Math.max(photo.width || 0, photo.height || 0);
-      const sized = longEdge > 1000
-        ? await ImageManipulator.manipulateAsync(
-          photo.uri,
-          [{ resize: { width: 640 } }],
-          { compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-        )
-        : photo;
-      if (sized.uri && sized.uri !== photo.uri) tempUris.push(sized.uri);
-      if (!sized.base64) return;
+      const sized = photo;
 
       let facePresent = false;
       let faceBox: { x: number; y: number; width: number; height: number } | undefined;
@@ -203,7 +195,24 @@ export default function KioskPunchScreen({
       setMessage('Recognizing…');
       const seenAt = Date.now();
       const watch = faceWatchRef.current;
-      const recognized = await matcherRef.current?.match(sized.base64, faceBox);
+      const imageWidth = photo.width || 0;
+      const imageHeight = photo.height || 0;
+      const padX = (faceBox?.width || 0) * 0.45;
+      const padY = (faceBox?.height || 0) * 0.55;
+      const originX = Math.max(0, Math.round((faceBox?.x || 0) - padX));
+      const originY = Math.max(0, Math.round((faceBox?.y || 0) - padY));
+      const cropWidth = Math.max(1, Math.min(imageWidth - originX, Math.round((faceBox?.width || imageWidth) + padX * 2)));
+      const cropHeight = Math.max(1, Math.min(imageHeight - originY, Math.round((faceBox?.height || imageHeight) + padY * 2)));
+      const facePhoto = imageWidth > 0 && imageHeight > 0 && faceBox
+        ? await ImageManipulator.manipulateAsync(
+          photo.uri,
+          [{ crop: { originX, originY, width: cropWidth, height: cropHeight } }],
+          { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        )
+        : null;
+      if (facePhoto?.uri) tempUris.push(facePhoto.uri);
+      if (!facePhoto?.base64) return;
+      const recognized = await matcherRef.current?.match(facePhoto.base64, undefined, true);
       if (faceWatchRef.current !== watch) return;
       if (!recognized) {
         unknownUntilRef.current = Date.now() + 8000;

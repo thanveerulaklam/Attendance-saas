@@ -23,7 +23,7 @@ export type FaceGallery = {
 export type FaceBox = { x: number; y: number; width: number; height: number };
 
 export type LocalFaceMatcherHandle = {
-  match: (imageBase64: string, faceBox?: FaceBox) => Promise<LocalFaceMatch | null>;
+  match: (imageBase64: string, faceBox?: FaceBox, faceCrop?: boolean) => Promise<LocalFaceMatch | null>;
 };
 
 type Props = {
@@ -104,30 +104,22 @@ function descriptorFromBox(img, box) {
     return faceapi.computeFaceDescriptor(aligned);
   });
 }
-function descriptorFull(img) {
-  return faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
-    .withFaceLandmarks()
-    .withFaceDescriptor()
-    .then(function (det) { return det ? det.descriptor : null; });
+function descriptorOnFace(img) {
+  return faceapi.detectFaceLandmarks(img).then(function (landmarks) {
+    var aligned = landmarks && landmarks.align ? landmarks.align() : img;
+    return faceapi.computeFaceDescriptor(aligned);
+  });
 }
-window.__match = function (requestId, imageBase64, box) {
+window.__match = function (requestId, imageBase64, box, faceCrop) {
   var img = new Image();
   img.onload = function () {
-    var fast = (box && box.width > 20)
-      ? descriptorFromBox(img, box)
-      : Promise.reject(new Error('no box'));
-    fast.then(function (desc) {
-      var hit = bestPerson(desc);
-      if (hit) {
-        post({ type: 'match', requestId: requestId, match: hit });
-        return 'done';
-      }
-      return descriptorFull(img);
-    }).catch(function () {
-      return descriptorFull(img);
+    var job = faceCrop
+      ? descriptorOnFace(img)
+      : ((box && box.width > 20) ? descriptorFromBox(img, box) : descriptorOnFace(img));
+    job.catch(function () {
+      return descriptorOnFace(img);
     }).then(function (desc) {
-      if (desc === 'done') return;
-      post({ type: 'match', requestId: requestId, match: desc ? bestPerson(desc) : null });
+      post({ type: 'match', requestId: requestId, match: bestPerson(desc) });
     }).catch(function (err) {
       post({ type: 'match', requestId: requestId, error: String(err && err.message || err) });
     });
@@ -196,7 +188,7 @@ const LocalFaceMatcher = forwardRef<LocalFaceMatcherHandle, Props>(function Loca
   }, [gallery, ready]);
 
   useImperativeHandle(ref, () => ({
-    match(imageBase64: string, faceBox?: FaceBox) {
+    match(imageBase64: string, faceBox?: FaceBox, faceCrop = false) {
       return new Promise((resolve, reject) => {
         if (!ready || !webRef.current) {
           reject(new Error('Face matching is still loading'));
@@ -220,7 +212,7 @@ const LocalFaceMatcher = forwardRef<LocalFaceMatcherHandle, Props>(function Loca
           },
         });
         webRef.current.injectJavaScript(
-          `window.__match(${requestId}, ${JSON.stringify(imageBase64)}, ${JSON.stringify(faceBox || null)}); true;`
+          `window.__match(${requestId}, ${JSON.stringify(imageBase64)}, ${JSON.stringify(faceBox || null)}, ${faceCrop ? 'true' : 'false'}); true;`
         );
       });
     },
