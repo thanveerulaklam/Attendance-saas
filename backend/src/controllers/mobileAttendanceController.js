@@ -239,6 +239,7 @@ async function getMobilePunchAttempts(req, res, next) {
       employeeId: req.query.employee_id != null ? Number(req.query.employee_id) : null,
       dateFrom: req.query.date_from,
       dateTo: req.query.date_to,
+      punchSource: req.query.punch_source,
       allowedBranchIds: req.allowedBranchIds,
     });
 

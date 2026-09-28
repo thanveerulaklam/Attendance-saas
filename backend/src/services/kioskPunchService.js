@@ -132,6 +132,7 @@ async function recordKioskAttendance({ kiosk, employee, clientIp, matchDistance 
       status: 'accepted',
       rejectReason: null,
       clientIp,
+      punchSource: 'kiosk',
     });
 
     return {
@@ -153,6 +154,7 @@ async function recordKioskAttendance({ kiosk, employee, clientIp, matchDistance 
       status: 'rejected',
       rejectReason: err.code || err.message,
       clientIp,
+      punchSource: 'kiosk',
     });
     const audited = err;
     audited.kioskAudited = true;
@@ -181,6 +183,7 @@ async function processKioskFacePunch(kiosk, imageBuffer, clientIp) {
         status: 'rejected',
         rejectReason: err.code || err.message,
         clientIp,
+        punchSource: 'kiosk',
       });
     }
     throw err;

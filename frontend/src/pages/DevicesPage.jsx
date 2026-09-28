@@ -47,6 +47,7 @@ export default function DevicesPage() {
   const [deleteStep, setDeleteStep] = useState(1);
   const [deleteTypedName, setDeleteTypedName] = useState('');
   const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
+  const [fieldAttendanceEnabled, setFieldAttendanceEnabled] = useState(false);
   const [mobileSaving, setMobileSaving] = useState(false);
   const [mobileToast, setMobileToast] = useState(null);
   const [kioskBusyBranchId, setKioskBusyBranchId] = useState(null);
@@ -95,7 +96,10 @@ export default function DevicesPage() {
   useEffect(() => {
     authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
       .then((res) => (res.ok ? res.json() : null))
-      .then((json) => setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled)))
+      .then((json) => {
+        setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled));
+        setFieldAttendanceEnabled(Boolean(json?.data?.field_attendance_enabled));
+      })
       .catch(() => setMobileAttendanceEnabled(false));
   }, []);
 
@@ -704,6 +708,55 @@ export default function DevicesPage() {
               {mobileToast.message}
             </div>
           )}
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={fieldAttendanceEnabled}
+              onChange={async (e) => {
+                const nextEnabled = e.target.checked;
+                if (!nextEnabled && fieldAttendanceEnabled) {
+                  const ok = window.confirm(
+                    'Turn off field attendance? Employees will no longer punch from PunchPay Field.'
+                  );
+                  if (!ok) return;
+                }
+                try {
+                  setMobileSaving(true);
+                  setMobileToast(null);
+                  const res = await authFetch('/api/company/field-settings', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ field_attendance_enabled: nextEnabled }),
+                  });
+                  const json = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(json.message || 'Failed to save field settings');
+                  setFieldAttendanceEnabled(Boolean(json.data?.field_attendance_enabled));
+                  setMobileToast({
+                    type: 'success',
+                    message: nextEnabled ? 'Field attendance enabled.' : 'Field attendance disabled.',
+                  });
+                } catch (err) {
+                  setMobileToast({ type: 'error', message: err.message || 'Failed to save' });
+                } finally {
+                  setMobileSaving(false);
+                }
+              }}
+              disabled={mobileSaving}
+            />
+            <span>
+              <span className="font-medium">Enable field attendance</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                PunchPay Field app for staff who punch at assigned GPS sites with an on-device selfie. Separate from office QR / tablet.
+              </span>
+            </span>
+          </label>
+          <p className="mt-2 text-[11px] text-slate-500">
+            <Link to="/field-sites" className="font-medium text-indigo-600 underline">
+              Manage field sites
+            </Link>
+            {' · then assign sites on each employee.'}
+          </p>
           <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
             <input
               type="checkbox"

@@ -26,6 +26,7 @@ const salaryPaymentsRouter = require('./routes/salaryPayments');
 const demoEnquiriesRouter = require('./routes/demoEnquiries');
 const admsRouter = require('./routes/adms');
 const employeeAppRouter = require('./routes/employeeApp');
+const fieldAppRouter = require('./routes/fieldApp');
 const kioskRouter = require('./routes/kiosk');
 
 const app = express();
@@ -137,6 +138,7 @@ app.use('/api/shift-rotation', shiftRotationRouter);
 app.use('/api/holidays', holidaysRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/employee-app', employeeAppRouter);
+app.use('/api/field-app', fieldAppRouter);
 const FACE_MODEL_FILES = new Set([
   'ssd_mobilenetv1_model-weights_manifest.json',
   'ssd_mobilenetv1_model.bin',

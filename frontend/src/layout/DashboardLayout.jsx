@@ -15,6 +15,7 @@ const baseNavItems = [
   { to: '/employees', label: 'Employee' },
   { to: '/shifts', label: 'Shift' },
   { to: '/devices', label: 'Device' },
+  { to: '/field-sites', label: 'Field sites' },
   { to: '/settings/company', label: 'Company' },
 ];
 

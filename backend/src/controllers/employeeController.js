@@ -2,6 +2,7 @@ const employeeService = require('../services/employeeService');
 const employeeAppService = require('../services/employeeAppService');
 const faceEnrollmentService = require('../services/faceEnrollmentService');
 const employeeBulkImportService = require('../services/employeeBulkImportService');
+const { listAssignedFieldSiteIds } = require('../services/fieldSiteService');
 const { buildEmployeeImportTemplateBuffer } = require('../services/employeeImportTemplate');
 const auditService = require('../services/auditService');
 const { AppError } = require('../utils/AppError');
@@ -171,10 +172,11 @@ const getEmployeeById = asyncHandler(async (req, res) => {
   const id = Number(req.params.id);
 
   const employee = await employeeService.getEmployeeById(companyId, id, branchContext(req));
+  const field_site_ids = await listAssignedFieldSiteIds(companyId, id);
 
   return res.status(200).json({
     success: true,
-    data: employee,
+    data: { ...employee, field_site_ids },
   });
 });
 

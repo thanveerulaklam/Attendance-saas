@@ -16,7 +16,11 @@ const REJECT_LABELS = {
   EMPLOYEE_INACTIVE: 'Employee inactive',
   BRANCH_MISMATCH: 'Wrong branch',
   RATE_LIMITED: 'Rate limited',
-  GEOFENCE_NOT_CONFIGURED: 'Geofence not set',
+  FACE_MISMATCH: 'Face mismatch',
+  OUTSIDE_SITE: 'Outside field site',
+  NOT_ENROLLED: 'Face not enrolled',
+  NO_SITES: 'No field sites assigned',
+  FIELD_DISABLED: 'Field attendance disabled',
 };
 
 function formatWhen(iso) {
@@ -40,6 +44,7 @@ export default function MobilePunchAttemptsPage() {
   const [error, setError] = useState(null);
   const [branches, setBranches] = useState([]);
   const [status, setStatus] = useState('');
+  const [punchSource, setPunchSource] = useState('');
   const [branchId, setBranchId] = useState('');
   const [dateFrom, setDateFrom] = useState(() => daysAgoIso(7).slice(0, 10));
   const [offset, setOffset] = useState(0);
@@ -69,6 +74,7 @@ export default function MobilePunchAttemptsPage() {
         offset: String(offset),
       });
       if (status) params.set('status', status);
+      if (punchSource) params.set('punch_source', punchSource);
       if (branchId) params.set('branch_id', branchId);
       if (dateFrom) params.set('date_from', new Date(`${dateFrom}T00:00:00`).toISOString());
 
@@ -85,7 +91,7 @@ export default function MobilePunchAttemptsPage() {
     } finally {
       setLoading(false);
     }
-  }, [status, branchId, dateFrom, offset]);
+  }, [status, punchSource, branchId, dateFrom, offset]);
 
   useEffect(() => {
     load();
@@ -106,7 +112,7 @@ export default function MobilePunchAttemptsPage() {
         </p>
         <h1 className="text-lg font-semibold text-slate-900">Mobile punch log</h1>
         <p className="mt-0.5 text-xs text-slate-500">
-          Accepted and rejected mobile punch attempts (QR + GPS). Use this to debug geofence or QR issues.
+          Accepted and rejected punch attempts from office QR, kiosk, and PunchPay Field.
         </p>
       </header>
 
@@ -137,6 +143,22 @@ export default function MobilePunchAttemptsPage() {
               <option value="">All</option>
               <option value="accepted">Accepted</option>
               <option value="rejected">Rejected</option>
+            </select>
+          </label>
+          <label className="text-xs text-slate-600">
+            Source
+            <select
+              value={punchSource}
+              onChange={(e) => {
+                setOffset(0);
+                setPunchSource(e.target.value);
+              }}
+              className="mt-1 block rounded-lg border border-slate-200 px-3 py-1.5 text-sm"
+            >
+              <option value="">All</option>
+              <option value="field">Field</option>
+              <option value="mobile">Office QR</option>
+              <option value="kiosk">Kiosk</option>
             </select>
           </label>
           <label className="text-xs text-slate-600">
@@ -179,7 +201,8 @@ export default function MobilePunchAttemptsPage() {
               <tr className="border-b border-slate-100 text-slate-500">
                 <th className="py-2 pr-3 font-medium">Time</th>
                 <th className="py-2 pr-3 font-medium">Employee</th>
-                <th className="py-2 pr-3 font-medium">Branch</th>
+                <th className="py-2 pr-3 font-medium">Source</th>
+                <th className="py-2 pr-3 font-medium">Site / branch</th>
                 <th className="py-2 pr-3 font-medium">Status</th>
                 <th className="py-2 pr-3 font-medium">Reason</th>
                 <th className="py-2 pr-3 font-medium">GPS</th>
@@ -188,13 +211,13 @@ export default function MobilePunchAttemptsPage() {
             <tbody>
               {loading && items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     Loading…
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     No punch attempts in this period.
                   </td>
                 </tr>
@@ -211,7 +234,19 @@ export default function MobilePunchAttemptsPage() {
                       ) : null}
                     </td>
                     <td className="py-2 pr-3 text-slate-700">
-                      {row.branch_name || branchNameById[String(row.branch_id)] || '—'}
+                      {row.punch_source === 'field'
+                        ? 'Field'
+                        : row.punch_source === 'kiosk'
+                          ? 'Kiosk'
+                          : row.punch_source === 'mobile'
+                            ? 'Office QR'
+                            : row.punch_source || '—'}
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">
+                      {row.field_site_name ||
+                        row.branch_name ||
+                        branchNameById[String(row.branch_id)] ||
+                        '—'}
                     </td>
                     <td className="py-2 pr-3">
                       <span

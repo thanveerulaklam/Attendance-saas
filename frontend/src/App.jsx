@@ -24,6 +24,7 @@ import PayslipGenerator from './pages/tools/PayslipGenerator';
 import PayrollCostCalculator from './pages/tools/PayrollCostCalculator';
 import MobileQrDisplayPage from './pages/MobileQrDisplayPage';
 import MobilePunchAttemptsPage from './pages/MobilePunchAttemptsPage';
+import FieldSitesPage from './pages/FieldSitesPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 
 function RootRedirect() {
@@ -68,6 +69,7 @@ function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/settings/company" element={<CompanySettingsPage />} />
             <Route path="/mobile-punch-log" element={<MobilePunchAttemptsPage />} />
+            <Route path="/field-sites" element={<FieldSitesPage />} />
             <Route path="/shifts" element={<ShiftsPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/payroll" element={<PayrollPage />} />

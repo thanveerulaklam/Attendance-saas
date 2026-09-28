@@ -222,6 +222,55 @@ async function listMobileFaceProfiles(companyId, branchId) {
   }));
 }
 
+async function getMobileFaceProfile(companyId, employeeId) {
+  const result = await pool.query(
+    `SELECT employee_id, recognition_model, embedding_dimension, embeddings, enrolled_at
+     FROM employee_face_enrollments
+     WHERE company_id = $1
+       AND employee_id = $2
+       AND recognition_model = $3
+       AND embeddings IS NOT NULL`,
+    [companyId, employeeId, MOBILEFACE_MODEL]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    employee_id: row.employee_id,
+    model: row.recognition_model,
+    dimension: row.embedding_dimension,
+    embeddings: row.embeddings,
+    enrolled_at: row.enrolled_at,
+  };
+}
+
+function cosineSimilarity(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) {
+    return -1;
+  }
+  let dot = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const x = Number(a[i]);
+    const y = Number(b[i]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return -1;
+    dot += x * y;
+  }
+  return dot;
+}
+
+function bestCosineAgainstTemplates(embedding, templates) {
+  if (!Array.isArray(templates) || templates.length === 0) return -1;
+  let best = -1;
+  for (const template of templates) {
+    const score = cosineSimilarity(embedding, template);
+    if (score > best) best = score;
+  }
+  return best;
+}
+
+function embeddingMatchesStoredTemplates(embedding, templates, threshold = MOBILEFACE_MATCH_THRESHOLD) {
+  return bestCosineAgainstTemplates(embedding, templates) >= threshold;
+}
+
 module.exports = {
   MOBILEFACE_MODEL,
   MOBILEFACE_DIMENSION,
@@ -230,6 +279,10 @@ module.exports = {
   getEnrollment,
   enrollEmployeeFace,
   saveMobileFaceProfile,
+  getMobileFaceProfile,
+  cosineSimilarity,
+  bestCosineAgainstTemplates,
+  embeddingMatchesStoredTemplates,
   removeEmployeeFace,
   listBranchFaceCandidates,
   listMobileFaceProfiles,

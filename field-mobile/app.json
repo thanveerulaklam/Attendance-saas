@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "PunchPay Field",
+    "slug": "punchpay-field",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "punchpay-field",
+    "platforms": ["ios", "android"],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0A"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.punchpay.field",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "PunchPay Field uses the front camera to match your enrolled face before recording attendance.",
+        "NSLocationWhenInUseUsageDescription": "PunchPay Field uses your location to confirm you are at an assigned work site when you punch."
+      }
+    },
+    "android": {
+      "package": "com.punchpay.field",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#D4A843",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "PunchPay Field uses the front camera to match your enrolled face before recording attendance."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "PunchPay Field uses your location to confirm you are at an assigned work site when you punch."
+        }
+      ]
+    ]
+  }
+}

@@ -964,6 +964,21 @@ export default function CompanySettingsPage() {
 
       {isAdmin && (
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">PunchPay Field</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Selfie + GPS attendance for staff who punch at assigned sites, not the office geofence.
+          </p>
+          <a
+            href="/field-sites"
+            className="mt-3 inline-flex text-xs font-medium text-indigo-600 underline"
+          >
+            Manage field sites and enable field attendance
+          </a>
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
           <h2 className="text-sm font-semibold text-slate-900">Branches</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
             Add one row per physical location. Employees and devices are assigned to a branch; HR users only see data for branches assigned to them (configured by your service provider).

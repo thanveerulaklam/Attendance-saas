@@ -30,13 +30,16 @@ async function recordPunchAttempt({
   locationAccuracyM,
   qrNonce,
   clientIp,
+  punchSource = null,
+  fieldSiteId = null,
 }) {
   try {
     await pool.query(
       `INSERT INTO mobile_punch_attempts (
          company_id, employee_id, branch_id, status, reject_reason,
-         latitude, longitude, location_accuracy_m, qr_nonce, client_ip
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::inet)`,
+         latitude, longitude, location_accuracy_m, qr_nonce, client_ip,
+         punch_source, field_site_id
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::inet, $11, $12)`,
       [
         companyId,
         employeeId ?? null,
@@ -48,6 +51,8 @@ async function recordPunchAttempt({
         locationAccuracyM ?? null,
         qrNonce ?? null,
         clientIp ?? null,
+        punchSource ?? null,
+        fieldSiteId ?? null,
       ]
     );
   } catch (err) {
@@ -201,6 +206,7 @@ async function processMobilePunch(companyId, employeeId, body, clientIp) {
         locationAccuracyM: coords.accuracy,
         qrNonce,
         clientIp,
+        punchSource: 'mobile',
       });
 
       return { punch, today };
@@ -222,6 +228,7 @@ async function processMobilePunch(companyId, employeeId, body, clientIp) {
       locationAccuracyM: locationAccuracyM != null ? Number(locationAccuracyM) : null,
       qrNonce,
       clientIp,
+      punchSource: 'mobile',
     });
     throw err;
   }

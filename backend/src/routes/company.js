@@ -18,6 +18,13 @@ const {
   updateBranchKioskSettingsPin,
   revokeBranchKioskToken,
 } = require('../controllers/mobileAttendanceController');
+const {
+  updateFieldSettings,
+  listSites,
+  createSite,
+  updateSite,
+  removeSite,
+} = require('../controllers/fieldSiteController');
 const { downloadKioskApk } = require('../controllers/kioskApkController');
 const {
   authenticate,
@@ -80,13 +87,19 @@ router.get(
   getBranchQrToken
 );
 
-// Mobile punch attempt audit log (admin + HR)
+// Mobile punch attempt audit log (admin + HR) — QR mobile, kiosk, and field
 router.get(
   '/mobile-punch-attempts',
   withBranchScope,
-  requireMobileAttendanceEnabledForAdmin,
   getMobilePunchAttempts
 );
+
+// PunchPay Field sites (admin CRUD; HR can list)
+router.patch('/field-settings', adminOnly, updateFieldSettings);
+router.get('/field-sites', withCompanyAuth, listSites);
+router.post('/field-sites', adminOnly, createSite);
+router.patch('/field-sites/:id', adminOnly, updateSite);
+router.delete('/field-sites/:id', adminOnly, removeSite);
 
 // Kiosk tablet pairing (admin only)
 router.get('/branches/:id/kiosk', adminOnly, getBranchKiosk);

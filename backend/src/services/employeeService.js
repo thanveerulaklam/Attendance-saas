@@ -320,9 +320,10 @@ async function createEmployee(companyId, data, branchContext = {}) {
         permission_hours_override,
         labour_card_number,
         iban,
-        contract_type
+        contract_type,
+        attendance_channel
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -353,6 +354,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         labourCardNumber,
         iban,
         contractType,
+        payload.attendance_channel || 'device',
       ]
     );
 

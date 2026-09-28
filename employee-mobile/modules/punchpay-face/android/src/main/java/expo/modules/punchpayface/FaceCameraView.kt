@@ -236,6 +236,8 @@ class FaceCameraView(context: Context, appContext: AppContext) : ExpoView(contex
           "name" to candidate.name,
           "similarity" to candidate.similarity,
           "threshold" to FaceEngine.threshold,
+          "embedding" to embedding.toList(),
+          "dimension" to embedding.size,
           "detectionMs" to detectionMs,
           "cropMs" to cropMs,
           "inferenceMs" to inferenceMs,

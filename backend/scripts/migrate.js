@@ -185,9 +185,17 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'demo_enquiry_calls' AND column_name = 'follow_up_at'
   )`,
+  '093_devices_isup_device_id.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'devices' AND column_name = 'isup_device_id'
+  )`,
   '094_mobileface_profiles.sql': `EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'employee_face_enrollments' AND column_name = 'recognition_model'
+  )`,
+  '095_field_attendance.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'field_sites'
   )`,
 };
 

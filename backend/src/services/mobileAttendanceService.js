@@ -16,7 +16,7 @@ function mobileReject(code, message, statusCode = 403) {
 
 async function loadCompanyForMobile(companyId) {
   const result = await pool.query(
-    `SELECT id, name, mobile_attendance_enabled, is_active, subscription_end_date
+    `SELECT id, name, mobile_attendance_enabled, field_attendance_enabled, is_active, subscription_end_date
      FROM companies
      WHERE id = $1`,
     [companyId]

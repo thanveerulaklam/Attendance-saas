@@ -23,12 +23,16 @@ async function listMobilePunchAttempts(companyId, options = {}) {
   );
   const offset = Math.max(0, Number(options.offset) || 0);
   const status = options.status ? String(options.status).trim().toLowerCase() : null;
+  const punchSource = options.punchSource ? String(options.punchSource).trim().toLowerCase() : null;
   const branchId = options.branchId != null ? Number(options.branchId) : null;
   const employeeId = options.employeeId != null ? Number(options.employeeId) : null;
   const allowedBranchIds = options.allowedBranchIds;
 
   if (status && !['accepted', 'rejected'].includes(status)) {
     throw new AppError('status must be accepted or rejected', 400);
+  }
+  if (punchSource && !['mobile', 'kiosk', 'field'].includes(punchSource)) {
+    throw new AppError('punch_source must be mobile, kiosk, or field', 400);
   }
   if (branchId != null && !branchId) {
     throw new AppError('Invalid branch id', 400);
@@ -70,6 +74,11 @@ async function listMobilePunchAttempts(companyId, options = {}) {
     where.push(`mpa.status = $${params.length}`);
   }
 
+  if (punchSource) {
+    params.push(punchSource);
+    where.push(`mpa.punch_source = $${params.length}`);
+  }
+
   if (dateFrom) {
     params.push(dateFrom.toISOString());
     where.push(`mpa.created_at >= $${params.length}`);
@@ -106,12 +115,16 @@ async function listMobilePunchAttempts(companyId, options = {}) {
        mpa.qr_nonce,
        mpa.client_ip,
        mpa.created_at,
+       mpa.punch_source,
+       mpa.field_site_id,
        e.name AS employee_name,
        e.employee_code,
-       b.name AS branch_name
+       b.name AS branch_name,
+       fs.name AS field_site_name
      FROM mobile_punch_attempts mpa
      LEFT JOIN employees e ON e.id = mpa.employee_id AND e.company_id = mpa.company_id
      LEFT JOIN branches b ON b.id = mpa.branch_id AND b.company_id = mpa.company_id
+     LEFT JOIN field_sites fs ON fs.id = mpa.field_site_id AND fs.company_id = mpa.company_id
      WHERE ${whereSql}
      ORDER BY mpa.created_at DESC
      LIMIT $${limitIdx} OFFSET $${offsetIdx}`,

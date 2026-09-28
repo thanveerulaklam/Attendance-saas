@@ -56,7 +56,10 @@ export default function EmployeeFormModal({
   const [countryCode, setCountryCode] = useState('IN');
   const [companyCurrency, setCompanyCurrency] = useState('INR');
   const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
+  const [fieldAttendanceEnabled, setFieldAttendanceEnabled] = useState(false);
   const [attendanceChannel, setAttendanceChannel] = useState('device');
+  const [fieldSites, setFieldSites] = useState([]);
+  const [selectedFieldSiteIds, setSelectedFieldSiteIds] = useState([]);
   const [appAccessUser, setAppAccessUser] = useState(null);
   const [appAccessEmail, setAppAccessEmail] = useState('');
   const [appAccessPassword, setAppAccessPassword] = useState('');
@@ -105,6 +108,7 @@ export default function EmployeeFormModal({
           setCountryCode(json?.data?.country_code || 'IN');
           setCompanyCurrency(json?.data?.currency || 'INR');
           setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled));
+          setFieldAttendanceEnabled(Boolean(json?.data?.field_attendance_enabled));
         })
         .catch(() => {
           setMonthlyOnlyPayroll(false);
@@ -173,6 +177,11 @@ export default function EmployeeFormModal({
         setPayrollFrequency(employee.payroll_frequency || 'monthly');
         setSalaryType(employee.salary_type || 'monthly');
         setAttendanceChannel(employee.attendance_channel || 'device');
+        setSelectedFieldSiteIds(
+          Array.isArray(employee.field_site_ids)
+            ? employee.field_site_ids.map((id) => Number(id))
+            : []
+        );
       } else {
         setName('');
         setEmployeeCode('');
@@ -202,6 +211,7 @@ export default function EmployeeFormModal({
         setPayrollFrequency('monthly');
         setSalaryType('monthly');
         setAttendanceChannel('device');
+        setSelectedFieldSiteIds([]);
         setAppAccessUser(null);
         setAppAccessEmail('');
         setAppAccessPassword('');
@@ -246,6 +256,25 @@ export default function EmployeeFormModal({
       .then((json) => setFaceEnrolled(Boolean(json?.data?.id)))
       .catch(() => setFaceEnrolled(false))
       .finally(() => setFaceLoading(false));
+  }, [open, isEdit, employee?.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    authFetch('/api/company/field-sites')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setFieldSites(Array.isArray(json?.data) ? json.data : []))
+      .catch(() => setFieldSites([]));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !isEdit || !employee?.id) return;
+    authFetch(`/api/employees/${employee.id}/field-sites`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        const ids = json?.data?.site_ids || [];
+        setSelectedFieldSiteIds(ids.map((id) => Number(id)));
+      })
+      .catch(() => {});
   }, [open, isEdit, employee?.id]);
 
   useEffect(() => {
@@ -461,6 +490,23 @@ export default function EmployeeFormModal({
 
         setToast({ type: 'error', message });
         return;
+      }
+
+      const savedId = json.data?.id || employee?.id;
+      if (savedId && (fieldAttendanceEnabled || selectedFieldSiteIds.length > 0)) {
+        const sitesRes = await authFetch(`/api/employees/${savedId}/field-sites`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ site_ids: selectedFieldSiteIds }),
+        });
+        if (!sitesRes.ok) {
+          const sitesJson = await sitesRes.json().catch(() => ({}));
+          setToast({
+            type: 'error',
+            message: sitesJson.message || 'Employee saved, but field sites could not be updated.',
+          });
+          return;
+        }
       }
 
       setToast({
@@ -1172,6 +1218,117 @@ export default function EmployeeFormModal({
               <p className="mt-1 text-[11px] text-rose-600">{errors.shift_id}</p>
             )}
           </div>
+
+          {(mobileAttendanceEnabled || fieldAttendanceEnabled) && (
+            <div>
+              <label className="block text-xs font-medium text-slate-700">
+                Attendance channel
+                <select
+                  value={attendanceChannel}
+                  onChange={(e) => setAttendanceChannel(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                >
+                  <option value="device">Device / kiosk only</option>
+                  <option value="mobile">Mobile / Field app only</option>
+                  <option value="both">Device and mobile / Field</option>
+                </select>
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                Field and office QR both require Mobile or Both, plus an app login.
+              </p>
+            </div>
+          )}
+
+          {fieldAttendanceEnabled && (
+            <div className="rounded-lg border border-sky-100 bg-sky-50/40 px-3 py-3 space-y-2">
+              <p className="text-xs font-semibold text-sky-900">PunchPay Field sites</p>
+              <p className="text-[11px] text-slate-600">
+                GPS punch is allowed inside any assigned site.{' '}
+                <a href="/field-sites" className="font-medium text-sky-800 underline">
+                  Manage sites
+                </a>
+              </p>
+              {fieldSites.length === 0 ? (
+                <p className="text-[11px] text-amber-700">No field sites yet. Create one first.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {fieldSites.map((site) => {
+                    const checked = selectedFieldSiteIds.includes(Number(site.id));
+                    return (
+                      <li key={site.id}>
+                        <label className="flex items-start gap-2 text-xs text-slate-800">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 rounded border-slate-300"
+                            checked={checked}
+                            onChange={(e) => {
+                              const id = Number(site.id);
+                              setSelectedFieldSiteIds((prev) =>
+                                e.target.checked
+                                  ? [...prev, id]
+                                  : prev.filter((value) => value !== id)
+                              );
+                            }}
+                          />
+                          <span>
+                            {site.name}
+                            <span className="block text-[10px] text-slate-500">{site.radius_m}m radius</span>
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {isEdit && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-900">App login (PunchPay Field)</p>
+              {appAccessLoading ? (
+                <p className="text-[11px] text-slate-500">Checking login…</p>
+              ) : appAccessUser ? (
+                <p className="text-[11px] text-emerald-700">Login: {appAccessUser.email}</p>
+              ) : (
+                <p className="text-[11px] text-slate-500">No app login yet.</p>
+              )}
+              <input
+                type="email"
+                value={appAccessEmail}
+                onChange={(e) => setAppAccessEmail(e.target.value)}
+                placeholder="employee@company.com"
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+              <input
+                type="password"
+                value={appAccessPassword}
+                onChange={(e) => setAppAccessPassword(e.target.value)}
+                placeholder={appAccessUser ? 'New password' : 'Password (min 6 chars)'}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+              />
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleProvisionAppAccess}
+                  disabled={appAccessSaving}
+                  className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-white disabled:opacity-50"
+                >
+                  {appAccessSaving ? 'Saving…' : appAccessUser ? 'Update login' : 'Create login'}
+                </button>
+                {appAccessUser && (
+                  <button
+                    type="button"
+                    onClick={handleRevokeAppAccess}
+                    disabled={appAccessSaving}
+                    className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-[11px] font-medium text-rose-700"
+                  >
+                    Revoke
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {mobileAttendanceEnabled && isEdit && (
             <div className="rounded-lg border border-violet-100 bg-violet-50/50 px-3 py-3 space-y-3">

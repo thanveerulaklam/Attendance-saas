@@ -18,6 +18,10 @@ const {
   deleteEmployee,
 } = require('../controllers/employeeController');
 const {
+  getEmployeeSites,
+  putEmployeeSites,
+} = require('../controllers/fieldSiteController');
+const {
   authenticate,
   requireRole,
   enforceCompanyFromToken,
@@ -81,6 +85,14 @@ router.get('/departments', withEmployeeAuth, getDepartments);
 router.get('/:id/app-access', withEmployeeAuth, getEmployeeAppAccess);
 router.post('/:id/app-access', withEmployeeAuth, requireHrBranchForMutation, provisionEmployeeAppAccess);
 router.delete('/:id/app-access', withEmployeeAuth, requireHrBranchForMutation, revokeEmployeeAppAccess);
+
+router.get('/:id/field-sites', withEmployeeAuth, getEmployeeSites);
+router.put(
+  '/:id/field-sites',
+  withEmployeeAuth,
+  requireHrBranchForMutation,
+  putEmployeeSites
+);
 
 router.get('/:id/face-enrollment', withEmployeeAuth, getEmployeeFaceEnrollment);
 router.post(
