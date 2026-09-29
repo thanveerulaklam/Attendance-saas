@@ -8,6 +8,52 @@ function toMoney(value) {
   return Math.round(n * 100) / 100;
 }
 
+/**
+ * Apply one cash amount across an employee's pending installments.
+ * Oldest rows are reduced first. A partial slice leaves the remainder pending.
+ */
+function allocateAgainstPending(rows, amount) {
+  const paid = toMoney(amount);
+  const normalized = (rows || []).map((row) => ({
+    ...row,
+    repayment_amount: toMoney(row.repayment_amount),
+  }));
+  const pendingTotal = toMoney(normalized.reduce((sum, row) => sum + row.repayment_amount, 0));
+  if (!(paid > 0)) {
+    return { error: 'invalid', pendingTotal, pendingAfter: pendingTotal, parts: [] };
+  }
+  if (paid > pendingTotal) {
+    return { error: 'exceeds', pendingTotal, pendingAfter: pendingTotal, parts: [] };
+  }
+
+  let remaining = paid;
+  const parts = [];
+  for (const row of normalized) {
+    if (remaining <= 0) break;
+    const apply = toMoney(Math.min(remaining, row.repayment_amount));
+    if (apply <= 0) continue;
+    const remainder = toMoney(row.repayment_amount - apply);
+    parts.push({
+      id: row.id,
+      loan_id: row.loan_id,
+      employee_id: row.employee_id,
+      year: row.year,
+      month: row.month,
+      pay: apply,
+      remainder,
+      full: remainder === 0,
+    });
+    remaining = toMoney(remaining - apply);
+  }
+
+  return {
+    error: null,
+    pendingTotal,
+    pendingAfter: toMoney(pendingTotal - paid),
+    parts,
+  };
+}
+
 function parseDateOnly(value) {
   if (!value) return new Date().toISOString().slice(0, 10);
   if (value instanceof Date) {
@@ -86,11 +132,10 @@ async function insertPendingRepayment(client, loan, companyId, year, month, amou
   );
 
   if (existing.rowCount > 0) {
-    const row = existing.rows[0];
-    if (row.status === 'pending') {
-      return row;
-    }
-    if (row.status === 'skipped') {
+    const pending = existing.rows.find((row) => row.status === 'pending');
+    if (pending) return pending;
+    const row = existing.rows.find((item) => item.status === 'skipped');
+    if (row && row.status === 'skipped') {
       const result = await client.query(
         `UPDATE employee_advance_repayments
          SET status = 'pending',
@@ -682,10 +727,20 @@ async function getMonthlyRepayments(companyId, year, month) {
        l.outstanding_balance AS loan_outstanding_balance,
        l.status AS loan_status,
        e.name AS employee_name,
-       e.employee_code
+       e.employee_code,
+       COALESCE(paid.month_repaid, 0) AS month_repaid
      FROM employee_advance_repayments r
      INNER JOIN employee_advance_loans l ON l.id = r.loan_id AND l.company_id = r.company_id
      INNER JOIN employees e ON e.id = r.employee_id AND e.company_id = r.company_id
+     LEFT JOIN (
+       SELECT employee_id, SUM(repayment_amount)::numeric AS month_repaid
+       FROM employee_advance_repayments
+       WHERE company_id = $1
+         AND year = $2
+         AND month = $3
+         AND status = 'deducted'
+       GROUP BY employee_id
+     ) paid ON paid.employee_id = r.employee_id
      WHERE r.company_id = $1
        AND r.year = $2
        AND r.month = $3
@@ -1516,7 +1571,167 @@ async function deleteLoan(companyId, loanId) {
   }
 }
 
+async function syncLoanRepaidTotals(client, companyId, loanId) {
+  const loanUpdateResult = await client.query(
+    `WITH repaid AS (
+       SELECT
+         l.id,
+         l.company_id,
+         l.loan_amount,
+         COALESCE(SUM(r.repayment_amount) FILTER (WHERE r.status = 'deducted'), 0)::numeric AS deducted_total
+       FROM employee_advance_loans l
+       LEFT JOIN employee_advance_repayments r
+         ON r.company_id = l.company_id
+        AND r.loan_id = l.id
+       WHERE l.company_id = $1 AND l.id = $2
+       GROUP BY l.id, l.company_id, l.loan_amount
+     )
+     UPDATE employee_advance_loans l
+     SET total_repaid = ROUND(repaid.deducted_total, 2),
+         outstanding_balance = GREATEST(ROUND((l.loan_amount - repaid.deducted_total)::numeric, 2), 0),
+         status = CASE
+           WHEN l.status = 'waived' THEN 'waived'
+           WHEN repaid.deducted_total >= l.loan_amount THEN 'cleared'
+           WHEN l.status = 'on_hold' THEN 'on_hold'
+           ELSE 'active'
+         END,
+         updated_at = NOW()
+     FROM repaid
+     WHERE l.company_id = repaid.company_id
+       AND l.id = repaid.id
+     RETURNING l.*`,
+    [companyId, Number(loanId)]
+  );
+  return loanUpdateResult.rows[0] || null;
+}
+
+/**
+ * Record one amount against an employee's combined pending deductions for a month.
+ * The amount is applied to the oldest loan first. Anything unpaid stays pending.
+ */
+async function recordEmployeeMonthRepayment(companyId, employeeId, year, month, amount) {
+  const employee = Number(employeeId);
+  const y = Number(year);
+  const m = Number(month);
+  if (!employee) throw new AppError('employee_id is required', 400);
+  if (!y || !m) throw new AppError('year and month are required', 400);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const pendingResult = await client.query(
+      `SELECT
+         r.id,
+         r.loan_id,
+         r.employee_id,
+         r.year,
+         r.month,
+         r.repayment_amount
+       FROM employee_advance_repayments r
+       INNER JOIN employee_advance_loans l
+         ON l.id = r.loan_id AND l.company_id = r.company_id
+       WHERE r.company_id = $1
+         AND r.employee_id = $2
+         AND r.year = $3
+         AND r.month = $4
+         AND r.status = 'pending'
+         AND l.status IN ('active', 'on_hold')
+       ORDER BY l.loan_date ASC, l.id ASC, r.id ASC
+       FOR UPDATE OF r`,
+      [companyId, employee, y, m]
+    );
+
+    const allocation = allocateAgainstPending(pendingResult.rows, amount);
+    if (allocation.error === 'invalid') {
+      throw new AppError('Amount must be greater than 0', 400);
+    }
+    if (pendingResult.rowCount === 0) {
+      throw new AppError('No pending deduction for this employee this month', 400);
+    }
+    if (allocation.error === 'exceeds') {
+      throw new AppError(
+        `Amount cannot exceed the pending total (${allocation.pendingTotal})`,
+        400
+      );
+    }
+
+    const note = `Repayment of ₹${toMoney(amount)} recorded against the employee's pending total`;
+    for (const part of allocation.parts) {
+      if (part.full) {
+        const updated = await client.query(
+          `UPDATE employee_advance_repayments
+           SET status = 'deducted',
+               repayment_amount = $3,
+               notes = CASE
+                 WHEN notes IS NULL OR notes = '' THEN $4
+                 ELSE notes || E'\n' || $4
+               END,
+               updated_at = NOW()
+           WHERE company_id = $1
+             AND id = $2
+             AND status = 'pending'
+           RETURNING id`,
+          [companyId, Number(part.id), part.pay, note]
+        );
+        if (updated.rowCount === 0) {
+          throw new AppError('Could not record repayment', 400);
+        }
+      } else {
+        await client.query(
+          `INSERT INTO employee_advance_repayments (
+             company_id, employee_id, loan_id, year, month,
+             repayment_amount, suggested_amount, status, notes
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $6, 'deducted', $7)`,
+          [companyId, employee, Number(part.loan_id), y, m, part.pay, note]
+        );
+        const reduced = await client.query(
+          `UPDATE employee_advance_repayments
+           SET repayment_amount = $3,
+               notes = CASE
+                 WHEN notes IS NULL OR notes = '' THEN $4
+                 ELSE notes || E'\n' || $4
+               END,
+               updated_at = NOW()
+           WHERE company_id = $1
+             AND id = $2
+             AND status = 'pending'
+           RETURNING id`,
+          [companyId, Number(part.id), part.remainder, note]
+        );
+        if (reduced.rowCount === 0) {
+          throw new AppError('Could not record repayment', 400);
+        }
+      }
+      await syncLoanRepaidTotals(client, companyId, part.loan_id);
+    }
+
+    await client.query('COMMIT');
+    return {
+      employee_id: employee,
+      year: y,
+      month: m,
+      paid: toMoney(amount),
+      pending_before: allocation.pendingTotal,
+      pending_after: allocation.pendingAfter,
+      applied: allocation.parts.map((part) => ({
+        loan_id: part.loan_id,
+        repayment_id: part.id,
+        amount: part.pay,
+        pending_left_on_loan: part.remainder,
+      })),
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
+  allocateAgainstPending,
   createAdvanceLoan,
   getCompanyLoans,
   getLoanById,
@@ -1533,6 +1748,7 @@ module.exports = {
   waiveLoan,
   updateAdvanceLoan,
   deleteLoan,
+  recordEmployeeMonthRepayment,
   addCalendarMonths,
   isBeforeMonth,
   isAfterMonth,

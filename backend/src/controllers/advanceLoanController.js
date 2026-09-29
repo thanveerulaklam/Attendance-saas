@@ -136,6 +136,24 @@ async function skip(req, res, next) {
   }
 }
 
+async function recordEmployeeRepayment(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const employeeId = Number(req.params.employeeId);
+    const body = req.body || {};
+    const data = await service.recordEmployeeMonthRepayment(
+      companyId,
+      employeeId,
+      body.year,
+      body.month,
+      body.amount
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function markPaid(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -160,4 +178,5 @@ module.exports = {
   adjustRepayment,
   skip,
   markPaid,
+  recordEmployeeRepayment,
 };

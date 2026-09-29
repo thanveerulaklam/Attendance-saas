@@ -101,6 +101,7 @@ function groupRepaymentsByEmployee(rows) {
       ...group,
       deduction: sumBy(group.repayments, (row) => row.repayment_amount),
       suggested: sumBy(group.repayments, (row) => row.suggested_amount),
+      monthRepaid: Number(group.repayments[0]?.month_repaid || 0),
     }))
     .sort((a, b) => String(a.employee_name || '').localeCompare(String(b.employee_name || '')));
 }
@@ -143,6 +144,8 @@ export default function AdvancesPage() {
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
   const [markPaidTarget, setMarkPaidTarget] = useState(null);
   const [markPaidAmount, setMarkPaidAmount] = useState('');
+  const [repayAmount, setRepayAmount] = useState('');
+  const [repaySavingId, setRepaySavingId] = useState(null);
   const [form, setForm] = useState({
     employee_id: '',
     loan_amount: '',
@@ -209,6 +212,13 @@ export default function AdvancesPage() {
   useEffect(() => {
     setExpandedEmployeeId(null);
   }, [tab]);
+
+  useEffect(() => {
+    if (tab !== 'monthly' || !expandedEmployeeId) return;
+    const group = monthlyGroups.find((item) => item.employeeId === expandedEmployeeId);
+    if (!group) return;
+    setRepayAmount(String(group.deduction));
+  }, [tab, expandedEmployeeId, monthlyGroups]);
 
   useEffect(() => {
     const amount = Number(form.loan_amount || 0);
@@ -469,6 +479,46 @@ export default function AdvancesPage() {
     ));
     const loanId = monthly?.loan_id || fromDetails?.id;
     if (loanId) await refreshLoanDetail(loanId);
+  }
+
+  async function handleRecordEmployeeRepayment(group) {
+    const amount = Number(repayAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setToast({ type: 'error', message: 'Enter an amount greater than 0' });
+      return;
+    }
+    if (amount > Number(group.deduction || 0) + 0.001) {
+      setToast({
+        type: 'error',
+        message: `Amount cannot exceed the pending total of ₹${formatMoney(group.deduction)}`,
+      });
+      return;
+    }
+    setRepaySavingId(group.employeeId);
+    try {
+      const res = await authFetch(`/api/advance-loans/employee/${group.employeeId}/repay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          year: selectedYear,
+          month: selectedMonth,
+          amount,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Could not record repayment');
+      const pendingAfter = json.data?.pending_after;
+      setToast({
+        type: 'success',
+        message: `Recorded ₹${formatMoney(amount)}. Pending this month is now ₹${formatMoney(pendingAfter)}.`,
+      });
+      setRepayAmount(pendingAfter != null ? String(pendingAfter) : '');
+      await loadAll();
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Could not record repayment' });
+    } finally {
+      setRepaySavingId(null);
+    }
   }
 
   function openMarkPaidDialog(repayment) {
@@ -756,7 +806,7 @@ export default function AdvancesPage() {
                 </label>
               </div>
               <p className="text-[11px] text-slate-500">
-                Use <span className="font-medium text-amber-700">Skip month</span> here before payroll if some employees should not be deducted this month.
+                Open an employee and enter the amount received. It comes off their total pending for this month, and whatever is left stays due.
               </p>
             </div>
             <div className="mb-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -767,8 +817,8 @@ export default function AdvancesPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3">Employee</th>
-                  <th className="pb-2 pr-3">This month deduction</th>
-                  <th className="pb-2 pr-3">Suggested</th>
+                  <th className="pb-2 pr-3">Pending this month</th>
+                  <th className="pb-2 pr-3">Repaid this month</th>
                 </tr>
               </thead>
               <tbody>
@@ -792,23 +842,51 @@ export default function AdvancesPage() {
                         <td className="py-2 pr-3">
                           <span className="font-medium text-slate-900">{group.employee_name} ({group.employee_code})</span>
                           <span className="mt-0.5 block text-[11px] text-slate-500">
-                            {group.repayments.length} deduction{group.repayments.length === 1 ? '' : 's'}
+                            {group.repayments.length} loan{group.repayments.length === 1 ? '' : 's'}
                           </span>
                         </td>
                         <td className="py-2 pr-3 font-semibold">₹{formatMoney(group.deduction)}</td>
-                        <td className="py-2 pr-3">₹{formatMoney(group.suggested)}</td>
+                        <td className="py-2 pr-3">₹{formatMoney(group.monthRepaid)}</td>
                       </tr>
                       {open && (
                         <tr>
                           <td colSpan={3} className="bg-slate-50 p-3">
-                            <table className="w-full min-w-[720px] text-xs">
+                            <form
+                              className="mb-3 flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 sm:flex-row sm:items-end"
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                handleRecordEmployeeRepayment(group);
+                              }}
+                            >
+                              <label className="text-[11px] text-slate-600 sm:flex-1">
+                                Amount received against ₹{formatMoney(group.deduction)} pending
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  step="0.01"
+                                  max={group.deduction}
+                                  value={repayAmount}
+                                  onChange={(event) => setRepayAmount(event.target.value)}
+                                  className="mt-1 block w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-900"
+                                />
+                              </label>
+                              <button
+                                type="submit"
+                                disabled={repaySavingId === group.employeeId}
+                                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                              >
+                                {repaySavingId === group.employeeId ? 'Saving...' : 'Record repayment'}
+                              </button>
+                            </form>
+                            <p className="mb-2 text-[11px] text-slate-500">
+                              Example: enter 45000 when 70000 is pending. The balance left stays due this month.
+                            </p>
+                            <table className="w-full min-w-[520px] text-xs">
                               <thead>
                                 <tr className="text-left text-slate-500">
                                   <th className="pb-1 pr-2">Loan</th>
                                   <th className="pb-1 pr-2">Original amount</th>
-                                  <th className="pb-1 pr-2">This month</th>
-                                  <th className="pb-1 pr-2">Suggested</th>
-                                  <th className="pb-1 pr-2">Status</th>
+                                  <th className="pb-1 pr-2">Still pending</th>
                                   <th className="pb-1 pr-2"> </th>
                                 </tr>
                               </thead>
@@ -818,9 +896,7 @@ export default function AdvancesPage() {
                                     <td className="py-1.5 pr-2">#{repayment.loan_id}</td>
                                     <td className="py-1.5 pr-2">₹{formatMoney(repayment.original_loan_amount)}</td>
                                     <td className="py-1.5 pr-2 font-medium">₹{formatMoney(repayment.repayment_amount)}</td>
-                                    <td className="py-1.5 pr-2">₹{formatMoney(repayment.suggested_amount)}</td>
-                                    <td className="py-1.5 pr-2">{repayment.status}</td>
-                                    <td className="py-1.5 pr-2 text-right space-x-2">
+                                    <td className="py-1.5 pr-2 text-right">
                                       <button
                                         type="button"
                                         onClick={() => {
@@ -832,27 +908,6 @@ export default function AdvancesPage() {
                                       >
                                         Skip month
                                       </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setOverrideRepayment(repayment);
-                                          setOverrideForm({ repayment_amount: String(repayment.repayment_amount), override_reason: '' });
-                                          setOverrideOpen(true);
-                                        }}
-                                        className="text-blue-600 hover:underline"
-                                      >
-                                        Override
-                                      </button>
-                                      {repayment.status === 'pending' && ['active', 'on_hold'].includes(repayment.loan_status) && (
-                                        <button
-                                          type="button"
-                                          disabled={markPaidRepaymentId === repayment.id}
-                                          onClick={() => openMarkPaidDialog(repayment)}
-                                          className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          {markPaidRepaymentId === repayment.id ? 'Saving...' : 'Mark paid'}
-                                        </button>
-                                      )}
                                     </td>
                                   </tr>
                                 ))}
