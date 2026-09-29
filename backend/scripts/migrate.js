@@ -205,6 +205,12 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM pg_indexes
     WHERE schemaname = 'public' AND indexname = 'employee_advance_repayments_one_pending_month'
   )`,
+  '098_advance_repayment_collected_via.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'employee_advance_repayments'
+      AND column_name = 'collected_via'
+  )`,
 };
 
 async function hasExistingSchema(client) {

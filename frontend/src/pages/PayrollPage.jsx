@@ -3173,7 +3173,7 @@ export default function PayrollPage() {
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    If unchecked, advance repayments remain pending. You can deduct per employee from the payroll table after generation.
+                    Deducts each employee’s pending advance for this month, across all their loans. Money already recorded on the Advance page is not deducted again. If unchecked, the pending amount stays due and can be deducted per employee from the payroll table.
                   </p>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -3232,7 +3232,7 @@ export default function PayrollPage() {
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    If unchecked, advance repayments remain pending. You can deduct per employee from the payroll table after generation.
+                    Deducts each employee’s pending advance for this month, across all their loans. Money already recorded on the Advance page is not deducted again. If unchecked, the pending amount stays due and can be deducted per employee from the payroll table.
                   </p>
                 </div>
               )}

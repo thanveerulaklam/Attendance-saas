@@ -898,6 +898,7 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
       ? await client.query(
           `UPDATE employee_advance_repayments
            SET status = 'deducted',
+               collected_via = 'payroll',
                repayment_amount = $3,
                updated_at = NOW()
            WHERE company_id = $1
@@ -909,6 +910,7 @@ async function markRepaymentDeducted(companyId, loanId, year, month, actualAmoun
       : await client.query(
           `UPDATE employee_advance_repayments
            SET status = 'deducted',
+               collected_via = 'payroll',
                repayment_amount = $5,
                updated_at = NOW()
            WHERE company_id = $1
@@ -1662,6 +1664,7 @@ async function recordEmployeeMonthRepayment(companyId, employeeId, year, month, 
         const updated = await client.query(
           `UPDATE employee_advance_repayments
            SET status = 'deducted',
+               collected_via = 'cash',
                repayment_amount = $3,
                notes = CASE
                  WHEN notes IS NULL OR notes = '' THEN $4
@@ -1681,9 +1684,9 @@ async function recordEmployeeMonthRepayment(companyId, employeeId, year, month, 
         await client.query(
           `INSERT INTO employee_advance_repayments (
              company_id, employee_id, loan_id, year, month,
-             repayment_amount, suggested_amount, status, notes
+             repayment_amount, suggested_amount, status, notes, collected_via
            )
-           VALUES ($1, $2, $3, $4, $5, $6, $6, 'deducted', $7)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $6, 'deducted', $7, 'cash')`,
           [companyId, employee, Number(part.loan_id), y, m, part.pay, note]
         );
         const reduced = await client.query(

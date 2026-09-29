@@ -2014,7 +2014,8 @@ async function generateWeeklyPayroll(
              r.id,
              r.loan_id,
              r.repayment_amount,
-             r.status
+             r.status,
+             r.collected_via
            FROM employee_advance_repayments r
            INNER JOIN employee_advance_loans l
              ON l.id = r.loan_id
@@ -2033,10 +2034,8 @@ async function generateWeeklyPayroll(
     const repaymentRows = repaymentRowsResult.rows || [];
     const pendingRepaymentRows = repaymentRows.filter((row) => row.status === 'pending');
     const monthRepaymentAdvance = applyAdvanceRepayments
-      ? pendingRepaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0)
-      : repaymentRows
-          .filter((row) => row.status === 'deducted')
-          .reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
+      ? payrollCollectedAdvanceTotal(repaymentRows)
+      : 0;
 
     const salaryAdvance = salaryAdvanceBase + monthRepaymentAdvance;
 
@@ -2273,7 +2272,8 @@ async function listWeeklyPayrollRecords(
           AND r.employee_id = w.employee_id
           AND r.year = EXTRACT(YEAR FROM w.week_end_date)::int
           AND r.month = EXTRACT(MONTH FROM w.week_end_date)::int
-          AND r.status = 'deducted') AS deducted_loan_repayment,
+          AND r.status = 'deducted'
+          AND COALESCE(r.collected_via, 'payroll') = 'payroll') AS deducted_loan_repayment,
        (SELECT COALESCE(
           json_agg(
             json_build_object(
@@ -2769,7 +2769,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
              r.id,
              r.loan_id,
              r.repayment_amount,
-             r.status
+             r.status,
+             r.collected_via
            FROM employee_advance_repayments r
            INNER JOIN employee_advance_loans l
              ON l.id = r.loan_id
@@ -2787,10 +2788,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const repaymentRows = repaymentRowsResult.rows;
     const pendingRepaymentRows = repaymentRows.filter((row) => row.status === 'pending');
     const monthRepaymentAdvance = applyAdvanceRepayments
-      ? pendingRepaymentRows.reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0)
-      : repaymentRows
-          .filter((row) => row.status === 'deducted')
-          .reduce((sum, row) => sum + Number(row.repayment_amount || 0), 0);
+      ? payrollCollectedAdvanceTotal(repaymentRows)
+      : 0;
     const salaryAdvance = oldSalaryAdvance + monthRepaymentAdvance;
     const shiftIncentive = Number(summary.noLeaveIncentiveFromShift || 0);
     const hasManualNoLeaveIncentive =
@@ -3136,6 +3135,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
        r.loan_id,
        r.status,
        r.repayment_amount AS this_month_deduction,
+       r.collected_via,
        l.loan_amount AS original_loan_amount,
        l.loan_date,
        l.total_repaid AS total_repaid_so_far,
@@ -3151,7 +3151,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     [companyId, employeeId, year, month]
   );
   const advanceRepayments = advanceRepaymentsResult.rows
-    .filter((row) => row.status === 'deducted')
+    .filter((row) => row.status === 'deducted' && (row.collected_via || 'payroll') === 'payroll')
     .map((row) => ({
     loan_id: row.loan_id,
     original_loan_amount: Number(row.original_loan_amount || 0),
@@ -3456,7 +3456,8 @@ async function listPayrollRecords(
            AND r.employee_id = p.employee_id
            AND r.year = p.year
            AND r.month = p.month
-           AND r.status = 'deducted') AS deducted_loan_repayment,
+           AND r.status = 'deducted'
+           AND COALESCE(r.collected_via, 'payroll') = 'payroll') AS deducted_loan_repayment,
         (SELECT COALESCE(
            json_agg(
              json_build_object(
@@ -3610,11 +3611,21 @@ async function fetchLoanRepaymentsForPeriod(client, companyId, employeeId, year,
        AND r.year = $3
        AND r.month = $4
        AND r.status = $5
+       AND ($5 <> 'deducted' OR COALESCE(r.collected_via, 'payroll') = 'payroll')
        AND l.status IN ('active', 'on_hold', 'cleared')
      ORDER BY r.id ASC`,
     [companyId, employeeId, Number(year), Number(month), status]
   );
   return result.rows;
+}
+
+function payrollCollectedAdvanceTotal(rows) {
+  return (rows || []).reduce((sum, row) => {
+    const amount = Number(row.repayment_amount || 0);
+    if (row.status === 'pending') return sum + amount;
+    if (row.status === 'deducted' && (row.collected_via || 'payroll') === 'payroll') return sum + amount;
+    return sum;
+  }, 0);
 }
 
 function computeNetSalaryFromPayrollRow(payroll, salaryAdvance) {
@@ -3656,6 +3667,7 @@ async function getDeductedLoanRepaymentTotal(client, companyId, employeeId, year
        AND r.year = $3
        AND r.month = $4
        AND r.status = 'deducted'
+       AND COALESCE(r.collected_via, 'payroll') = 'payroll'
        AND l.status IN ('active', 'on_hold', 'cleared')`,
     [companyId, employeeId, Number(year), Number(month)]
   );
