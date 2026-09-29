@@ -309,57 +309,59 @@ export default function SalaryIncrementsPanel() {
                 const increased = Number(lastAmount) > 0;
                 const decreased = Number(lastAmount) < 0;
                 return (
-                  <tr key={row.id} className={selected ? 'bg-blue-50/70' : 'hover:bg-slate-50/70'}>
+                  <tr
+                    key={row.id}
+                    tabIndex={0}
+                    aria-pressed={selected}
+                    onClick={() => setSelectedId(row.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        setSelectedId(row.id);
+                      }
+                    }}
+                    className={`cursor-pointer ${selected ? 'bg-blue-50/70' : 'hover:bg-slate-50/80'}`}
+                  >
                     <td className="border-b border-slate-100 py-3 pr-4">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedId(row.id)}
-                        className="text-left"
-                      >
-                        <span className="block font-medium text-slate-900">{row.name || '—'}</span>
-                        <span className="mt-0.5 block text-[11px] text-slate-500">
-                          {row.employee_code || '—'}
-                          {row.department ? ` · ${row.department}` : ''}
-                          {row.status && row.status !== 'active' ? ` · ${row.status}` : ''}
-                        </span>
-                      </button>
+                      <span className="block font-medium text-slate-900">{row.name || '—'}</span>
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        {row.employee_code || '—'}
+                        {row.department ? ` · ${row.department}` : ''}
+                        {row.status && row.status !== 'active' ? ` · ${row.status}` : ''}
+                      </span>
                     </td>
                     <td className="border-b border-slate-100 py-3 pr-4">
-                      <button type="button" onClick={() => setSelectedId(row.id)} className="text-left">
-                        <span className="block tabular-nums font-medium text-slate-800">
-                          {fmt(row.basic_salary)}
-                        </span>
-                        <span className="mt-0.5 block text-[11px] text-slate-500">
-                          {salaryKind(row.salary_type)}
-                        </span>
-                      </button>
+                      <span className="block tabular-nums font-medium text-slate-800">
+                        {fmt(row.basic_salary)}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-slate-500">
+                        {salaryKind(row.salary_type)}
+                      </span>
                     </td>
                     <td className="border-b border-slate-100 py-3">
-                      <button type="button" onClick={() => setSelectedId(row.id)} className="text-left">
-                        {lastAmount == null ? (
-                          <span className="text-xs text-slate-400">No changes yet</span>
-                        ) : (
-                          <>
-                            <span
-                              className={`block tabular-nums text-xs font-medium ${
-                                increased
-                                  ? 'text-emerald-700'
-                                  : decreased
-                                    ? 'text-rose-700'
-                                    : 'text-slate-700'
-                              }`}
-                            >
-                              {formatSignedMoney(lastAmount, currency)}
-                            </span>
-                            <span className="mt-0.5 block text-[11px] text-slate-500">
-                              {formatYmd(row.last_effective_date)}
-                              {Number(row.increment_count) > 1
-                                ? ` · ${row.increment_count} changes`
-                                : ''}
-                            </span>
-                          </>
-                        )}
-                      </button>
+                      {lastAmount == null ? (
+                        <span className="text-xs text-slate-400">No changes yet</span>
+                      ) : (
+                        <>
+                          <span
+                            className={`block tabular-nums text-xs font-medium ${
+                              increased
+                                ? 'text-emerald-700'
+                                : decreased
+                                  ? 'text-rose-700'
+                                  : 'text-slate-700'
+                            }`}
+                          >
+                            {formatSignedMoney(lastAmount, currency)}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] text-slate-500">
+                            {formatYmd(row.last_effective_date)}
+                            {Number(row.increment_count) > 1
+                              ? ` · ${row.increment_count} changes`
+                              : ''}
+                          </span>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );
