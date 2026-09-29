@@ -227,7 +227,7 @@ export default function SalaryIncrementsPanel() {
   const canNext = page < totalPages;
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+    <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-5">
       <section className="rounded-xl border border-slate-100 bg-white px-4 py-5 shadow-soft lg:col-span-3 sm:px-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <label className="block w-full text-[11px] font-medium text-slate-600 sm:max-w-xs">
@@ -277,13 +277,13 @@ export default function SalaryIncrementsPanel() {
           </div>
         )}
 
-        <div className="mt-4 overflow-x-auto">
+        <div className="mt-4 max-h-[calc(100vh-18rem)] overflow-auto">
           <table className="min-w-[640px] w-full text-left text-sm">
-            <thead>
+            <thead className="sticky top-0 z-10 bg-white">
               <tr className="border-b border-slate-200 text-xs text-slate-500">
-                <th className="pb-3 pr-4 font-medium">Employee</th>
-                <th className="pb-3 pr-4 font-medium">Current basic</th>
-                <th className="pb-3 font-medium">Last change</th>
+                <th className="bg-white pb-3 pr-4 font-medium">Employee</th>
+                <th className="bg-white pb-3 pr-4 font-medium">Current basic</th>
+                <th className="bg-white pb-3 font-medium">Last change</th>
               </tr>
             </thead>
             <tbody>
@@ -400,7 +400,7 @@ export default function SalaryIncrementsPanel() {
         </div>
       </section>
 
-      <aside className="rounded-xl border border-slate-100 bg-white px-4 py-5 shadow-soft lg:col-span-2 sm:px-5">
+      <aside className="rounded-xl border border-slate-100 bg-white px-4 py-5 shadow-soft sm:px-5 lg:sticky lg:top-4 lg:col-span-2 lg:max-h-[calc(100vh-6.5rem)] lg:self-start lg:overflow-y-auto">
         {!selectedId ? (
           <div className="flex min-h-[240px] flex-col items-center justify-center text-center">
             <h2 className="text-sm font-semibold text-slate-900">Salary history</h2>
