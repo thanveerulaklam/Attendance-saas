@@ -31,6 +31,80 @@ function statusBadge(status) {
   return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${map[status] || map.active}`}>{status}</span>;
 }
 
+function sumBy(items, pick) {
+  return items.reduce((sum, item) => sum + Number(pick(item) || 0), 0);
+}
+
+function groupLoansByEmployee(loanList) {
+  const map = new Map();
+  loanList.forEach((loan) => {
+    const key = String(loan.employee_id);
+    if (!map.has(key)) {
+      map.set(key, {
+        employeeId: key,
+        employee_name: loan.employee_name,
+        employee_code: loan.employee_code,
+        loans: [],
+      });
+    }
+    map.get(key).loans.push(loan);
+  });
+
+  return [...map.values()]
+    .map((group) => {
+      const loans = [...group.loans].sort((a, b) => String(b.loan_date || '').localeCompare(String(a.loan_date || '')));
+      const upcoming = loans
+        .filter((loan) => loan.next_repayment_year && loan.next_repayment_month)
+        .sort((a, b) => (
+          Number(a.next_repayment_year) - Number(b.next_repayment_year)
+          || Number(a.next_repayment_month) - Number(b.next_repayment_month)
+        ));
+      const earliest = upcoming[0];
+      const sameMonth = earliest
+        ? upcoming.filter((loan) => (
+          Number(loan.next_repayment_year) === Number(earliest.next_repayment_year)
+          && Number(loan.next_repayment_month) === Number(earliest.next_repayment_month)
+        ))
+        : [];
+      return {
+        ...group,
+        loans,
+        loanAmount: sumBy(loans, (loan) => loan.loan_amount),
+        totalRepaid: sumBy(loans, (loan) => loan.total_repaid),
+        outstanding: sumBy(loans, (loan) => loan.outstanding_balance),
+        monthly: sumBy(loans, (loan) => loan.monthly_installment),
+        nextYear: earliest?.next_repayment_year,
+        nextMonth: earliest?.next_repayment_month,
+        nextAmount: sumBy(sameMonth, (loan) => loan.next_repayment_amount),
+        statuses: [...new Set(loans.map((loan) => loan.status))],
+      };
+    })
+    .sort((a, b) => String(a.employee_name || '').localeCompare(String(b.employee_name || '')));
+}
+
+function groupRepaymentsByEmployee(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    const key = String(row.employee_id);
+    if (!map.has(key)) {
+      map.set(key, {
+        employeeId: key,
+        employee_name: row.employee_name,
+        employee_code: row.employee_code,
+        repayments: [],
+      });
+    }
+    map.get(key).repayments.push(row);
+  });
+  return [...map.values()]
+    .map((group) => ({
+      ...group,
+      deduction: sumBy(group.repayments, (row) => row.repayment_amount),
+      suggested: sumBy(group.repayments, (row) => row.suggested_amount),
+    }))
+    .sort((a, b) => String(a.employee_name || '').localeCompare(String(b.employee_name || '')));
+}
+
 function loanDateInputValue(dateStr) {
   if (!dateStr) return '';
   const raw = String(dateStr).trim();
@@ -50,8 +124,9 @@ export default function AdvancesPage() {
   const [employees, setEmployees] = useState([]);
   const [loans, setLoans] = useState([]);
   const [monthlyRepayments, setMonthlyRepayments] = useState([]);
-  const [expandedLoanId, setExpandedLoanId] = useState(null);
-  const [expandedLoan, setExpandedLoan] = useState(null);
+  const [expandedEmployeeId, setExpandedEmployeeId] = useState(null);
+  const [loanDetailsById, setLoanDetailsById] = useState({});
+  const [detailsLoading, setDetailsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -92,6 +167,9 @@ export default function AdvancesPage() {
 
   const activeLoans = useMemo(() => loans.filter((l) => l.status === 'active' || l.status === 'on_hold'), [loans]);
   const historyLoans = useMemo(() => loans.filter((l) => l.status === 'cleared' || l.status === 'waived'), [loans]);
+  const activeGroups = useMemo(() => groupLoansByEmployee(activeLoans), [activeLoans]);
+  const historyGroups = useMemo(() => groupLoansByEmployee(historyLoans), [historyLoans]);
+  const monthlyGroups = useMemo(() => groupRepaymentsByEmployee(monthlyRepayments), [monthlyRepayments]);
   const activeLoanWarning = useMemo(() => {
     if (!form.employee_id) return null;
     return activeLoans.find((l) => Number(l.employee_id) === Number(form.employee_id)) || null;
@@ -127,6 +205,10 @@ export default function AdvancesPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    setExpandedEmployeeId(null);
+  }, [tab]);
 
   useEffect(() => {
     const amount = Number(form.loan_amount || 0);
@@ -270,10 +352,7 @@ export default function AdvancesPage() {
 
       setToast({ type: 'success', message: 'Advance loan updated successfully' });
       closeEditModal();
-      if (expandedLoanId === editLoan.id) {
-        setExpandedLoanId(null);
-        setExpandedLoan(null);
-      }
+      if (expandedEmployeeId) await refreshLoanDetail(editLoan.id);
       await loadAll();
     } catch (err) {
       setEditError(err.message || 'Unable to update loan');
@@ -283,17 +362,39 @@ export default function AdvancesPage() {
     }
   }
 
-  async function openLoanDetails(loanId) {
-    if (expandedLoanId === loanId) {
-      setExpandedLoanId(null);
-      setExpandedLoan(null);
-      return;
-    }
-    setExpandedLoanId(loanId);
+  async function refreshLoanDetail(loanId) {
     const res = await authFetch(`/api/advance-loans/${loanId}`, { headers: { 'Content-Type': 'application/json' } });
     if (!res.ok) return;
     const json = await res.json();
-    setExpandedLoan(json.data);
+    setLoanDetailsById((prev) => ({ ...prev, [String(loanId)]: json.data }));
+  }
+
+  async function toggleEmployee(employeeId, loanIds) {
+    const key = String(employeeId);
+    if (expandedEmployeeId === key) {
+      setExpandedEmployeeId(null);
+      return;
+    }
+    setExpandedEmployeeId(key);
+    if (!loanIds?.length) return;
+    setDetailsLoading(true);
+    try {
+      const details = await Promise.all(loanIds.map(async (id) => {
+        const res = await authFetch(`/api/advance-loans/${id}`, { headers: { 'Content-Type': 'application/json' } });
+        if (!res.ok) return null;
+        const json = await res.json();
+        return json.data;
+      }));
+      setLoanDetailsById((prev) => {
+        const next = { ...prev };
+        details.filter(Boolean).forEach((loan) => {
+          next[String(loan.id)] = loan;
+        });
+        return next;
+      });
+    } finally {
+      setDetailsLoading(false);
+    }
   }
 
   async function handleOverrideSubmit() {
@@ -341,7 +442,7 @@ export default function AdvancesPage() {
       : '';
     setToast({ type: 'success', message: `Installment skipped.${rescheduleMsg}` });
     setSkipPending(null);
-    if (expandedLoanId) await refreshExpandedLoan(expandedLoanId);
+    await refreshLoanForRepayment(repaymentId);
     await loadAll();
   }
 
@@ -356,15 +457,18 @@ export default function AdvancesPage() {
       setToast({ type: 'error', message: 'Unable to waive loan' });
       return;
     }
+    if (expandedEmployeeId) await refreshLoanDetail(loanId);
     await loadAll();
   }
 
-  async function refreshExpandedLoan(loanId) {
-    const res = await authFetch(`/api/advance-loans/${loanId}`, { headers: { 'Content-Type': 'application/json' } });
-    if (res.ok) {
-      const json = await res.json();
-      setExpandedLoan(json.data);
-    }
+  async function refreshLoanForRepayment(repaymentId) {
+    if (!expandedEmployeeId) return;
+    const monthly = monthlyRepayments.find((row) => String(row.id) === String(repaymentId));
+    const fromDetails = Object.values(loanDetailsById).find((loan) => (
+      (loan.repayments || []).some((row) => String(row.id) === String(repaymentId))
+    ));
+    const loanId = monthly?.loan_id || fromDetails?.id;
+    if (loanId) await refreshLoanDetail(loanId);
   }
 
   function openMarkPaidDialog(repayment) {
@@ -395,7 +499,7 @@ export default function AdvancesPage() {
       setMarkPaidOpen(false);
       setMarkPaidTarget(null);
       setMarkPaidAmount('');
-      if (expandedLoanId) await refreshExpandedLoan(expandedLoanId);
+      await refreshLoanForRepayment(repaymentId);
       await loadAll();
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Could not mark as paid' });
@@ -414,10 +518,11 @@ export default function AdvancesPage() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.message || 'Unable to delete loan');
-      if (expandedLoanId === loanId) {
-        setExpandedLoanId(null);
-        setExpandedLoan(null);
-      }
+      setLoanDetailsById((prev) => {
+        const next = { ...prev };
+        delete next[String(loanId)];
+        return next;
+      });
       setToast({ type: 'success', message: 'Advance loan deleted' });
       await loadAll();
     } catch (err) {
@@ -425,6 +530,108 @@ export default function AdvancesPage() {
     } finally {
       setDeletePendingLoanId(null);
     }
+  }
+
+  function renderEmployeeLoans(group) {
+    return (
+      <div className="space-y-3">
+        {detailsLoading && !group.loans.every((loan) => loanDetailsById[String(loan.id)]) && (
+          <p className="text-[11px] text-slate-500">Loading loan details…</p>
+        )}
+        {group.loans.map((loan) => {
+          const detail = loanDetailsById[String(loan.id)] || loan;
+          const repaid = Number(detail.total_repaid || 0);
+          const amount = Number(detail.loan_amount || 1);
+          const width = Math.min(100, (repaid / amount) * 100);
+          return (
+            <div key={loan.id} className="rounded-lg border border-slate-200 bg-white p-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="font-medium text-slate-900">
+                    ₹{formatMoney(detail.loan_amount)}
+                    <span className="ml-2 font-normal text-slate-500">given {fmtDate(detail.loan_date)}</span>
+                  </p>
+                  {detail.reason ? <p className="mt-0.5 text-[11px] text-slate-500">{detail.reason}</p> : null}
+                  <p className="mt-1 text-[11px] text-slate-600">
+                    Repaid ₹{formatMoney(detail.total_repaid)} · Outstanding ₹{formatMoney(detail.outstanding_balance)} · EMI ₹{formatMoney(detail.monthly_installment)}
+                    {['cleared', 'waived'].includes(detail.status) ? ` · closed ${fmtDate(String(detail.updated_at || '').slice(0, 10))}` : ''}
+                    {detail.next_repayment_year ? ` · Next ${monthLabel(detail.next_repayment_year, detail.next_repayment_month)} ₹${formatMoney(detail.next_repayment_amount || 0)}` : ''}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {statusBadge(detail.status)}
+                  {['active', 'on_hold'].includes(detail.status) && (
+                    <button type="button" className="text-blue-600" onClick={() => openEditModal(loan)}>Edit</button>
+                  )}
+                  {['active', 'on_hold'].includes(detail.status) && (
+                    <button type="button" className="text-rose-600" onClick={() => handleWaive(loan.id)}>Waive</button>
+                  )}
+                  <button
+                    type="button"
+                    className="text-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    disabled={deletePendingLoanId === loan.id}
+                    onClick={() => handleDeleteLoan(loan.id)}
+                  >
+                    {deletePendingLoanId === loan.id ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+              <div className="my-2 h-2 rounded bg-slate-200">
+                <div className="h-2 rounded bg-emerald-500" style={{ width: `${width}%` }} />
+              </div>
+              {(detail.repayments || []).length > 0 && (
+                <table className="w-full min-w-[640px] text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-500">
+                      <th className="pb-1 pr-2">Month</th>
+                      <th className="pb-1 pr-2">Suggested</th>
+                      <th className="pb-1 pr-2">Amount</th>
+                      <th className="pb-1 pr-2">Status</th>
+                      <th className="pb-1 pr-2"> </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.repayments.map((repayment) => (
+                      <tr key={repayment.id} className="border-t border-slate-100">
+                        <td className="py-1 pr-2">{monthLabel(repayment.year, repayment.month)}</td>
+                        <td className="py-1 pr-2">₹{formatMoney(repayment.suggested_amount)}</td>
+                        <td className="py-1 pr-2">₹{formatMoney(repayment.repayment_amount)}</td>
+                        <td className="py-1 pr-2">{repayment.status}</td>
+                        <td className="py-1 pr-2 text-right space-x-2">
+                          {repayment.status === 'pending' && ['active', 'on_hold'].includes(detail.status) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const reason = window.prompt('Reason to skip this month?') || '';
+                                  setSkipPending(reason);
+                                  handleSkip(repayment.id, monthLabel(repayment.year, repayment.month));
+                                }}
+                                className="text-amber-700 hover:underline"
+                              >
+                                Skip month
+                              </button>
+                              <button
+                                type="button"
+                                disabled={markPaidRepaymentId === repayment.id}
+                                onClick={() => openMarkPaidDialog(repayment)}
+                                className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {markPaidRepaymentId === repayment.id ? 'Saving...' : 'Mark paid'}
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -440,7 +647,7 @@ export default function AdvancesPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Advance Loans</h1>
-          <p className="text-xs text-slate-500">Track multi-month loan repayments and payroll deductions.</p>
+          <p className="text-xs text-slate-500">Each employee is listed once. Open a row to see every loan and its repayments.</p>
         </div>
         <button type="button" onClick={() => setCreateOpen(true)} className="w-full sm:w-auto rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
           New Advance
@@ -458,99 +665,62 @@ export default function AdvancesPage() {
           <div className="h-24 animate-pulse rounded bg-slate-50" />
         ) : tab === 'active' ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-xs">
+            <table className="w-full min-w-[860px] text-xs">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3">Employee</th>
-                  <th className="pb-2 pr-3">Loan Amount</th>
-                  <th className="pb-2 pr-3">Given On</th>
-                  <th className="pb-2 pr-3">Total Repaid</th>
+                  <th className="pb-2 pr-3">Total given</th>
+                  <th className="pb-2 pr-3">Total repaid</th>
                   <th className="pb-2 pr-3">Outstanding</th>
                   <th className="pb-2 pr-3">Monthly EMI</th>
-                  <th className="pb-2 pr-3">Next Deduction</th>
+                  <th className="pb-2 pr-3">Next deduction</th>
                   <th className="pb-2 pr-3">Status</th>
-                  <th className="pb-2 pr-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {activeLoans.map((loan) => (
-                  <Fragment key={loan.id}>
-                    <tr className="border-b border-slate-100 hover:bg-slate-50">
-                      <td className="py-2 pr-3 font-medium">{loan.employee_name} ({loan.employee_code})</td>
-                      <td className="py-2 pr-3">₹{formatMoney(loan.loan_amount)}</td>
-                      <td className="py-2 pr-3">{fmtDate(loan.loan_date)}</td>
-                      <td className="py-2 pr-3">₹{formatMoney(loan.total_repaid)}</td>
-                      <td className="py-2 pr-3 font-semibold text-amber-700">₹{formatMoney(loan.outstanding_balance)}</td>
-                      <td className="py-2 pr-3">₹{formatMoney(loan.monthly_installment)}</td>
-                      <td className="py-2 pr-3">{monthLabel(loan.next_repayment_year, loan.next_repayment_month)} • ₹{formatMoney(loan.next_repayment_amount || 0)}</td>
-                      <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
-                      <td className="py-2 pr-3">
-                        <button type="button" className="mr-2 text-blue-600" onClick={() => openLoanDetails(loan.id)}>Details</button>
-                        <button type="button" className="mr-2 text-blue-600" onClick={() => openEditModal(loan)}>Edit</button>
-                        <button type="button" className="mr-2 text-rose-600" onClick={() => handleWaive(loan.id)}>Waive</button>
-                        <button type="button" className="text-rose-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deletePendingLoanId === loan.id} onClick={() => handleDeleteLoan(loan.id)}>
-                          {deletePendingLoanId === loan.id ? 'Deleting...' : 'Delete'}
-                        </button>
-                      </td>
-                    </tr>
-                    {expandedLoanId === loan.id && expandedLoan && (
-                      <tr>
-                        <td colSpan={9} className="bg-slate-50 p-3">
-                          <p className="mb-2 text-xs text-slate-700">Repaid: ₹{formatMoney(expandedLoan.total_repaid)} / ₹{formatMoney(expandedLoan.loan_amount)}</p>
-                          <div className="mb-3 h-2 rounded bg-slate-200">
-                            <div className="h-2 rounded bg-emerald-500" style={{ width: `${Math.min(100, (Number(expandedLoan.total_repaid || 0) / Number(expandedLoan.loan_amount || 1)) * 100)}%` }} />
-                          </div>
-                          <table className="w-full min-w-[640px] text-xs">
-                            <thead>
-                              <tr className="text-left text-slate-500">
-                                <th className="pb-1 pr-2">Month</th>
-                                <th className="pb-1 pr-2">Suggested</th>
-                                <th className="pb-1 pr-2">Amount</th>
-                                <th className="pb-1 pr-2">Status</th>
-                                <th className="pb-1 pr-2"> </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(expandedLoan.repayments || []).map((r) => (
-                                <tr key={r.id} className="border-t border-slate-200">
-                                  <td className="py-1 pr-2">{monthLabel(r.year, r.month)}</td>
-                                  <td className="py-1 pr-2">₹{formatMoney(r.suggested_amount)}</td>
-                                  <td className="py-1 pr-2">₹{formatMoney(r.repayment_amount)}</td>
-                                  <td className="py-1 pr-2">{r.status}</td>
-                                  <td className="py-1 pr-2 text-right space-x-2">
-                                    {r.status === 'pending' && ['active', 'on_hold'].includes(expandedLoan.status) && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            const reason = window.prompt('Reason to skip this month?') || '';
-                                            setSkipPending(reason);
-                                            handleSkip(r.id, monthLabel(r.year, r.month));
-                                          }}
-                                          className="text-amber-700 hover:underline"
-                                        >
-                                          Skip month
-                                        </button>
-                                        <button
-                                          type="button"
-                                          disabled={markPaidRepaymentId === r.id}
-                                          onClick={() => openMarkPaidDialog(r)}
-                                          className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
-                                        </button>
-                                      </>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                {activeGroups.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-slate-500">No active advances.</td>
+                  </tr>
+                ) : activeGroups.map((group) => {
+                  const open = expandedEmployeeId === group.employeeId;
+                  return (
+                    <Fragment key={group.employeeId}>
+                      <tr
+                        onClick={() => toggleEmployee(group.employeeId, group.loans.map((loan) => loan.id))}
+                        className={`cursor-pointer border-b border-slate-100 ${open ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
+                      >
+                        <td className="py-2 pr-3">
+                          <span className="font-medium text-slate-900">{group.employee_name} ({group.employee_code})</span>
+                          <span className="mt-0.5 block text-[11px] text-slate-500">
+                            {group.loans.length} loan{group.loans.length === 1 ? '' : 's'}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3">₹{formatMoney(group.loanAmount)}</td>
+                        <td className="py-2 pr-3">₹{formatMoney(group.totalRepaid)}</td>
+                        <td className="py-2 pr-3 font-semibold text-amber-700">₹{formatMoney(group.outstanding)}</td>
+                        <td className="py-2 pr-3">₹{formatMoney(group.monthly)}</td>
+                        <td className="py-2 pr-3">
+                          {group.nextYear
+                            ? `${monthLabel(group.nextYear, group.nextMonth)} • ₹${formatMoney(group.nextAmount)}`
+                            : '—'}
+                        </td>
+                        <td className="py-2 pr-3">
+                          <span className="inline-flex flex-wrap gap-1">
+                            {group.statuses.map((status) => <span key={status}>{statusBadge(status)}</span>)}
+                          </span>
                         </td>
                       </tr>
-                    )}
-                  </Fragment>
-                ))}
+                      {open && (
+                        <tr>
+                          <td colSpan={7} className="bg-slate-50 p-3">
+                            {renderEmployeeLoans(group)}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -597,100 +767,155 @@ export default function AdvancesPage() {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-600">
                   <th className="pb-2 pr-3">Employee</th>
-                  <th className="pb-2 pr-3">Loan Ref</th>
-                  <th className="pb-2 pr-3">Original Amount</th>
-                  <th className="pb-2 pr-3">This Month Deduction</th>
+                  <th className="pb-2 pr-3">This month deduction</th>
                   <th className="pb-2 pr-3">Suggested</th>
-                  <th className="pb-2 pr-3">Status</th>
-                  <th className="pb-2 pr-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {monthlyRepayments.length === 0 ? (
+                {monthlyGroups.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-6 text-center text-slate-500">
+                    <td colSpan={3} className="py-6 text-center text-slate-500">
                       No pending advance deductions for {monthLabel(selectedYear, selectedMonth)}.
                       {selectedYear === currentYear && selectedMonth === currentMonth
                         ? ' Employees with loans may already be skipped, deducted, or not due this month.'
                         : ' Change the month above to match the payroll period you are generating.'}
                     </td>
                   </tr>
-                ) : monthlyRepayments.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-3">{r.employee_name} ({r.employee_code})</td>
-                    <td className="py-2 pr-3">#{r.loan_id}</td>
-                    <td className="py-2 pr-3">₹{formatMoney(r.original_loan_amount)}</td>
-                    <td className="py-2 pr-3 font-semibold">₹{formatMoney(r.repayment_amount)}</td>
-                    <td className="py-2 pr-3">₹{formatMoney(r.suggested_amount)}</td>
-                    <td className="py-2 pr-3">{r.status}</td>
-                    <td className="py-2 pr-3 space-x-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const reason = window.prompt('Reason to skip this month?') || '';
-                          setSkipPending(reason);
-                          handleSkip(r.id, `${r.employee_name} — ${monthLabel(selectedYear, selectedMonth)}`);
-                        }}
-                        className="font-medium text-amber-700 hover:underline"
+                ) : monthlyGroups.map((group) => {
+                  const open = expandedEmployeeId === group.employeeId;
+                  return (
+                    <Fragment key={group.employeeId}>
+                      <tr
+                        onClick={() => toggleEmployee(group.employeeId, [])}
+                        className={`cursor-pointer border-b border-slate-100 ${open ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
                       >
-                        Skip month
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOverrideRepayment(r);
-                          setOverrideForm({ repayment_amount: String(r.repayment_amount), override_reason: '' });
-                          setOverrideOpen(true);
-                        }}
-                        className="text-blue-600 hover:underline"
-                      >
-                        Override
-                      </button>
-                      {r.status === 'pending' && ['active', 'on_hold'].includes(r.loan_status) && (
-                        <button
-                          type="button"
-                          disabled={markPaidRepaymentId === r.id}
-                          onClick={() => openMarkPaidDialog(r)}
-                          className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {markPaidRepaymentId === r.id ? 'Saving...' : 'Mark paid'}
-                        </button>
+                        <td className="py-2 pr-3">
+                          <span className="font-medium text-slate-900">{group.employee_name} ({group.employee_code})</span>
+                          <span className="mt-0.5 block text-[11px] text-slate-500">
+                            {group.repayments.length} deduction{group.repayments.length === 1 ? '' : 's'}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 font-semibold">₹{formatMoney(group.deduction)}</td>
+                        <td className="py-2 pr-3">₹{formatMoney(group.suggested)}</td>
+                      </tr>
+                      {open && (
+                        <tr>
+                          <td colSpan={3} className="bg-slate-50 p-3">
+                            <table className="w-full min-w-[720px] text-xs">
+                              <thead>
+                                <tr className="text-left text-slate-500">
+                                  <th className="pb-1 pr-2">Loan</th>
+                                  <th className="pb-1 pr-2">Original amount</th>
+                                  <th className="pb-1 pr-2">This month</th>
+                                  <th className="pb-1 pr-2">Suggested</th>
+                                  <th className="pb-1 pr-2">Status</th>
+                                  <th className="pb-1 pr-2"> </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.repayments.map((repayment) => (
+                                  <tr key={repayment.id} className="border-t border-slate-200 bg-white">
+                                    <td className="py-1.5 pr-2">#{repayment.loan_id}</td>
+                                    <td className="py-1.5 pr-2">₹{formatMoney(repayment.original_loan_amount)}</td>
+                                    <td className="py-1.5 pr-2 font-medium">₹{formatMoney(repayment.repayment_amount)}</td>
+                                    <td className="py-1.5 pr-2">₹{formatMoney(repayment.suggested_amount)}</td>
+                                    <td className="py-1.5 pr-2">{repayment.status}</td>
+                                    <td className="py-1.5 pr-2 text-right space-x-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const reason = window.prompt('Reason to skip this month?') || '';
+                                          setSkipPending(reason);
+                                          handleSkip(repayment.id, `${group.employee_name} — ${monthLabel(selectedYear, selectedMonth)}`);
+                                        }}
+                                        className="font-medium text-amber-700 hover:underline"
+                                      >
+                                        Skip month
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setOverrideRepayment(repayment);
+                                          setOverrideForm({ repayment_amount: String(repayment.repayment_amount), override_reason: '' });
+                                          setOverrideOpen(true);
+                                        }}
+                                        className="text-blue-600 hover:underline"
+                                      >
+                                        Override
+                                      </button>
+                                      {repayment.status === 'pending' && ['active', 'on_hold'].includes(repayment.loan_status) && (
+                                        <button
+                                          type="button"
+                                          disabled={markPaidRepaymentId === repayment.id}
+                                          onClick={() => openMarkPaidDialog(repayment)}
+                                          className="text-emerald-700 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {markPaidRepaymentId === repayment.id ? 'Saving...' : 'Mark paid'}
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
               </table>
             </div>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-xs">
+            <table className="w-full min-w-[640px] text-xs">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-600">
                 <th className="pb-2 pr-3">Employee</th>
-                <th className="pb-2 pr-3">Loan Amount</th>
-                <th className="pb-2 pr-3">Given On</th>
-                <th className="pb-2 pr-3">Closed On</th>
+                <th className="pb-2 pr-3">Total given</th>
+                <th className="pb-2 pr-3">Total repaid</th>
                 <th className="pb-2 pr-3">Status</th>
-                <th className="pb-2 pr-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {historyLoans.map((loan) => (
-                <tr key={loan.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-3">{loan.employee_name} ({loan.employee_code})</td>
-                  <td className="py-2 pr-3">₹{formatMoney(loan.loan_amount)}</td>
-                  <td className="py-2 pr-3">{fmtDate(loan.loan_date)}</td>
-                  <td className="py-2 pr-3">{fmtDate((loan.updated_at || '').slice(0, 10))}</td>
-                  <td className="py-2 pr-3">{statusBadge(loan.status)}</td>
-                  <td className="py-2 pr-3">
-                    <button type="button" className="text-rose-700 disabled:cursor-not-allowed disabled:opacity-50" disabled={deletePendingLoanId === loan.id} onClick={() => handleDeleteLoan(loan.id)}>
-                      {deletePendingLoanId === loan.id ? 'Deleting...' : 'Delete'}
-                    </button>
-                  </td>
+              {historyGroups.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-6 text-center text-slate-500">No closed advances.</td>
                 </tr>
-              ))}
+              ) : historyGroups.map((group) => {
+                const open = expandedEmployeeId === group.employeeId;
+                return (
+                  <Fragment key={group.employeeId}>
+                    <tr
+                      onClick={() => toggleEmployee(group.employeeId, group.loans.map((loan) => loan.id))}
+                      className={`cursor-pointer border-b border-slate-100 ${open ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
+                    >
+                      <td className="py-2 pr-3">
+                        <span className="font-medium text-slate-900">{group.employee_name} ({group.employee_code})</span>
+                        <span className="mt-0.5 block text-[11px] text-slate-500">
+                          {group.loans.length} loan{group.loans.length === 1 ? '' : 's'}
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3">₹{formatMoney(group.loanAmount)}</td>
+                      <td className="py-2 pr-3">₹{formatMoney(group.totalRepaid)}</td>
+                      <td className="py-2 pr-3">
+                        <span className="inline-flex flex-wrap gap-1">
+                          {group.statuses.map((status) => <span key={status}>{statusBadge(status)}</span>)}
+                        </span>
+                      </td>
+                    </tr>
+                    {open && (
+                      <tr>
+                        <td colSpan={4} className="bg-slate-50 p-3">
+                          {renderEmployeeLoans(group)}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
             </table>
           </div>
