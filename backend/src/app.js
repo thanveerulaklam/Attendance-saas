@@ -23,6 +23,7 @@ const adminRouter = require('./routes/admin');
 const advancesRouter = require('./routes/advances');
 const advanceLoansRouter = require('./routes/advanceLoans');
 const salaryPaymentsRouter = require('./routes/salaryPayments');
+const salaryIncrementsRouter = require('./routes/salaryIncrements');
 const demoEnquiriesRouter = require('./routes/demoEnquiries');
 const admsRouter = require('./routes/adms');
 const employeeAppRouter = require('./routes/employeeApp');
@@ -176,6 +177,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/advances', advancesRouter);
 app.use('/api/advance-loans', advanceLoansRouter);
 app.use('/api/salary-payments', salaryPaymentsRouter);
+app.use('/api/salary-increments', salaryIncrementsRouter);
 app.use('/api/demo-enquiries', demoEnquiriesRouter);
 
 // 404

@@ -19,6 +19,7 @@ const branchContext = (req) => ({
   role: req.user?.role,
   allowedBranchIds: req.allowedBranchIds,
   defaultBranchId: req.defaultBranchId,
+  userId: req.user?.user_id ?? null,
 });
 
 const createEmployee = asyncHandler(async (req, res) => {

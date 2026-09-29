@@ -4,6 +4,8 @@ const { getCompanyCountryCode } = require('./companyService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
 const { assignShiftBulk, resolveShiftIdsForEmployeesOnDate } = require('./shiftAssignmentService');
 const { todayIstYmd, pgDateToYmd } = require('../utils/istDate');
+const { resolveNewSalary } = require('../utils/salaryChange');
+const { insertSalaryIncrement } = require('./salaryIncrementService');
 const {
   validateCreateEmployee,
   validateUpdateEmployee,
@@ -621,6 +623,15 @@ async function updateEmployee(companyId, id, data, branchContext = {}) {
   try {
     await client.query('BEGIN');
 
+    const locked = await client.query(
+      `SELECT basic_salary FROM employees WHERE company_id = $1 AND id = $2 FOR UPDATE`,
+      [companyId, id]
+    );
+    if (locked.rowCount === 0) {
+      throw new AppError('Employee not found for this company', 404);
+    }
+    const previousSalary = locked.rows[0].basic_salary;
+
     const fields = [];
     const values = [companyId, id];
     let paramIndex = 3;
@@ -642,6 +653,28 @@ async function updateEmployee(companyId, id, data, branchContext = {}) {
 
     if (result.rowCount === 0) {
       throw new AppError('Employee not found for this company', 404);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'basic_salary')) {
+      const resolved = resolveNewSalary({
+        previousSalary,
+        newSalary: updates.basic_salary,
+      });
+      if (!resolved.error) {
+        await insertSalaryIncrement(client, {
+          companyId,
+          employeeId: id,
+          previousSalary: resolved.previousSalary,
+          newSalary: resolved.newSalary,
+          changeAmount: resolved.changeAmount,
+          effectiveDate: todayIstYmd(),
+          notes: null,
+          source: 'employee_form',
+          createdBy: branchContext.userId,
+        });
+      } else if (resolved.code !== 'unchanged') {
+        throw new AppError(resolved.error, 400);
+      }
     }
 
     await client.query('COMMIT');

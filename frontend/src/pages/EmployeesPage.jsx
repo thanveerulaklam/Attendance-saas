@@ -4,6 +4,7 @@ import { authFetch } from '../utils/api';
 import EmployeeFormModal from '../components/employees/EmployeeFormModal';
 import EmployeeBulkImportModal from '../components/employees/EmployeeBulkImportModal';
 import EmployeeFilters from '../components/employees/EmployeeFilters';
+import SalaryIncrementsPanel from '../components/employees/SalaryIncrementsPanel';
 import {
   downloadEmployeeListPdf,
   fetchAllEmployeesForExport,
@@ -66,6 +67,7 @@ export default function EmployeesPage() {
   const [branches, setBranches] = useState([]);
   const [devices, setDevices] = useState([]);
   const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [activeTab, setActiveTab] = useState('directory');
 
   const shiftNameById = Object.fromEntries(
     (shifts || []).map((s) => [String(s.id), s.shift_name])
@@ -401,9 +403,12 @@ export default function EmployeesPage() {
         <div>
           <h1 className="text-lg font-semibold text-slate-900">Employees</h1>
           <p className="text-xs text-slate-500">
-            Manage your workforce—view all details and options in one place.
+            {activeTab === 'increments'
+              ? 'See each employee’s current basic salary, raise or lower it, and open the full change history.'
+              : 'Manage your workforce—view all details and options in one place.'}
           </p>
         </div>
+        {activeTab === 'directory' ? (
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -432,8 +437,33 @@ export default function EmployeesPage() {
             Add employee
           </button>
         </div>
+        ) : null}
       </div>
 
+      <div className="flex flex-wrap gap-2 border-b border-slate-200">
+        {[
+          { id: 'directory', label: 'Directory' },
+          { id: 'increments', label: 'Salary increments' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            className={`rounded-t-lg px-4 py-2 text-xs font-medium ${
+              activeTab === tab.id
+                ? 'border border-b-0 border-slate-200 bg-white text-blue-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'increments' ? <SalaryIncrementsPanel /> : null}
+
+      {activeTab === 'directory' ? (
+      <>
       {/* Filters row */}
       <EmployeeFilters
         search={search}
@@ -656,6 +686,8 @@ export default function EmployeesPage() {
           </>
         )}
       </section>
+      </>
+      ) : null}
 
       {showModal && (
         <EmployeeFormModal
