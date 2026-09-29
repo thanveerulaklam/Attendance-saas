@@ -2283,7 +2283,7 @@ async function listWeeklyPayrollRecords(
               'outstanding_balance', l.outstanding_balance,
               'loan_amount', l.loan_amount
             )
-            ORDER BY r.id
+            ORDER BY l.loan_date ASC, r.id ASC
           ),
           '[]'::json
         )
@@ -3467,7 +3467,7 @@ async function listPayrollRecords(
                'outstanding_balance', l.outstanding_balance,
                'loan_amount', l.loan_amount
              )
-             ORDER BY r.id
+             ORDER BY l.loan_date ASC, r.id ASC
            ),
            '[]'::json
          )

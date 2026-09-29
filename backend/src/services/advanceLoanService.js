@@ -1621,6 +1621,7 @@ async function recordEmployeeMonthRepayment(companyId, employeeId, year, month, 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await ensureDueRepaymentsForPayrollMonth(companyId, y, m, { client });
 
     const pendingResult = await client.query(
       `SELECT
@@ -1733,6 +1734,123 @@ async function recordEmployeeMonthRepayment(companyId, employeeId, year, month, 
   }
 }
 
+/**
+ * Set how much of an employee's combined pending installments stays due this month.
+ * The oldest loans are kept first. Anything above the new amount is moved to a later month.
+ */
+async function adjustEmployeeMonthDeduction(companyId, employeeId, year, month, amount, reason) {
+  const employee = Number(employeeId);
+  const y = Number(year);
+  const m = Number(month);
+  if (!employee) throw new AppError('employee_id is required', 400);
+  if (!y || !m) throw new AppError('year and month are required', 400);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureDueRepaymentsForPayrollMonth(companyId, y, m, { client });
+    const pendingResult = await client.query(
+      `SELECT
+         r.*,
+         l.outstanding_balance,
+         l.loan_amount,
+         l.loan_date,
+         l.status AS loan_status
+       FROM employee_advance_repayments r
+       INNER JOIN employee_advance_loans l
+         ON l.id = r.loan_id AND l.company_id = r.company_id
+       WHERE r.company_id = $1
+         AND r.employee_id = $2
+         AND r.year = $3
+         AND r.month = $4
+         AND r.status = 'pending'
+         AND l.status IN ('active', 'on_hold')
+       ORDER BY l.loan_date ASC, l.id ASC, r.id ASC
+       FOR UPDATE OF r`,
+      [companyId, employee, y, m]
+    );
+
+    const allocation = allocateAgainstPending(pendingResult.rows, amount);
+    if (allocation.error === 'invalid') {
+      throw new AppError('Amount must be greater than 0', 400);
+    }
+    if (pendingResult.rowCount === 0) {
+      throw new AppError('No pending deduction for this employee this month', 400);
+    }
+    if (allocation.error === 'exceeds') {
+      throw new AppError(
+        `Amount cannot exceed the pending total (${allocation.pendingTotal})`,
+        400
+      );
+    }
+
+    const keptById = new Map(allocation.parts.map((part) => [String(part.id), part]));
+    const overrideReason = reason ? String(reason).trim() || null : null;
+    let moved = 0;
+    let reschedule = null;
+
+    for (const row of pendingResult.rows) {
+      const part = keptById.get(String(row.id));
+      const oldAmount = toMoney(row.repayment_amount);
+      const keep = part ? part.pay : 0;
+      const remainder = toMoney(oldAmount - keep);
+      if (remainder <= 0) continue;
+
+      if (keep <= 0) {
+        const note = overrideReason
+          ? `Moved off this month: ${overrideReason}`
+          : 'Moved off this month so the employee total could be deducted';
+        await client.query(
+          `UPDATE employee_advance_repayments
+           SET status = 'skipped',
+               is_overridden = true,
+               override_reason = $3,
+               notes = CASE WHEN notes IS NULL OR notes = '' THEN $4 ELSE notes || E'\n' || $4 END,
+               updated_at = NOW()
+           WHERE company_id = $1 AND id = $2 AND status = 'pending'`,
+          [companyId, row.id, overrideReason, note]
+        );
+        reschedule = await rescheduleSkippedAmount(client, row, remainder, note);
+      } else {
+        const note = `₹${keep} stays this month; ₹${remainder} moved to a later month`;
+        await client.query(
+          `UPDATE employee_advance_repayments
+           SET repayment_amount = $3,
+               is_overridden = true,
+               override_reason = $4,
+               notes = CASE WHEN notes IS NULL OR notes = '' THEN $5 ELSE notes || E'\n' || $5 END,
+               updated_at = NOW()
+           WHERE company_id = $1 AND id = $2 AND status = 'pending'`,
+          [companyId, row.id, keep, overrideReason, note]
+        );
+        reschedule = await rescheduleSkippedAmount(
+          client,
+          row,
+          remainder,
+          overrideReason || `Balance from ${row.month}/${row.year}`
+        );
+      }
+      moved = toMoney(moved + remainder);
+    }
+
+    await client.query('COMMIT');
+    return {
+      employee_id: employee,
+      year: y,
+      month: m,
+      pending_before: allocation.pendingTotal,
+      pending_after: toMoney(amount),
+      moved,
+      reschedule: reschedule?.rescheduled_to || null,
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   allocateAgainstPending,
   createAdvanceLoan,
@@ -1752,6 +1870,7 @@ module.exports = {
   updateAdvanceLoan,
   deleteLoan,
   recordEmployeeMonthRepayment,
+  adjustEmployeeMonthDeduction,
   addCalendarMonths,
   isBeforeMonth,
   isAfterMonth,

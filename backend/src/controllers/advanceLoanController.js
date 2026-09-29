@@ -136,6 +136,23 @@ async function skip(req, res, next) {
   }
 }
 
+async function adjustEmployeeMonth(req, res, next) {
+  try {
+    const body = req.body || {};
+    const data = await service.adjustEmployeeMonthDeduction(
+      req.companyId,
+      Number(req.params.employeeId),
+      body.year,
+      body.month,
+      body.amount,
+      body.override_reason
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 async function recordEmployeeRepayment(req, res, next) {
   try {
     const companyId = req.companyId;
@@ -179,4 +196,5 @@ module.exports = {
   skip,
   markPaid,
   recordEmployeeRepayment,
+  adjustEmployeeMonth,
 };
