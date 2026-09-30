@@ -8,6 +8,7 @@ const {
 } = require('../src/services/faceEnrollmentService');
 const { findMatchingFieldSite } = require('../src/services/fieldSiteService');
 const { parseGps } = require('../src/services/fieldPunchService');
+const { parseFieldPunchBody } = require('../src/validators/fieldPunchValidator');
 const { MAX_ACCURACY_M } = require('../src/services/mobileGeofenceService');
 
 function unitVector(at = 0) {
@@ -75,5 +76,21 @@ describe('field GPS accuracy', () => {
     const coords = parseGps(12.9716, 77.5946, 12);
     assert.equal(coords.lat, 12.9716);
     assert.equal(coords.accuracy, 12);
+  });
+});
+
+describe('field punch body', () => {
+  const gps = { latitude: 12.9716, longitude: 77.5946, location_accuracy_m: 8 };
+
+  it('accepts an explicit in or out punch', () => {
+    assert.equal(parseFieldPunchBody({ ...gps, punch_type: 'IN' }).punch_type, 'in');
+    assert.equal(parseFieldPunchBody({ ...gps, punch_type: 'out' }).punch_type, 'out');
+  });
+
+  it('rejects an invalid punch type', () => {
+    assert.throws(
+      () => parseFieldPunchBody({ ...gps, punch_type: 'break' }),
+      (err) => err.code === 'INVALID_PUNCH_TYPE'
+    );
   });
 });

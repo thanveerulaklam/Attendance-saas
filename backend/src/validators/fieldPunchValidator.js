@@ -24,11 +24,22 @@ function parseFieldPunchBody(body) {
     }
   }
 
+  let punchType = null;
+  const rawType = body?.punch_type ?? body?.punchType;
+  if (rawType != null && String(rawType).trim() !== '') {
+    const normalized = String(rawType).trim().toLowerCase();
+    if (normalized !== 'in' && normalized !== 'out') {
+      throw new AppError('punch_type must be "in" or "out"', 422, 'INVALID_PUNCH_TYPE');
+    }
+    punchType = normalized;
+  }
+
   return {
     latitude,
     longitude,
     location_accuracy_m: locationAccuracyM,
     embedding: vector,
+    punch_type: punchType,
   };
 }
 

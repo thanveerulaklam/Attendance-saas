@@ -159,7 +159,10 @@ async function processFieldPunch(companyId, employeeId, body, clientIp) {
         );
       }
 
-      const punchType = await inferNextPunchType(client, companyId, employeeId, punchTime);
+      const punchType =
+        body.punch_type === 'in' || body.punch_type === 'out'
+          ? body.punch_type
+          : await inferNextPunchType(client, companyId, employeeId, punchTime);
       const insertResult = await client.query(
         `INSERT INTO attendance_logs (
            company_id, employee_id, punch_time, punch_type, device_id, branch_id,
