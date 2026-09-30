@@ -608,6 +608,8 @@ export default function PayrollPage() {
     open: false,
     row: null,
     repayments: [],
+    loans: [],
+    loansLoading: false,
     selectedRepaymentId: null,
     amount: '',
     note: '',
@@ -1948,7 +1950,7 @@ export default function PayrollPage() {
     }
   };
 
-  const openLoanAdjustModal = (row) => {
+  const openLoanAdjustModal = async (row) => {
     if (!subscriptionAllowed || isLoanAdvanceDeducted(row)) return;
     const repayments = getPendingLoanRepayments(row);
     if (!repayments.length) return;
@@ -1957,10 +1959,32 @@ export default function PayrollPage() {
       open: true,
       row,
       repayments,
+      loans: [],
+      loansLoading: true,
       selectedRepaymentId: null,
       amount: String(scheduled),
       note: '',
     });
+    try {
+      const res = await authFetch(`/api/advance-loans/employee/${row.employee_id}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to load loans');
+      const loans = (Array.isArray(json.data) ? json.data : []).filter((loan) => (
+        loan.status === 'active' || loan.status === 'on_hold'
+      ));
+      setLoanAdjustModal((current) => (
+        current.open && String(current.row?.employee_id) === String(row.employee_id)
+          ? { ...current, loans, loansLoading: false }
+          : current
+      ));
+    } catch (err) {
+      setLoanAdjustModal((current) => (
+        current.open ? { ...current, loansLoading: false } : current
+      ));
+      setToast({ type: 'error', message: err.message || 'Failed to load loans' });
+    }
   };
 
   const closeLoanAdjustModal = () => {
@@ -1968,6 +1992,8 @@ export default function PayrollPage() {
       open: false,
       row: null,
       repayments: [],
+      loans: [],
+      loansLoading: false,
       selectedRepaymentId: null,
       amount: '',
       note: '',
@@ -1978,15 +2004,21 @@ export default function PayrollPage() {
     const { row, amount, note, repayments } = loanAdjustModal;
     if (!row || !subscriptionAllowed || loanAdjustSaving) return;
     const repaymentAmount = Number(amount);
+    const outstanding = (loanAdjustModal.loans || []).reduce(
+      (sum, loan) => sum + Number(loan.outstanding_balance || 0),
+      0
+    );
     const scheduled = repayments.reduce((sum, repayment) => sum + Number(repayment.repayment_amount || 0), 0);
+    const cap = outstanding > 0 ? outstanding : scheduled;
+    if (loanAdjustModal.loansLoading) return;
     if (!Number.isFinite(repaymentAmount) || repaymentAmount <= 0) {
       setToast({ type: 'error', message: 'Enter a valid amount greater than 0' });
       return;
     }
-    if (repaymentAmount > scheduled + 0.001) {
+    if (repaymentAmount > cap + 0.001) {
       setToast({
         type: 'error',
-        message: `Amount cannot exceed the pending total (${fmt(scheduled)})`,
+        message: `Amount cannot exceed the outstanding balance (${fmt(cap)})`,
       });
       return;
     }
@@ -2015,13 +2047,16 @@ export default function PayrollPage() {
       }
       const json = await res.json();
       const moved = Number(json.data?.moved || 0);
+      const broughtForward = Number(json.data?.brought_forward || 0);
       closeLoanAdjustModal();
       setReloadKey((k) => k + 1);
       setToast({
         type: 'success',
-        message: moved > 0
-          ? `This month is now ${fmtSym(repaymentAmount)}. ${fmtSym(moved)} moved to a later month.`
-          : `Loan deduction set to ${fmtSym(repaymentAmount)} for ${row.employee_name || 'employee'}.`,
+        message: broughtForward > 0
+          ? `This month is now ${fmtSym(repaymentAmount)}, taken from the outstanding balance.`
+          : moved > 0
+            ? `This month is now ${fmtSym(repaymentAmount)}. ${fmtSym(moved)} moved to a later month.`
+            : `Loan deduction set to ${fmtSym(repaymentAmount)} for ${row.employee_name || 'employee'}.`,
       });
     } catch (err) {
       setToast({
@@ -3398,40 +3433,47 @@ export default function PayrollPage() {
                   )}
             </p>
             <p className="mt-2 text-[11px] text-slate-500">
-              This is the combined total of every loan. Set how much to deduct from salary this month.
-              The rest moves to a later month.
+              Outstanding is everything still owed on all loans. Deduct this month can be any amount up to that balance.
             </p>
             {(() => {
               const repayments = loanAdjustModal.repayments;
+              const loans = loanAdjustModal.loans || [];
               const scheduled = repayments.reduce((sum, repayment) => sum + Number(repayment.repayment_amount || 0), 0);
-              const loans = new Map();
+              const dueByLoan = new Map();
               repayments.forEach((repayment) => {
-                loans.set(String(repayment.loan_id), repayment);
+                const key = String(repayment.loan_id);
+                dueByLoan.set(key, (dueByLoan.get(key) || 0) + Number(repayment.repayment_amount || 0));
               });
-              const loanTotal = [...loans.values()].reduce((sum, repayment) => sum + Number(repayment.loan_amount || 0), 0);
-              const outstanding = [...loans.values()].reduce((sum, repayment) => sum + Number(repayment.outstanding_balance || 0), 0);
+              const loanTotal = loans.reduce((sum, loan) => sum + Number(loan.loan_amount || 0), 0);
+              const outstanding = loans.reduce((sum, loan) => sum + Number(loan.outstanding_balance || 0), 0);
               return (
                 <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
                   <div className="flex justify-between gap-2">
-                    <span>Scheduled this month</span>
+                    <span>Due this month</span>
                     <span className="font-medium text-slate-800">{fmt(scheduled)}</span>
                   </div>
                   <div className="mt-1 flex justify-between gap-2">
-                    <span>Total given ({loans.size} loan{loans.size === 1 ? '' : 's'})</span>
-                    <span>{fmt(loanTotal)}</span>
+                    <span>Total given ({loanAdjustModal.loansLoading ? '…' : loans.length} loan{loans.length === 1 ? '' : 's'})</span>
+                    <span>{loanAdjustModal.loansLoading ? '…' : fmt(loanTotal)}</span>
                   </div>
                   <div className="mt-1 flex justify-between gap-2">
                     <span>Outstanding balance</span>
-                    <span className="font-medium text-amber-800">{fmt(outstanding)}</span>
+                    <span className="font-medium text-amber-800">{loanAdjustModal.loansLoading ? '…' : fmt(outstanding)}</span>
                   </div>
-                  {repayments.length > 1 && (
+                  {loans.length > 0 && (
                     <div className="mt-2 space-y-1 border-t border-slate-200 pt-2">
-                      {repayments.map((repayment) => (
-                        <div key={repayment.id} className="flex justify-between gap-2 text-slate-500">
-                          <span>Loan #{repayment.loan_id}</span>
-                          <span>{fmt(repayment.repayment_amount)} this month</span>
-                        </div>
-                      ))}
+                      {loans.map((loan) => {
+                        const due = dueByLoan.get(String(loan.id)) || 0;
+                        return (
+                          <div key={loan.id} className="flex justify-between gap-2 text-slate-500">
+                            <span>Loan #{loan.id}</span>
+                            <span>
+                              {fmt(loan.outstanding_balance)} left
+                              {due > 0 ? ` · ${fmt(due)} this month` : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -3481,7 +3523,7 @@ export default function PayrollPage() {
               <button
                 type="button"
                 onClick={() => void saveLoanAdjust()}
-                disabled={loanAdjustSaving}
+                disabled={loanAdjustSaving || loanAdjustModal.loansLoading}
                 className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 {loanAdjustSaving ? 'Saving…' : 'Save amount'}

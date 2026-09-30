@@ -1734,9 +1734,123 @@ async function recordEmployeeMonthRepayment(companyId, employeeId, year, month, 
   }
 }
 
+async function outstandingForEmployee(client, companyId, employeeId) {
+  const result = await client.query(
+    `SELECT COALESCE(SUM(outstanding_balance), 0) AS total
+     FROM employee_advance_loans
+     WHERE company_id = $1
+       AND employee_id = $2
+       AND status IN ('active', 'on_hold')`,
+    [companyId, Number(employeeId)]
+  );
+  return toMoney(result.rows[0]?.total || 0);
+}
+
+/**
+ * Bring later installments into this payroll month, oldest loan first.
+ * Future pending rows are reduced by the same amount so the balance is not collected twice.
+ */
+async function pullOutstandingIntoMonth(client, companyId, employeeId, year, month, extra, reason) {
+  let remaining = toMoney(extra);
+  if (remaining <= 0) return 0;
+
+  const loans = await client.query(
+    `SELECT id, employee_id, outstanding_balance
+     FROM employee_advance_loans
+     WHERE company_id = $1
+       AND employee_id = $2
+       AND status IN ('active', 'on_hold')
+       AND outstanding_balance > 0
+     ORDER BY loan_date ASC, id ASC
+     FOR UPDATE`,
+    [companyId, Number(employeeId)]
+  );
+
+  const note = reason
+    ? `Brought into this payroll month: ${reason}`
+    : 'Brought into this payroll month from the outstanding balance';
+
+  for (const loan of loans.rows) {
+    if (remaining <= 0) break;
+    const pendingRows = await client.query(
+      `SELECT id, year, month, repayment_amount
+       FROM employee_advance_repayments
+       WHERE company_id = $1 AND loan_id = $2 AND status = 'pending'
+       ORDER BY year ASC, month ASC
+       FOR UPDATE`,
+      [companyId, loan.id]
+    );
+    const thisMonth = pendingRows.rows.find((row) => (
+      Number(row.year) === Number(year) && Number(row.month) === Number(month)
+    ));
+    const thisAmount = toMoney(thisMonth?.repayment_amount || 0);
+    const room = toMoney(Number(loan.outstanding_balance) - thisAmount);
+    const add = toMoney(Math.min(remaining, Math.max(0, room)));
+    if (add <= 0) continue;
+
+    if (thisMonth) {
+      await client.query(
+        `UPDATE employee_advance_repayments
+         SET repayment_amount = $3,
+             is_overridden = true,
+             notes = CASE WHEN notes IS NULL OR notes = '' THEN $4 ELSE notes || E'\n' || $4 END,
+             updated_at = NOW()
+         WHERE company_id = $1 AND id = $2`,
+        [companyId, thisMonth.id, toMoney(thisAmount + add), note]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO employee_advance_repayments (
+           company_id, employee_id, loan_id, year, month,
+           repayment_amount, suggested_amount, status, notes, is_overridden
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $6, 'pending', $7, true)`,
+        [companyId, loan.employee_id, loan.id, Number(year), Number(month), add, note]
+      );
+    }
+
+    let toReduce = add;
+    for (const future of pendingRows.rows) {
+      if (toReduce <= 0) break;
+      const isLater = Number(future.year) > Number(year)
+        || (Number(future.year) === Number(year) && Number(future.month) > Number(month));
+      if (!isLater) continue;
+      const futureAmount = toMoney(future.repayment_amount);
+      const cut = toMoney(Math.min(futureAmount, toReduce));
+      const left = toMoney(futureAmount - cut);
+      if (left <= 0) {
+        await client.query(
+          `UPDATE employee_advance_repayments
+           SET status = 'skipped',
+               notes = CASE WHEN notes IS NULL OR notes = '' THEN $3 ELSE notes || E'\n' || $3 END,
+               updated_at = NOW()
+           WHERE company_id = $1 AND id = $2 AND status = 'pending'`,
+          [companyId, future.id, note]
+        );
+      } else {
+        await client.query(
+          `UPDATE employee_advance_repayments
+           SET repayment_amount = $3,
+               updated_at = NOW()
+           WHERE company_id = $1 AND id = $2 AND status = 'pending'`,
+          [companyId, future.id, left]
+        );
+      }
+      toReduce = toMoney(toReduce - cut);
+    }
+    remaining = toMoney(remaining - add);
+  }
+
+  if (remaining > 0) {
+    throw new AppError('Amount cannot exceed the outstanding balance', 400);
+  }
+  return toMoney(extra);
+}
+
 /**
  * Set how much of an employee's combined pending installments stays due this month.
  * The oldest loans are kept first. Anything above the new amount is moved to a later month.
+ * An amount above this month's schedule is taken from the remaining outstanding balance.
  */
 async function adjustEmployeeMonthDeduction(companyId, employeeId, year, month, amount, reason) {
   const employee = Number(employeeId);
@@ -1774,14 +1888,36 @@ async function adjustEmployeeMonthDeduction(companyId, employeeId, year, month, 
     if (allocation.error === 'invalid') {
       throw new AppError('Amount must be greater than 0', 400);
     }
-    if (pendingResult.rowCount === 0) {
-      throw new AppError('No pending deduction for this employee this month', 400);
-    }
-    if (allocation.error === 'exceeds') {
+    const outstandingTotal = await outstandingForEmployee(client, companyId, employee);
+    if (toMoney(amount) > outstandingTotal) {
       throw new AppError(
-        `Amount cannot exceed the pending total (${allocation.pendingTotal})`,
+        `Amount cannot exceed the outstanding balance (${outstandingTotal})`,
         400
       );
+    }
+    if (allocation.error === 'exceeds') {
+      const broughtForward = toMoney(toMoney(amount) - allocation.pendingTotal);
+      await pullOutstandingIntoMonth(
+        client,
+        companyId,
+        employee,
+        y,
+        m,
+        broughtForward,
+        reason
+      );
+      await client.query('COMMIT');
+      return {
+        employee_id: employee,
+        year: y,
+        month: m,
+        pending_before: allocation.pendingTotal,
+        pending_after: toMoney(amount),
+        moved: 0,
+        brought_forward: broughtForward,
+        outstanding: outstandingTotal,
+        reschedule: null,
+      };
     }
 
     const keptById = new Map(allocation.parts.map((part) => [String(part.id), part]));
@@ -1841,6 +1977,7 @@ async function adjustEmployeeMonthDeduction(companyId, employeeId, year, month, 
       pending_before: allocation.pendingTotal,
       pending_after: toMoney(amount),
       moved,
+      outstanding: outstandingTotal,
       reschedule: reschedule?.rescheduled_to || null,
     };
   } catch (err) {
