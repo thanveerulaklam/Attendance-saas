@@ -26,6 +26,22 @@ body {
   transform: rotate(-45deg);
 }
 
+.field-locate-btn {
+  width: 34px;
+  height: 34px;
+  margin-top: 8px;
+  border: none;
+  background: #fff;
+  color: #1d4ed8;
+  font-size: 16px;
+  line-height: 34px;
+  cursor: pointer;
+}
+
+.field-locate-btn:hover {
+  background: #eff6ff;
+}
+
 /* Payslip modal: print only the payslip card, not the payroll page behind it */
 @media print {
   body.payslip-printing * {

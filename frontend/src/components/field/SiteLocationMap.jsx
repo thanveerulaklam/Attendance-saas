@@ -37,20 +37,26 @@ export default function SiteLocationMap({
   radiusM = 200,
   onChange,
   disabled = false,
+  followUser = false,
 }) {
   const wrapRef = useRef(null);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
   const circleRef = useRef(null);
+  const youAreHereRef = useRef(null);
   const onChangeRef = useRef(onChange);
   const disabledRef = useRef(disabled);
+  const followUserRef = useRef(followUser);
+  const askedLocateRef = useRef(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(null);
+  const [locateState, setLocateState] = useState(followUser ? 'locating' : 'idle');
 
   onChangeRef.current = onChange;
   disabledRef.current = disabled;
+  followUserRef.current = followUser;
 
   const lat = parseCoord(latitude);
   const lng = parseCoord(longitude);
@@ -72,6 +78,56 @@ export default function SiteLocationMap({
     }).addTo(map);
     map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
 
+    const markYouAreHere = (latlng, accuracy) => {
+      if (youAreHereRef.current) {
+        map.removeLayer(youAreHereRef.current);
+      }
+      const group = L.layerGroup().addTo(map);
+      L.circle(latlng, {
+        radius: Math.max(Number(accuracy) || 40, 20),
+        color: '#2563eb',
+        weight: 1,
+        fillColor: '#60a5fa',
+        fillOpacity: 0.12,
+      }).addTo(group);
+      L.circleMarker(latlng, {
+        radius: 7,
+        color: '#fff',
+        weight: 2,
+        fillColor: '#2563eb',
+        fillOpacity: 1,
+      }).addTo(group);
+      youAreHereRef.current = group;
+    };
+
+    const startLocate = (panToUser) => {
+      setLocateState('locating');
+      map.locate({
+        setView: panToUser,
+        maxZoom: PIN_ZOOM,
+        enableHighAccuracy: true,
+        timeout: 12000,
+        maximumAge: 15000,
+      });
+    };
+
+    map.on('locationfound', (event) => {
+      markYouAreHere(event.latlng, event.accuracy);
+      setLocateState('found');
+      if (disabledRef.current || markerRef.current || !followUserRef.current) return;
+      const next = onChangeRef.current;
+      if (typeof next === 'function') {
+        next({
+          latitude: formatCoord(event.latlng.lat),
+          longitude: formatCoord(event.latlng.lng),
+        });
+      }
+    });
+
+    map.on('locationerror', () => {
+      setLocateState((prev) => (prev === 'found' ? prev : 'denied'));
+    });
+
     map.on('click', (event) => {
       if (disabledRef.current) return;
       const next = onChangeRef.current;
@@ -83,7 +139,29 @@ export default function SiteLocationMap({
       }
     });
 
+    const LocateControl = L.Control.extend({
+      onAdd() {
+        const btn = L.DomUtil.create('button', 'leaflet-bar field-locate-btn');
+        btn.type = 'button';
+        btn.title = 'Show my current location';
+        btn.setAttribute('aria-label', 'Show my current location');
+        btn.innerHTML = '<span aria-hidden="true">◎</span>';
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', (event) => {
+          L.DomEvent.stop(event);
+          startLocate(true);
+        });
+        return btn;
+      },
+    });
+    map.addControl(new LocateControl({ position: 'topleft' }));
+
     mapRef.current = map;
+    if (!askedLocateRef.current) {
+      askedLocateRef.current = true;
+      startLocate(Boolean(followUserRef.current));
+    }
+
     const resize = window.setTimeout(() => map.invalidateSize(), 80);
     const resizeAgain = window.setTimeout(() => map.invalidateSize(), 300);
 
@@ -94,6 +172,7 @@ export default function SiteLocationMap({
       mapRef.current = null;
       markerRef.current = null;
       circleRef.current = null;
+      youAreHereRef.current = null;
     };
   }, []);
 
@@ -247,8 +326,14 @@ export default function SiteLocationMap({
         style={{ minHeight: 256 }}
       />
       <p className="text-[11px] text-slate-500">
-        Click the map or drag the pin to fill latitude and longitude. The blue circle is the punch
-        radius. Map © OpenStreetMap (free).
+        {locateState === 'locating'
+          ? 'Finding your current location…'
+          : locateState === 'found'
+            ? 'Showing your current location. Drag the pin if the site is a little further away.'
+            : locateState === 'denied'
+              ? 'Could not read GPS. Search a place, click the map, or use Use my location.'
+              : 'Click the map or drag the pin to fill latitude and longitude.'}{' '}
+        The larger blue circle is the punch radius. Map © OpenStreetMap (free).
       </p>
     </div>
   );

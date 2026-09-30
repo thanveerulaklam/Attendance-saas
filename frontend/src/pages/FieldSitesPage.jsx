@@ -266,10 +266,12 @@ export default function FieldSitesPage() {
               />
             </label>
             <SiteLocationMap
+              key={editingId || 'new'}
               latitude={form.latitude}
               longitude={form.longitude}
               radiusM={form.radius_m}
               disabled={saving}
+              followUser={!editingId}
               onChange={({ latitude, longitude }) =>
                 setForm((prev) => ({ ...prev, latitude, longitude }))
               }
