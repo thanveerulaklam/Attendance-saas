@@ -3,6 +3,8 @@ import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import FieldEmployeesPanel from '../components/employees/FieldEmployeesPanel';
+import SiteLocationMap from '../components/field/SiteLocationMap';
 
 const DEFAULT_RADIUS = 200;
 
@@ -18,6 +20,7 @@ function emptyForm() {
 export default function FieldSitesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const canManageEmployees = isAdmin || user?.role === 'hr';
   const [enabled, setEnabled] = useState(false);
   const [savingFlag, setSavingFlag] = useState(false);
   const [sites, setSites] = useState([]);
@@ -262,6 +265,15 @@ export default function FieldSitesPage() {
                 required
               />
             </label>
+            <SiteLocationMap
+              latitude={form.latitude}
+              longitude={form.longitude}
+              radiusM={form.radius_m}
+              disabled={saving}
+              onChange={({ latitude, longitude }) =>
+                setForm((prev) => ({ ...prev, latitude, longitude }))
+              }
+            />
             <label className="text-xs text-slate-600">
               Latitude
               <input
@@ -327,7 +339,7 @@ export default function FieldSitesPage() {
         {loading ? (
           <p className="mt-3 text-xs text-slate-500">Loading…</p>
         ) : sites.length === 0 ? (
-          <p className="mt-3 text-xs text-slate-500">No field sites yet. Create one, then assign it on the employee form.</p>
+          <p className="mt-3 text-xs text-slate-500">No field sites yet. Create one, then assign employees below.</p>
         ) : (
           <ul className="mt-3 divide-y divide-slate-100">
             {sites.map((site) => (
@@ -361,6 +373,12 @@ export default function FieldSitesPage() {
           </ul>
         )}
       </section>
+
+      <FieldEmployeesPanel
+        sites={sites}
+        canManage={canManageEmployees}
+        setToast={setToast}
+      />
     </div>
   );
 }

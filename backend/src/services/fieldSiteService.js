@@ -1,6 +1,10 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const { haversineDistanceMeters } = require('../utils/geo');
+const { suggestNextEmployeeCode } = require('../utils/employeeCode');
+const { todayIstYmd } = require('../utils/istDate');
+const employeeService = require('./employeeService');
+const employeeAppService = require('./employeeAppService');
 
 const MIN_RADIUS_M = 50;
 const MAX_RADIUS_M = 5000;
@@ -168,6 +172,124 @@ async function setEmployeeFieldSites(companyId, employeeId, siteIds) {
   return listAssignedFieldSites(companyId, employeeId);
 }
 
+async function nextFieldEmployeeCode(companyId) {
+  const result = await pool.query(
+    `SELECT employee_code FROM employees WHERE company_id = $1`,
+    [companyId]
+  );
+  const next = suggestNextEmployeeCode(result.rows.map((row) => row.employee_code));
+  return next || `F${Date.now().toString().slice(-6)}`;
+}
+
+async function listFieldEmployees(companyId, allowedBranchIds = null) {
+  const params = [companyId];
+  let branchClause = '';
+  if (allowedBranchIds != null) {
+    if (allowedBranchIds.length === 0) return [];
+    params.push(allowedBranchIds);
+    branchClause = ` AND e.branch_id = ANY($2::bigint[])`;
+  }
+
+  const result = await pool.query(
+    `SELECT
+       e.id,
+       e.name,
+       e.employee_code,
+       e.status,
+       e.attendance_channel,
+       e.department,
+       u.email AS app_email,
+       COALESCE(ARRAY_REMOVE(ARRAY_AGG(efs.field_site_id ORDER BY s.name ASC), NULL), '{}') AS field_site_ids,
+       COALESCE(ARRAY_REMOVE(ARRAY_AGG(s.name ORDER BY s.name ASC), NULL), '{}') AS field_site_names
+     FROM employees e
+     LEFT JOIN users u
+       ON u.company_id = e.company_id AND u.employee_id = e.id AND u.role = 'employee'
+     LEFT JOIN employee_field_sites efs
+       ON efs.company_id = e.company_id AND efs.employee_id = e.id
+     LEFT JOIN field_sites s
+       ON s.id = efs.field_site_id AND s.company_id = e.company_id
+     WHERE e.company_id = $1 AND e.status = 'active'${branchClause}
+     GROUP BY e.id, u.email
+     ORDER BY LOWER(TRIM(e.name)) ASC, e.id ASC`,
+    params
+  );
+
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    name: row.name,
+    employee_code: row.employee_code,
+    status: row.status,
+    attendance_channel: row.attendance_channel || 'device',
+    department: row.department,
+    app_email: row.app_email || null,
+    field_site_ids: (row.field_site_ids || [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isInteger(id) && id > 0),
+    field_site_names: (row.field_site_names || []).filter(Boolean),
+  }));
+}
+
+async function createFieldEmployee(companyId, body = {}, branchContext = {}) {
+  const name = String(body.name || '').trim();
+  const email = String(body.email || '').trim().toLowerCase();
+  const password = String(body.password || '');
+  let employeeCode = String(body.employee_code || '').trim();
+  const siteIds = body.site_ids || body.field_site_ids || [];
+  const basicSalary = body.basic_salary;
+  const joinDate = String(body.join_date || '').trim() || todayIstYmd();
+  const attendanceChannel = body.attendance_channel === 'both' ? 'both' : 'mobile';
+
+  if (name.length < 2) {
+    throw new AppError('Name must be at least 2 characters', 400);
+  }
+  if (!email) {
+    throw new AppError('Email is required for PunchPay Field login', 400);
+  }
+  if (!password || password.length < 6) {
+    throw new AppError('Password must be at least 6 characters', 400);
+  }
+  if (basicSalary == null || basicSalary === '' || Number(basicSalary) <= 0) {
+    throw new AppError('Basic salary is required', 400);
+  }
+
+  if (!employeeCode) {
+    employeeCode = await nextFieldEmployeeCode(companyId);
+  }
+
+  const employee = await employeeService.createEmployee(
+    companyId,
+    {
+      name,
+      employee_code: employeeCode,
+      basic_salary: Number(basicSalary),
+      join_date: joinDate,
+      status: 'active',
+      attendance_channel: attendanceChannel,
+      ...(body.branch_id != null && body.branch_id !== '' ? { branch_id: Number(body.branch_id) } : {}),
+    },
+    branchContext
+  );
+
+  const sites = await setEmployeeFieldSites(companyId, employee.id, siteIds);
+  const login = await employeeAppService.provisionEmployeeAppAccess(companyId, employee.id, {
+    email,
+    password,
+    name,
+  });
+
+  return {
+    id: Number(employee.id),
+    name: employee.name,
+    employee_code: employee.employee_code,
+    status: employee.status,
+    attendance_channel: employee.attendance_channel || attendanceChannel,
+    department: employee.department,
+    app_email: login.user.email,
+    field_site_ids: sites.map((site) => Number(site.id)),
+    field_site_names: sites.map((site) => site.name),
+  };
+}
+
 function findMatchingFieldSite(lat, lng, sites) {
   let best = null;
   for (const site of sites) {
@@ -197,5 +319,7 @@ module.exports = {
   listAssignedFieldSites,
   listAssignedFieldSiteIds,
   setEmployeeFieldSites,
+  listFieldEmployees,
+  createFieldEmployee,
   findMatchingFieldSite,
 };

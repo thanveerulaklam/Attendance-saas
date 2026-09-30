@@ -1,6 +1,7 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
 const employeeService = require('../services/employeeService');
+const auditService = require('../services/auditService');
 const {
   listFieldSites,
   createFieldSite,
@@ -8,6 +9,8 @@ const {
   deleteFieldSite,
   listAssignedFieldSites,
   setEmployeeFieldSites,
+  listFieldEmployees,
+  createFieldEmployee,
 } = require('../services/fieldSiteService');
 
 const branchContext = (req) => ({
@@ -121,6 +124,30 @@ async function putEmployeeSites(req, res, next) {
   }
 }
 
+async function listFieldEmployeesHandler(req, res, next) {
+  try {
+    const employees = await listFieldEmployees(req.companyId, req.allowedBranchIds);
+    return res.json({ success: true, data: employees });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function createFieldEmployeeHandler(req, res, next) {
+  try {
+    const employee = await createFieldEmployee(req.companyId, req.body || {}, branchContext(req));
+    auditService
+      .log(req.companyId, req.user?.user_id, 'employee.create', 'employee', employee.id, {
+        name: employee.name,
+        source: 'field_sites',
+      })
+      .catch(() => {});
+    return res.status(201).json({ success: true, data: employee });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   updateFieldSettings,
   listSites,
@@ -129,4 +156,6 @@ module.exports = {
   removeSite,
   getEmployeeSites,
   putEmployeeSites,
+  listFieldEmployeesHandler,
+  createFieldEmployeeHandler,
 };

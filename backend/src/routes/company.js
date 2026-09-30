@@ -24,6 +24,8 @@ const {
   createSite,
   updateSite,
   removeSite,
+  listFieldEmployeesHandler,
+  createFieldEmployeeHandler,
 } = require('../controllers/fieldSiteController');
 const { downloadKioskApk } = require('../controllers/kioskApkController');
 const {
@@ -100,6 +102,8 @@ router.get('/field-sites', withCompanyAuth, listSites);
 router.post('/field-sites', adminOnly, createSite);
 router.patch('/field-sites/:id', adminOnly, updateSite);
 router.delete('/field-sites/:id', adminOnly, removeSite);
+router.get('/field-employees', withCompanyAuth, listFieldEmployeesHandler);
+router.post('/field-employees', withCompanyAuth, createFieldEmployeeHandler);
 
 // Kiosk tablet pairing (admin only)
 router.get('/branches/:id/kiosk', adminOnly, getBranchKiosk);

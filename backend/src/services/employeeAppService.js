@@ -43,24 +43,31 @@ async function provisionEmployeeAppAccess(companyId, employeeId, body = {}) {
 
   const hash = await bcrypt.hash(password, 10);
 
-  if (existing.rowCount > 0) {
-    const updated = await pool.query(
-      `UPDATE users
-       SET email = $1, password = $2, name = $3
-       WHERE id = $4
-       RETURNING ${USER_PUBLIC_FIELDS}`,
-      [email, hash, name, existing.rows[0].id]
-    );
-    return { created: false, user: updated.rows[0] };
-  }
+  try {
+    if (existing.rowCount > 0) {
+      const updated = await pool.query(
+        `UPDATE users
+         SET email = $1, password = $2, name = $3
+         WHERE id = $4
+         RETURNING ${USER_PUBLIC_FIELDS}`,
+        [email, hash, name, existing.rows[0].id]
+      );
+      return { created: false, user: updated.rows[0] };
+    }
 
-  const inserted = await pool.query(
-    `INSERT INTO users (company_id, name, email, password, role, employee_id)
-     VALUES ($1, $2, $3, $4, 'employee', $5)
-     RETURNING ${USER_PUBLIC_FIELDS}`,
-    [companyId, name, email, hash, employeeId]
-  );
-  return { created: true, user: inserted.rows[0] };
+    const inserted = await pool.query(
+      `INSERT INTO users (company_id, name, email, password, role, employee_id)
+       VALUES ($1, $2, $3, $4, 'employee', $5)
+       RETURNING ${USER_PUBLIC_FIELDS}`,
+      [companyId, name, email, hash, employeeId]
+    );
+    return { created: true, user: inserted.rows[0] };
+  } catch (err) {
+    if (err.code === '23505') {
+      throw new AppError('That email is already used for another login in this company', 409);
+    }
+    throw err;
+  }
 }
 
 async function revokeEmployeeAppAccess(companyId, employeeId) {

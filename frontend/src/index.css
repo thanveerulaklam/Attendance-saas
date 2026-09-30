@@ -4,6 +4,28 @@ body {
   @apply bg-slate-50 text-slate-900 antialiased;
 }
 
+.leaflet-container {
+  z-index: 0;
+  font-family: inherit;
+}
+
+.field-site-pin {
+  background: transparent;
+  border: none;
+}
+
+.field-site-pin-dot {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  background: #2563eb;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
+  transform: rotate(-45deg);
+}
+
 /* Payslip modal: print only the payslip card, not the payroll page behind it */
 @media print {
   body.payslip-printing * {
