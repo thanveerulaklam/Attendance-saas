@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import {
   PLAN_EMPLOYEE_CAP,
@@ -425,7 +426,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(() => !!sessionStorage.getItem(ADMIN_KEY_STORAGE));
   const [overviewLoading, setOverviewLoading] = useState(false);
   const [keyError, setKeyError] = useState('');
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [busyId, setBusyId] = useState(null);
   const [approveModalCompany, setApproveModalCompany] = useState(null);
   const [approveSaving, setApproveSaving] = useState(false);

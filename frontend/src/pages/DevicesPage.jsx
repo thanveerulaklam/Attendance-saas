@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -37,7 +38,7 @@ export default function DevicesPage() {
   const [newName, setNewName] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [showFullKeyId, setShowFullKeyId] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [branches, setBranches] = useState([]);
   const [newBranchId, setNewBranchId] = useState('');
   const [admsInputs, setAdmsInputs] = useState({});
@@ -49,13 +50,13 @@ export default function DevicesPage() {
   const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
   const [fieldAttendanceEnabled, setFieldAttendanceEnabled] = useState(false);
   const [mobileSaving, setMobileSaving] = useState(false);
-  const [mobileToast, setMobileToast] = useState(null);
+  const [mobileToast, setMobileToast] = useAutoDismiss(null);
   const [kioskBusyBranchId, setKioskBusyBranchId] = useState(null);
   const [kioskByBranch, setKioskByBranch] = useState({});
   const [kioskSettingsPins, setKioskSettingsPins] = useState({});
   const [apkDownloading, setApkDownloading] = useState(false);
   const [kioskError, setKioskError] = useState(null);
-  const [kioskSuccess, setKioskSuccess] = useState(null);
+  const [kioskSuccess, setKioskSuccess] = useAutoDismiss(null);
 
   const normalizeKioskPinInput = (value) => String(value || '').replace(/\D/g, '').slice(0, 6);
 

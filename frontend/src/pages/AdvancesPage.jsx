@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { authFetch } from '../utils/api';
 
 const TABS = ['active', 'monthly', 'history'];
@@ -129,7 +130,7 @@ export default function AdvancesPage() {
   const [loanDetailsById, setLoanDetailsById] = useState({});
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createError, setCreateError] = useState('');
   const [editOpen, setEditOpen] = useState(false);

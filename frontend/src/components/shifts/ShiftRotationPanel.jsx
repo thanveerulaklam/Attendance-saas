@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAutoDismiss } from '../../hooks/useAutoDismiss';
 import { authFetch } from '../../utils/api';
 import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
 
@@ -24,7 +25,7 @@ export default function ShiftRotationPanel({ shifts }) {
   const [importingId, setImportingId] = useState(null);
   const [syncingId, setSyncingId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
-  const [success, setSuccess] = useState('');
+  const [success, setSuccess] = useAutoDismiss('');
   const [form, setForm] = useState({
     name: '',
     shift_a_id: '',

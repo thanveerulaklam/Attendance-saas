@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { useSearchParams } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import EmployeeFormModal from '../components/employees/EmployeeFormModal';
@@ -62,7 +63,7 @@ export default function EmployeesPage() {
   const [showModal, setShowModal] = useState(openFromOnboarding);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
   const [branches, setBranches] = useState([]);
   const [devices, setDevices] = useState([]);

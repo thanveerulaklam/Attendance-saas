@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState, useMemo, useCallback } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -132,7 +133,7 @@ export default function AttendancePage() {
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualError, setManualError] = useState(null);
-  const [manualSuccess, setManualSuccess] = useState(null);
+  const [manualSuccess, setManualSuccess] = useAutoDismiss(null);
   const [editPunchOpen, setEditPunchOpen] = useState(false);
   const [editPunchSubmitting, setEditPunchSubmitting] = useState(false);
   const [editPunchError, setEditPunchError] = useState(null);

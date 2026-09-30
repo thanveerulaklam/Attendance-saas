@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { generateDetailedAttendancePdf } from '../components/reports/DetailedReportPDF';
@@ -173,7 +174,7 @@ export default function ReportsPage() {
   const [year, setYear] = useState(currentYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [loading, setLoading] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [detailedLoading, setDetailedLoading] = useState(false);
   const [detailedDepartment, setDetailedDepartment] = useState('');
   const [employees, setEmployees] = useState([]);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAutoDismiss } from '../../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../../utils/api';
 import { activeEmployeesFromApi, arrayFromApi } from '../../utils/employeesApi';
@@ -14,7 +15,7 @@ export default function ShiftAssignmentsPanel({ shifts }) {
   const [shiftId, setShiftId] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState('');
+  const [success, setSuccess] = useAutoDismiss('');
   const [hideAssignedOnTarget, setHideAssignedOnTarget] = useState(true);
   const [moveShiftId, setMoveShiftId] = useState('');
   const [moveIds, setMoveIds] = useState([]);

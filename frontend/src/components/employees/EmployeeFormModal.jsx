@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAutoDismiss } from '../../hooks/useAutoDismiss';
 import { authFetch } from '../../utils/api';
 import { GENDER_OPTIONS } from '../../utils/employeeGender';
 import { currencySymbol } from '../../utils/formatMoney';
@@ -77,7 +78,7 @@ export default function EmployeeFormModal({
 
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
 
   useEffect(() => {
     if (open) {

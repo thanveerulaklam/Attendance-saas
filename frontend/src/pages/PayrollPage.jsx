@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { authFetch } from '../utils/api';
 import { getSubscriptionStatus } from '../utils/subscription';
 import PayslipModal from '../components/payroll/PayslipModal';
@@ -586,7 +587,7 @@ export default function PayrollPage() {
     applyAdvanceRepayments: false,
   });
   const [generating, setGenerating] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [generationFailures, setGenerationFailures] = useState([]);
   const [failureModalOpen, setFailureModalOpen] = useState(false);
   const [company, setCompany] = useState(null);

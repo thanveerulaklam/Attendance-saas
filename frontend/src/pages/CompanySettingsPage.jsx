@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { authFetch } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -64,7 +65,7 @@ export default function CompanySettingsPage() {
   const [cpConfirmNewPassword, setCpConfirmNewPassword] = useState('');
   const [cpSaving, setCpSaving] = useState(false);
   const [cpError, setCpError] = useState('');
-  const [cpSuccess, setCpSuccess] = useState('');
+  const [cpSuccess, setCpSuccess] = useAutoDismiss('');
 
   const [form, setForm] = useState({
     name: '',
@@ -83,13 +84,13 @@ export default function CompanySettingsPage() {
     last_sent_for_date: null,
     last_sent_at: null,
   });
-  const [whatsappToast, setWhatsappToast] = useState(null);
+  const [whatsappToast, setWhatsappToast] = useAutoDismiss(null);
   const [shiftRotationEnabled, setShiftRotationEnabled] = useState(false);
   const [shiftRotationSaving, setShiftRotationSaving] = useState(false);
-  const [shiftRotationToast, setShiftRotationToast] = useState(null);
+  const [shiftRotationToast, setShiftRotationToast] = useAutoDismiss(null);
   const [flexibleHoursEnabled, setFlexibleHoursEnabled] = useState(false);
   const [flexibleHoursSaving, setFlexibleHoursSaving] = useState(false);
-  const [flexibleHoursToast, setFlexibleHoursToast] = useState(null);
+  const [flexibleHoursToast, setFlexibleHoursToast] = useAutoDismiss(null);
   const [subscriptionForm, setSubscriptionForm] = useState({
     subscription_start_date: '',
     subscription_end_date: '',
@@ -98,7 +99,7 @@ export default function CompanySettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useAutoDismiss(false);
 
   /** Enriched from GET /api/company (plan, AMC, caps). */
   const [planSnapshot, setPlanSnapshot] = useState(null);
@@ -109,7 +110,7 @@ export default function CompanySettingsPage() {
   const [newBranchAddress, setNewBranchAddress] = useState('');
   const [branchSaving, setBranchSaving] = useState(false);
   const [branchError, setBranchError] = useState(null);
-  const [branchSuccess, setBranchSuccess] = useState(null);
+  const [branchSuccess, setBranchSuccess] = useAutoDismiss(null);
   const [editingBranchId, setEditingBranchId] = useState(null);
   const [editBranchName, setEditBranchName] = useState('');
   const [editBranchAddress, setEditBranchAddress] = useState('');

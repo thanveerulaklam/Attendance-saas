@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { authFetch } from '../utils/api';
 import { createPdf, addReportHeader, addAutoTable, savePdf } from '../utils/pdfGenerator';
 import RecordPaymentModal, { paymentModeLabel } from '../components/payroll/RecordPaymentModal';
@@ -93,7 +94,7 @@ export default function PaymentsPage() {
   const [branches, setBranches] = useState([]);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [recordModal, setRecordModal] = useState({ open: false, row: null, payrollMode: 'monthly' });
   const [voidingId, setVoidingId] = useState(null);
   const [statementEmployeeId, setStatementEmployeeId] = useState('');

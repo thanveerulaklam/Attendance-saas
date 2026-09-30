@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useAutoDismiss } from '../../hooks/useAutoDismiss';
 import { authFetch } from '../../utils/api';
 
 export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toast, setToast] = useAutoDismiss(null);
   const [result, setResult] = useState(null);
 
   useEffect(() => {

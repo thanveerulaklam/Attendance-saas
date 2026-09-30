@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAutoDismiss } from '../../hooks/useAutoDismiss';
 import { authFetch } from '../../utils/api';
 import { formatMoneyWithSymbol } from '../../utils/formatMoney';
 
@@ -99,7 +100,7 @@ export default function SalaryIncrementsPanel() {
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
-  const [formSuccess, setFormSuccess] = useState('');
+  const [formSuccess, setFormSuccess] = useAutoDismiss('');
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const fmt = (value) => formatMoneyWithSymbol(value, currency);
