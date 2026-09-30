@@ -759,33 +759,6 @@ export default function PayslipModal({
             </div>
           </section>
 
-          {!!(breakdown.advance_repayments || []).length && (
-            <section className="payslip-print-hidden rounded-xl border border-slate-100 bg-white px-4 py-3 text-[11px] text-slate-700">
-              <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">
-                ADVANCE REPAYMENTS
-              </h3>
-              <div className="space-y-1.5">
-                {(breakdown.advance_repayments || []).map((repayment, index) => (
-                  <div key={`${repayment.loan_id}-${index}`} className="flex items-start justify-between gap-3 border-b border-slate-100 pb-1.5">
-                    <div>
-                      <p className="font-medium text-slate-800">
-                        Loan #{index + 1} ({fmtSym(repayment.original_loan_amount)} on {repayment.loan_date || '—'})
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        Outstanding after: {fmtSym(repayment.outstanding_balance_after)}
-                      </p>
-                    </div>
-                    <p className="font-semibold text-amber-700">-{fmtSym(repayment.this_month_deduction)}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-semibold text-slate-900">
-                <span>Total Advance Deduction</span>
-                <span>-{fmtSym(breakdown.breakdown?.salaryAdvance)}</span>
-              </div>
-            </section>
-          )}
-
           <section className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-[11px] text-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
