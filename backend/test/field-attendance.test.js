@@ -7,9 +7,8 @@ const {
   MOBILEFACE_MATCH_THRESHOLD,
 } = require('../src/services/faceEnrollmentService');
 const { findMatchingFieldSite } = require('../src/services/fieldSiteService');
-const { parseGps } = require('../src/services/fieldPunchService');
+const { parseGps, FIELD_MAX_ACCURACY_M } = require('../src/services/fieldPunchService');
 const { parseFieldPunchBody } = require('../src/validators/fieldPunchValidator');
-const { MAX_ACCURACY_M } = require('../src/services/mobileGeofenceService');
 
 function unitVector(at = 0) {
   const values = new Array(128).fill(0);
@@ -67,15 +66,14 @@ describe('field site geofence', () => {
 describe('field GPS accuracy', () => {
   it('rejects poor GPS accuracy with GPS_INACCURATE', () => {
     assert.throws(
-      () => parseGps(12.97, 77.59, MAX_ACCURACY_M + 1),
+      () => parseGps(12.97, 77.59, FIELD_MAX_ACCURACY_M + 1),
       (err) => err.code === 'GPS_INACCURATE'
     );
   });
 
-  it('accepts a precise reading', () => {
-    const coords = parseGps(12.9716, 77.5946, 12);
-    assert.equal(coords.lat, 12.9716);
-    assert.equal(coords.accuracy, 12);
+  it('accepts indoor field GPS within 200m', () => {
+    const coords = parseGps(12.9716, 77.5946, 129);
+    assert.equal(coords.accuracy, 129);
   });
 });
 

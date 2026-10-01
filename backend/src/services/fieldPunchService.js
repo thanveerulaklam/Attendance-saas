@@ -6,7 +6,7 @@ const {
   isEmployeeChannelAllowed,
   mobileReject,
 } = require('./mobileAttendanceService');
-const { MAX_ACCURACY_M } = require('./mobileGeofenceService');
+const FIELD_MAX_ACCURACY_M = Number(process.env.FIELD_MAX_GPS_ACCURACY_M || 200);
 const {
   listAssignedFieldSites,
   findMatchingFieldSite,
@@ -69,10 +69,10 @@ function parseGps(latitude, longitude, locationAccuracyM) {
   if (!Number.isFinite(accuracy) || accuracy < 0) {
     throw mobileReject('GPS_INACCURATE', 'GPS accuracy reading is required.', 422);
   }
-  if (accuracy > MAX_ACCURACY_M) {
+  if (accuracy > FIELD_MAX_ACCURACY_M) {
     throw mobileReject(
       'GPS_INACCURATE',
-      `GPS accuracy is too low (${Math.round(accuracy)}m). Move outdoors and try again.`,
+      `GPS accuracy is too low (${Math.round(accuracy)}m). Wait for a better reading.`,
       422
     );
   }
@@ -274,4 +274,5 @@ module.exports = {
   assertEmployeeFieldEligible,
   parseGps,
   FIELD_COOLDOWN_SECONDS,
+  FIELD_MAX_ACCURACY_M,
 };
