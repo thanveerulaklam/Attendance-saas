@@ -8,6 +8,6 @@ export const API_BASE = (
 
 export const PRIVACY_URL = 'https://punchpay.in/privacy';
 export const WEB_APP_URL = 'https://punchpay.in';
-export const MAX_GPS_ACCURACY_M = 80;
+export const MAX_GPS_ACCURACY_M = 2000;
 export const MOBILEFACE_MODEL = 'mobilefacenet_sface_v1';
 export const MOBILEFACE_MATCH_THRESHOLD = 0.363;

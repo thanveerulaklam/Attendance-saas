@@ -71,9 +71,10 @@ describe('field GPS accuracy', () => {
     );
   });
 
-  it('accepts indoor field GPS within 200m', () => {
+  it('accepts coarse indoor field GPS like Android fused location', () => {
     const coords = parseGps(12.9716, 77.5946, 129);
     assert.equal(coords.accuracy, 129);
+    assert.equal(parseGps(12.9716, 77.5946, 400).accuracy, 400);
   });
 });
 

@@ -6,7 +6,9 @@ const {
   isEmployeeChannelAllowed,
   mobileReject,
 } = require('./mobileAttendanceService');
-const FIELD_MAX_ACCURACY_M = Number(process.env.FIELD_MAX_GPS_ACCURACY_M || 200);
+// Field GPS is often coarse indoors (Android fused location ±100–200m).
+// The assigned-site geofence is the real check; this is only a sanity cap.
+const FIELD_MAX_ACCURACY_M = Number(process.env.FIELD_MAX_GPS_ACCURACY_M || 2000);
 const {
   listAssignedFieldSites,
   findMatchingFieldSite,
