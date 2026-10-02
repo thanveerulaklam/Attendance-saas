@@ -42,7 +42,8 @@ async function loadBranchForMobile(companyId, branchId) {
 
 async function loadEmployeeForMobile(companyId, employeeId) {
   const result = await pool.query(
-    `SELECT id, company_id, branch_id, name, employee_code, status, attendance_channel, shift_id
+    `SELECT id, company_id, branch_id, name, employee_code, status, attendance_channel, shift_id,
+            COALESCE(field_beat_enabled, FALSE) AS field_beat_enabled
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]

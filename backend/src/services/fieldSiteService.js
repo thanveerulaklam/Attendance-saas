@@ -198,6 +198,7 @@ async function listFieldEmployees(companyId, allowedBranchIds = null) {
        e.status,
        e.attendance_channel,
        e.department,
+       COALESCE(e.field_beat_enabled, FALSE) AS field_beat_enabled,
        u.email AS app_email,
        COALESCE(ARRAY_REMOVE(ARRAY_AGG(efs.field_site_id ORDER BY s.name ASC), NULL), '{}') AS field_site_ids,
        COALESCE(ARRAY_REMOVE(ARRAY_AGG(s.name ORDER BY s.name ASC), NULL), '{}') AS field_site_names
@@ -221,6 +222,7 @@ async function listFieldEmployees(companyId, allowedBranchIds = null) {
     status: row.status,
     attendance_channel: row.attendance_channel || 'device',
     department: row.department,
+    field_beat_enabled: Boolean(row.field_beat_enabled),
     app_email: row.app_email || null,
     field_site_ids: (row.field_site_ids || [])
       .map((id) => Number(id))
@@ -238,6 +240,7 @@ async function createFieldEmployee(companyId, body = {}, branchContext = {}) {
   const basicSalary = body.basic_salary;
   const joinDate = String(body.join_date || '').trim() || todayIstYmd();
   const attendanceChannel = body.attendance_channel === 'both' ? 'both' : 'mobile';
+  const fieldBeatEnabled = Boolean(body.field_beat_enabled);
 
   if (name.length < 2) {
     throw new AppError('Name must be at least 2 characters', 400);
@@ -271,6 +274,12 @@ async function createFieldEmployee(companyId, body = {}, branchContext = {}) {
   );
 
   const sites = await setEmployeeFieldSites(companyId, employee.id, siteIds);
+  if (fieldBeatEnabled) {
+    await pool.query(
+      `UPDATE employees SET field_beat_enabled = TRUE WHERE company_id = $1 AND id = $2`,
+      [companyId, employee.id]
+    );
+  }
   const login = await employeeAppService.provisionEmployeeAppAccess(companyId, employee.id, {
     email,
     password,
@@ -285,6 +294,7 @@ async function createFieldEmployee(companyId, body = {}, branchContext = {}) {
     attendance_channel: employee.attendance_channel || attendanceChannel,
     department: employee.department,
     app_email: login.user.email,
+    field_beat_enabled: fieldBeatEnabled,
     field_site_ids: sites.map((site) => Number(site.id)),
     field_site_names: sites.map((site) => site.name),
   };

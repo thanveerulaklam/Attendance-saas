@@ -12,6 +12,11 @@ const MESSAGES: Record<string, string> = {
   NOT_ENROLLED: 'Register your face in this app before punching.',
   NO_SITES: 'No field sites are assigned to you. Contact HR.',
   NOT_EMPLOYEE: 'This app is for field employees. Admins should use PunchPay Admin.',
+  BEAT_NOT_ENABLED: 'Door-to-door visits are not enabled for your profile.',
+  DAY_NOT_STARTED: 'Start your day before adding visits or ending.',
+  DAY_ALREADY_STARTED: 'You already started today.',
+  DAY_ALREADY_ENDED: 'Today is already closed.',
+  INVALID_LABEL: 'Visit name is too long.',
 };
 
 export function messageForRejectCode(code?: string | null, fallback?: string): string {

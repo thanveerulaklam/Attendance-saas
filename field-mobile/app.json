@@ -16,6 +16,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.punchpay.field",
+      "appleTeamId": "J6L5L7N664",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "PunchPay Field uses the front camera to match your enrolled face before recording attendance.",
@@ -24,7 +25,7 @@
     },
     "android": {
       "package": "com.punchpay.field",
-      "versionCode": 1,
+      "versionCode": 9,
       "adaptiveIcon": {
         "backgroundColor": "#D4A843",
         "foregroundImage": "./assets/android-icon-foreground.png",

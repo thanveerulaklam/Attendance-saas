@@ -17,6 +17,7 @@ function emptyCreateForm() {
     join_date: todayYmd(),
     site_ids: [],
     also_device: false,
+    field_beat_enabled: false,
   };
 }
 
@@ -88,6 +89,7 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
           basic_salary: Number(createForm.basic_salary),
           join_date: createForm.join_date,
           site_ids: createForm.site_ids,
+          field_beat_enabled: createForm.field_beat_enabled,
           attendance_channel: createForm.also_device ? 'both' : 'mobile',
         }),
       });
@@ -151,6 +153,35 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
       );
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed to save sites' });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleToggleBeat = async (employee, checked) => {
+    if (!canManage || savingId) return;
+    try {
+      setSavingId(employee.id);
+      const res = await authFetch(`/api/company/field-employees/${employee.id}/beat`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field_beat_enabled: checked }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.message || 'Failed to save door-to-door mode');
+      setEmployees((prev) =>
+        prev.map((row) =>
+          row.id === employee.id
+            ? {
+                ...row,
+                field_beat_enabled: Boolean(json.data?.field_beat_enabled),
+                attendance_channel: json.data?.attendance_channel || row.attendance_channel,
+              }
+            : row
+        )
+      );
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Failed to save door-to-door mode' });
     } finally {
       setSavingId(null);
     }
@@ -222,7 +253,8 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Field employees</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            Assign sites and create an email/password for PunchPay Field. New people are added to{' '}
+            Assign sites for a warehouse or shop, or enable door-to-door for Start / Visit / End. New
+            people are added to{' '}
             <Link to="/employees" className="font-medium text-primary-600 hover:underline">
               Employees
             </Link>{' '}
@@ -338,6 +370,16 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
             />
             Also punch on biometric / office kiosk
           </label>
+          <label className="flex items-center gap-2 text-[11px] text-slate-600">
+            <input
+              type="checkbox"
+              checked={createForm.field_beat_enabled}
+              onChange={(e) =>
+                setCreateForm((p) => ({ ...p, field_beat_enabled: e.target.checked }))
+              }
+            />
+            Door-to-door (Start day / Visit / End day — no fixed site)
+          </label>
           <button
             type="submit"
             disabled={creating}
@@ -370,7 +412,9 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
           {filtered.map((emp) => {
             const draft = draftFor(emp, loginDrafts);
             const loginOpen = openLoginId === emp.id || !emp.app_email;
-            const ready = Boolean(emp.app_email) && (emp.field_site_ids || []).length > 0;
+            const ready =
+              Boolean(emp.app_email) &&
+              ((emp.field_site_ids || []).length > 0 || Boolean(emp.field_beat_enabled));
             return (
               <li key={emp.id} className="py-3">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -391,6 +435,7 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
                       {(emp.field_site_ids || []).length > 0
                         ? emp.field_site_names.join(', ')
                         : 'No site assigned'}
+                      {emp.field_beat_enabled ? ' · Door-to-door' : ''}
                       {ready ? ' · Ready for PunchPay Field' : ''}
                     </p>
                   </div>
@@ -404,6 +449,22 @@ export default function FieldEmployeesPanel({ sites, canManage, setToast }) {
                     </button>
                   )}
                 </div>
+
+                <label
+                  className={`mt-2 inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] ${
+                    emp.field_beat_enabled
+                      ? 'border-amber-200 bg-amber-50 text-amber-900'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  } ${!canManage || savingId ? 'opacity-60' : ''}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(emp.field_beat_enabled)}
+                    onChange={(e) => handleToggleBeat(emp, e.target.checked)}
+                    disabled={!canManage || savingId === emp.id}
+                  />
+                  Door-to-door (Start / Visit / End)
+                </label>
 
                 {sites.length === 0 ? (
                   <p className="mt-2 text-[11px] text-slate-500">Create a site to assign this employee.</p>

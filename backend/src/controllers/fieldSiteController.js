@@ -12,6 +12,11 @@ const {
   listFieldEmployees,
   createFieldEmployee,
 } = require('../services/fieldSiteService');
+const {
+  setEmployeeFieldBeat,
+  listCompanyBeatDays,
+} = require('../services/fieldBeatService');
+const { parseBeatDateQuery } = require('../validators/fieldBeatValidator');
 
 const branchContext = (req) => ({
   role: req.user?.role,
@@ -148,6 +153,35 @@ async function createFieldEmployeeHandler(req, res, next) {
   }
 }
 
+async function putEmployeeBeatHandler(req, res, next) {
+  try {
+    const employeeId = Number(req.params.id);
+    if (!employeeId) throw new AppError('Invalid employee id', 400);
+    await employeeService.getEmployeeById(req.companyId, employeeId, branchContext(req));
+    if (typeof req.body?.field_beat_enabled !== 'boolean') {
+      throw new AppError('field_beat_enabled (boolean) is required', 400);
+    }
+    const data = await setEmployeeFieldBeat(
+      req.companyId,
+      employeeId,
+      req.body.field_beat_enabled
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
+async function listFieldBeatDaysHandler(req, res, next) {
+  try {
+    const date = parseBeatDateQuery(req.query);
+    const data = await listCompanyBeatDays(req.companyId, date, req.allowedBranchIds);
+    return res.json({ success: true, data });
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   updateFieldSettings,
   listSites,
@@ -158,4 +192,6 @@ module.exports = {
   putEmployeeSites,
   listFieldEmployeesHandler,
   createFieldEmployeeHandler,
+  putEmployeeBeatHandler,
+  listFieldBeatDaysHandler,
 };

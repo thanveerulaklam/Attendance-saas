@@ -255,6 +255,7 @@ async function getEmployeeMe(companyId, employeeId) {
       employee_code: employee.employee_code,
       attendance_channel: employee.attendance_channel,
       branch_id: employee.branch_id,
+      field_beat_enabled: Boolean(employee.field_beat_enabled),
     },
     company: {
       id: company.id,

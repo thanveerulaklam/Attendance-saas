@@ -9,6 +9,7 @@ const {
 const { findMatchingFieldSite } = require('../src/services/fieldSiteService');
 const { parseGps, FIELD_MAX_ACCURACY_M } = require('../src/services/fieldPunchService');
 const { parseFieldPunchBody } = require('../src/validators/fieldPunchValidator');
+const { parseBeatBody, parseBeatLabel } = require('../src/validators/fieldBeatValidator');
 
 function unitVector(at = 0) {
   const values = new Array(128).fill(0);
@@ -90,6 +91,28 @@ describe('field punch body', () => {
     assert.throws(
       () => parseFieldPunchBody({ ...gps, punch_type: 'break' }),
       (err) => err.code === 'INVALID_PUNCH_TYPE'
+    );
+  });
+});
+
+describe('field beat body', () => {
+  const gps = {
+    latitude: 10.72,
+    longitude: 77.89,
+    location_accuracy_m: 129,
+    embedding: unitVector(0),
+  };
+
+  it('accepts start/visit GPS with a 128-d face vector', () => {
+    const parsed = parseBeatBody({ ...gps, label: '  Anand Store  ' });
+    assert.equal(parsed.label, 'Anand Store');
+    assert.equal(parsed.embedding.length, 128);
+  });
+
+  it('rejects a visit name over 120 characters', () => {
+    assert.throws(
+      () => parseBeatLabel('x'.repeat(121)),
+      (err) => err.code === 'INVALID_LABEL'
     );
   });
 });

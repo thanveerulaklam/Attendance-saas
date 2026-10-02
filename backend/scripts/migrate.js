@@ -211,6 +211,10 @@ const APPLIED_CHECKS = {
       AND table_name = 'employee_advance_repayments'
       AND column_name = 'collected_via'
   )`,
+  '099_field_beat.sql': `EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'field_days'
+  )`,
 };
 
 async function hasExistingSchema(client) {

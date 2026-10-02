@@ -25,6 +25,7 @@ import PayrollCostCalculator from './pages/tools/PayrollCostCalculator';
 import MobileQrDisplayPage from './pages/MobileQrDisplayPage';
 import MobilePunchAttemptsPage from './pages/MobilePunchAttemptsPage';
 import FieldSitesPage from './pages/FieldSitesPage';
+import FieldVisitsPage from './pages/FieldVisitsPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 
 function RootRedirect() {
@@ -70,6 +71,7 @@ function App() {
             <Route path="/settings/company" element={<CompanySettingsPage />} />
             <Route path="/mobile-punch-log" element={<MobilePunchAttemptsPage />} />
             <Route path="/field-sites" element={<FieldSitesPage />} />
+            <Route path="/field-visits" element={<FieldVisitsPage />} />
             <Route path="/shifts" element={<ShiftsPage />} />
             <Route path="/devices" element={<DevicesPage />} />
             <Route path="/payroll" element={<PayrollPage />} />

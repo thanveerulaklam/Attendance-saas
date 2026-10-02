@@ -200,10 +200,15 @@ export default function FieldSitesPage() {
           </Link>
           {' · '}
           PunchPay Field
+          {' · '}
+          <Link to="/field-visits" className="font-medium text-indigo-600 underline">
+            Field visits
+          </Link>
         </p>
         <h1 className="text-lg font-semibold text-slate-900">Field sites</h1>
         <p className="mt-0.5 text-xs text-slate-500">
           Assign GPS sites for employees who punch away from the office with PunchPay Field (selfie + GPS). This is separate from office QR / kiosk geofence.
+          Keep site radius at 150–200m when iPhone and Android both punch indoors; 50m is only reliable in open sky.
         </p>
       </header>
 
@@ -237,7 +242,8 @@ export default function FieldSitesPage() {
           <span>
             <span className="font-medium">Enable field attendance</span>
             <span className="mt-0.5 block text-[11px] text-slate-500">
-              Employees with a mobile/both attendance channel, app login, and at least one assigned site can punch from PunchPay Field. Office tablet QR stays unchanged.
+              Employees with a mobile/both attendance channel, app login, and either an assigned site
+              or door-to-door mode can punch from PunchPay Field. Office tablet QR stays unchanged.
             </span>
           </span>
         </label>
@@ -305,6 +311,10 @@ export default function FieldSitesPage() {
                 className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 required
               />
+              <span className="mt-1 block text-[11px] font-normal text-slate-500">
+                Use 150–200m when iPhone and Android both punch indoors. Use 50m only in open sky or
+                single-device tests.
+              </span>
             </label>
             <div className="flex flex-wrap items-end gap-2">
               <button

@@ -17,6 +17,26 @@ export type FieldSite = {
   radius_m: number;
 };
 
+export type BeatVisit = {
+  id: number;
+  visited_at: string;
+  latitude: number;
+  longitude: number;
+  location_accuracy_m?: number | null;
+  label?: string | null;
+};
+
+export type BeatDay = {
+  id?: number;
+  work_date?: string;
+  started: boolean;
+  ended: boolean;
+  started_at?: string | null;
+  ended_at?: string | null;
+  visit_count: number;
+  visits: BeatVisit[];
+};
+
 export type FieldUser = {
   user_id?: number;
   role: string;
@@ -33,6 +53,7 @@ export type MeResponse = {
     employee_code: string;
     attendance_channel: string;
     branch_id: number;
+    field_beat_enabled?: boolean;
   };
   company: {
     id: number;
@@ -50,6 +71,8 @@ export type MeResponse = {
   };
   sites: FieldSite[];
   enrolled: boolean;
+  field_beat_enabled?: boolean;
+  beat?: BeatDay | null;
   face: {
     model: string;
     dimension: number;
