@@ -654,8 +654,15 @@ export default function CompanySettingsPage() {
   const displayAmcAmount =
     planSnapshot == null
       ? null
-      : tenantDisplayAmcAmount(planSnapshot.plan_code, localeInfo.country_code, planSnapshot.amc_amount);
+      : tenantDisplayAmcAmount(
+          planSnapshot.plan_code,
+          localeInfo.country_code,
+          planSnapshot.amc_amount,
+          planSnapshot.billing_cycle
+        );
   const annualOnlyBilling = isAnnualOnlyBilling(localeInfo.country_code);
+  const aeTriennial =
+    annualOnlyBilling && String(planSnapshot?.billing_cycle || '').toLowerCase() === 'triennial';
   const pepmPlan = isPepmPlan(planSnapshot?.plan_code);
   const indiaBillingType = normalizeIndiaBillingType(
     planSnapshot?.billing_cycle,
@@ -1355,7 +1362,9 @@ export default function CompanySettingsPage() {
         <h2 className="text-sm font-semibold text-slate-900">Plan &amp; access</h2>
         <p className="mt-0.5 text-[11px] text-slate-500">
           {annualOnlyBilling
-            ? 'Your annual subscription covers software access for one year. Renewal is due each year on the date shown below. Dates and limits are managed by the service provider—contact support to make changes.'
+            ? aeTriennial
+              ? 'Your 3-year subscription covers software access for three years. Renewal is due at the end of the term. Dates and limits are managed by the service provider—contact support to make changes.'
+              : 'Your annual subscription covers software access for one year. Renewal is due each year on the date shown below. Dates and limits are managed by the service provider—contact support to make changes.'
             : pepmPlan
               ? 'Your monthly plan is billed yearly. ₹499/month includes 10 staff; each extra employee is ₹49/month. Dates and limits are managed by the service provider—contact support to make changes.'
               : isIndiaPrepaidBilling(indiaBillingType)
@@ -1428,7 +1437,7 @@ export default function CompanySettingsPage() {
               <div className="text-sm">
                 <span className="text-slate-500">
                   {annualOnlyBilling
-                    ? 'Annual subscription (excl. VAT)'
+                    ? `${softwareLabel} (excl. VAT)`
                     : prepaidSoftware
                       ? `${softwareLabel} (excl. GST)`
                       : 'AMC per year (excl. GST)'}

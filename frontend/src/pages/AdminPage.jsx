@@ -15,9 +15,13 @@ import {
   isPepmPlan,
   hidesOnetimeFee,
   syncPepmFormAmounts,
-  INDIA_BILLING_TYPE_OPTIONS,
   INDIA_BILLING_TYPE_YEARLY,
   INDIA_BILLING_TYPE_OTC,
+  AE_BILLING_TYPE_YEARLY,
+  AE_BILLING_TYPE_TRIENNIAL,
+  normalizeAeBillingType,
+  billingTypeOptionsForCountry,
+  billingTermYearsForCountry,
   normalizeIndiaBillingType,
   isIndiaPrepaidBilling,
   indiaBillingTypeLabel,
@@ -101,14 +105,14 @@ function deriveSubscriptionDates(company) {
   if (end && Number.isNaN(end.getTime())) end = null;
   if (!end && start) {
     end = new Date(start);
-    const years = indiaBillingTermYears(normalizeIndiaBillingType(company?.billing_cycle, company?.plan_code));
+    const years = billingTermYearsForCountry(company?.country_code, company?.billing_cycle, company?.plan_code);
     end.setFullYear(end.getFullYear() + years);
   }
   return { start, end };
 }
 
 function defaultBillingTypeForForm(countryCode, { pipeline = false } = {}) {
-  if (isAnnualOnlyBilling(countryCode)) return 'annual';
+  if (isAnnualOnlyBilling(countryCode)) return AE_BILLING_TYPE_YEARLY;
   return pipeline ? INDIA_BILLING_TYPE_OTC : INDIA_BILLING_TYPE_YEARLY;
 }
 
@@ -164,7 +168,9 @@ function formatPlanWithLimits(c) {
   const plan = (c.plan_code || 'starter').toLowerCase();
   const planLabel = PLAN_DISPLAY_NAME[plan] || plan.charAt(0).toUpperCase() + plan.slice(1);
   const billingLabel = isAnnualOnlyBilling(c.country_code)
-    ? 'Yearly'
+    ? normalizeAeBillingType(c.billing_cycle) === AE_BILLING_TYPE_TRIENNIAL
+      ? '3-year package'
+      : 'Yearly'
     : indiaBillingTypeLabel(normalizeIndiaBillingType(c.billing_cycle, c.plan_code));
   const staffCap =
     c.employee_limit_override != null && c.employee_limit_override !== ''
@@ -336,9 +342,7 @@ function companyNeedsBillingAttention(company) {
 
 function computeNextAmcDueDateClient(company) {
   if (!company) return null;
-  const years = isAnnualOnlyBilling(company.country_code)
-    ? 1
-    : indiaBillingTermYears(normalizeIndiaBillingType(company.billing_cycle, company.plan_code));
+  const years = billingTermYearsForCountry(company.country_code, company.billing_cycle, company.plan_code);
   const addYears = (dateLike) => {
     const iso = toCalendarIso(dateLike);
     if (!iso) return null;
@@ -357,7 +361,7 @@ function computeNextAmcDueDateClient(company) {
 }
 
 function resolvedCompanyBillingCycle(company) {
-  if (isAnnualOnlyBilling(company?.country_code)) return 'annual';
+  if (isAnnualOnlyBilling(company?.country_code)) return normalizeAeBillingType(company?.billing_cycle);
   return normalizeIndiaBillingType(company?.billing_cycle, company?.plan_code);
 }
 
@@ -395,24 +399,27 @@ function PaymentStatusPill({ status, label }) {
   );
 }
 
-function IndiaBillingTypeSelect({ value, onChange, name = 'billing_cycle' }) {
+function BillingTypeSelect({ value, onChange, countryCode, name = 'billing_cycle' }) {
+  const annualOnly = isAnnualOnlyBilling(countryCode);
   return (
     <div>
       <label className="block text-xs font-medium text-slate-700 mb-1">Billing type</label>
       <select
         name={name}
-        value={value || INDIA_BILLING_TYPE_YEARLY}
+        value={annualOnly ? normalizeAeBillingType(value) : value || INDIA_BILLING_TYPE_YEARLY}
         onChange={onChange}
         className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
       >
-        {INDIA_BILLING_TYPE_OPTIONS.map((o) => (
+        {billingTypeOptionsForCountry(countryCode).map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
         ))}
       </select>
       <p className="mt-1 text-[11px] text-slate-500">
-        New deals: yearly or 3-year. Keep OTC + AMC for existing customers and a few pipeline quotes.
+        {annualOnly
+          ? 'UAE: yearly or 3-year prepaid subscription (excl. VAT). No one-time fee.'
+          : 'New deals: yearly or 3-year. Keep OTC + AMC for existing customers and a few pipeline quotes.'}
       </p>
     </div>
   );
@@ -2616,12 +2623,11 @@ export default function AdminPage() {
                     Saved profile: {formatPlanWithLimits(detailsCompany)}
                   </p>
                   <form onSubmit={handleBillingSubmit} className="mt-4 space-y-4">
-                    {!billingIsAnnualOnly && (
-                      <IndiaBillingTypeSelect
-                        value={billingForm.billing_cycle}
-                        onChange={handleBillingChange}
-                      />
-                    )}
+                    <BillingTypeSelect
+                      value={billingForm.billing_cycle}
+                      onChange={handleBillingChange}
+                      countryCode={detailsCompany?.country_code}
+                    />
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">Plan</label>
                       <select
@@ -2652,7 +2658,7 @@ export default function AdminPage() {
                       </label>
                       <span className="text-xs text-slate-500">
                         {billingIsAnnualOnly
-                          ? 'UAE: yearly subscription · editing start date sets valid till +1 year'
+                          ? `UAE: ${softwareFeeLabel('AE', billingForm.billing_cycle)} · start date sets valid till +${billingTermYearsForCountry('AE', billingForm.billing_cycle)} year(s)`
                           : `India: ${indiaBillingTypeLabel(normalizeIndiaBillingType(billingForm.billing_cycle, billingForm.plan_code))} · start date sets valid till +${indiaBillingTermYears(normalizeIndiaBillingType(billingForm.billing_cycle, billingForm.plan_code))} year(s)`}
                       </span>
                     </div>
@@ -2760,7 +2766,7 @@ export default function AdminPage() {
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          {`${billingSoftwareLabel} (${billingMoneySymbol}${billingIsAnnualOnly ? '/year, excl. VAT' : ', excl. GST'})`}
+                          {`${billingSoftwareLabel} (${billingMoneySymbol}${billingIsAnnualOnly ? ', excl. VAT' : ', excl. GST'})`}
                         </label>
                         <input
                           type="number"
@@ -2787,7 +2793,7 @@ export default function AdminPage() {
                         <p className="mt-1 text-[11px] text-slate-500">
                           {billingIsPepm
                             ? PEPM_ADMIN_HINT
-                            : `Next due = this date + ${indiaBillingTermYears(normalizeIndiaBillingType(billingForm.billing_cycle, billingForm.plan_code))} year(s).`}
+                            : `Next due = this date + ${billingTermYearsForCountry(detailsCompany?.country_code, billingForm.billing_cycle, billingForm.plan_code)} year(s).`}
                         </p>
                       </div>
                       {detailsCompany.next_amc_due_date && (
@@ -3189,12 +3195,11 @@ export default function AdminPage() {
               </p>
 
               <form onSubmit={handleApproveSubmit} className="space-y-4">
-                {!isAnnualOnlyBilling(approveModalCompany?.country_code) && (
-                  <IndiaBillingTypeSelect
-                    value={approveForm.billing_cycle}
-                    onChange={handleApproveFormChange}
-                  />
-                )}
+                <BillingTypeSelect
+                  value={approveForm.billing_cycle}
+                  onChange={handleApproveFormChange}
+                  countryCode={approveModalCompany?.country_code || DEFAULT_COUNTRY_CODE}
+                />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-slate-700 mb-1">Pack chosen</label>
@@ -3503,14 +3508,13 @@ export default function AdminPage() {
                 </div>
                 <div className="border-t border-slate-200 pt-3 mt-1">
                   <p className="text-xs font-semibold text-slate-800 mb-2">Plan & access window</p>
-                  {!isAnnualOnlyBilling(createForm.country_code) && (
-                    <div className="mb-3">
-                      <IndiaBillingTypeSelect
-                        value={createForm.billing_cycle}
-                        onChange={handleCreateFormChange}
-                      />
-                    </div>
-                  )}
+                  <div className="mb-3">
+                    <BillingTypeSelect
+                      value={createForm.billing_cycle}
+                      onChange={handleCreateFormChange}
+                      countryCode={createForm.country_code}
+                    />
+                  </div>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">Pack</label>

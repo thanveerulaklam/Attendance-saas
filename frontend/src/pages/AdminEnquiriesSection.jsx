@@ -30,8 +30,10 @@ import {
   hidesOnetimeFee,
   syncPepmFormAmounts,
   PEPM_ADMIN_HINT,
-  INDIA_BILLING_TYPE_OPTIONS,
   INDIA_BILLING_TYPE_YEARLY,
+  AE_BILLING_TYPE_YEARLY,
+  normalizeAeBillingType,
+  billingTypeOptionsForCountry,
   isAnnualOnlyBilling,
   accessEndFromStart,
   softwareFeeLabel,
@@ -1170,9 +1172,11 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
           name === 'billing_cycle'
             ? value
             : name === 'country_code'
-              ? INDIA_BILLING_TYPE_YEARLY
+              ? isAnnualOnlyBilling(value)
+                ? AE_BILLING_TYPE_YEARLY
+                : INDIA_BILLING_TYPE_YEARLY
               : prev.billing_cycle;
-        if (name === 'country_code' && !isAnnualOnlyBilling(value)) next.billing_cycle = billingType;
+        if (name === 'country_code') next.billing_cycle = billingType;
         applyAdminPlanFields(next, plan, countryCode, { billingType });
         const end = accessEndFromStart(
           next.subscription_start_date,
@@ -2573,27 +2577,27 @@ export default function AdminEnquiriesSection({ adminKey, onAuthError, setToast,
                   </label>
                   <label className="block sm:col-span-2">
                     <span className="text-xs font-medium text-slate-700">Billing type</span>
-                    {!isAnnualOnlyBilling(convertForm.country_code) ? (
-                      <>
-                        <select
-                          name="billing_cycle"
-                          value={convertForm.billing_cycle || INDIA_BILLING_TYPE_YEARLY}
-                          onChange={handleConvertChange}
-                          className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                        >
-                          {INDIA_BILLING_TYPE_OPTIONS.map((o) => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          New deals: yearly or 3-year. Keep OTC + AMC for existing customers and a few pipeline quotes.
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-1 text-sm text-slate-700">UAE yearly subscription</p>
-                    )}
+                    <select
+                      name="billing_cycle"
+                      value={
+                        isAnnualOnlyBilling(convertForm.country_code)
+                          ? normalizeAeBillingType(convertForm.billing_cycle)
+                          : convertForm.billing_cycle || INDIA_BILLING_TYPE_YEARLY
+                      }
+                      onChange={handleConvertChange}
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    >
+                      {billingTypeOptionsForCountry(convertForm.country_code).map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {isAnnualOnlyBilling(convertForm.country_code)
+                        ? 'UAE: yearly or 3-year prepaid subscription (excl. VAT). No one-time fee.'
+                        : 'New deals: yearly or 3-year. Keep OTC + AMC for existing customers and a few pipeline quotes.'}
+                    </p>
                   </label>
                   <label className="block">
                     <span className="text-xs font-medium text-slate-700">Plan</span>

@@ -65,8 +65,10 @@ function addOneYearIso(dateLike) {
 const ALLOWED_BILLING_CYCLES = ['monthly', 'annual', 'otc', 'yearly', 'triennial'];
 
 function normalizeBillingCycle(raw, countryCode = 'IN') {
-  if (String(countryCode || 'IN').toUpperCase() === 'AE') return 'annual';
   const c = String(raw || '').trim().toLowerCase();
+  if (String(countryCode || 'IN').toUpperCase() === 'AE') {
+    return c === 'triennial' || c === '3years' || c === '3year' || c === '3-year' ? 'triennial' : 'annual';
+  }
   if (c === 'triennial' || c === '3years' || c === '3year' || c === '3-year') return 'triennial';
   if (c === 'yearly') return 'yearly';
   if (c === 'otc') return 'otc';

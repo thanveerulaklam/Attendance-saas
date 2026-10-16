@@ -623,6 +623,80 @@
   .plan-feature.dim { color: rgba(255,255,255,0.25); }
   .plan-feature.dim::before { color: rgba(255,255,255,0.15); content: '—'; }
 
+  .price-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .price-table th {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--gold);
+    font-weight: 600;
+    text-align: left;
+    padding: 12px 16px;
+    background: rgba(212,168,67,0.06);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .price-table td {
+    padding: 11px 16px;
+    font-size: 13px;
+    color: var(--white);
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .price-table tr:last-child td { border-bottom: none; }
+
+  .price-table .num {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    color: var(--gold);
+    letter-spacing: -0.3px;
+  }
+
+  .price-table .save {
+    font-size: 11px;
+    color: var(--white-dim);
+  }
+
+  .price-table tr.popular td { background: rgba(212,168,67,0.07); }
+
+  .price-table .tag {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--black);
+    background: var(--gold);
+    border-radius: 10px;
+    padding: 2px 6px;
+    vertical-align: middle;
+  }
+
+  .includes-box {
+    margin-top: 16px;
+    background: var(--card-bg);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+
+  .includes-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px 12px;
+    margin-top: 8px;
+  }
+
   /* ── PAGE 4: HOW IT WORKS + CTA ── */
   .final-page {
     background: var(--black);
@@ -1048,8 +1122,8 @@
   <!-- Bottom stats -->
   <div class="hero-bottom">
     <div class="stat-item">
-      <div class="stat-num">4</div>
-      <div class="stat-label">Flexible Plans</div>
+      <div class="stat-num" style="white-space:nowrap;"><span style="font-size:15px;letter-spacing:0;">AED</span> 299</div>
+      <div class="stat-label">Plans from / year</div>
     </div>
     <div class="stat-item">
       <div class="stat-num">∞</div>
@@ -1148,121 +1222,90 @@
 <div class="page pricing-page">
   <div style="position:relative;z-index:2">
     <div class="section-eyebrow">Transparent Pricing</div>
-    <h2 class="section-title">Choose Your Plan</h2>
-    <p class="section-sub" style="margin-bottom:0;">One simple annual subscription per plan — no setup fee, no separate AMC. All prices exclude 5% UAE VAT.</p>
+    <h2 class="section-title">The Right Price for Your Team Size</h2>
+    <p class="section-sub" style="margin-bottom:0;">One PunchPay product — your employee count decides the price. No setup fee, no separate AMC. All prices exclude 5% UAE VAT.</p>
 
     <div class="pricing-subscription-hero">
-      <div class="sub-eyebrow">Yearly subscription only</div>
-      <div class="sub-price"><span class="sub-currency">AED</span>&nbsp;499<span class="sub-period"><span class="sub-unit">/year</span></span></div>
-      <div class="sub-billed">from Base · billed annually</div>
-      <div class="sub-note">Same billing model on Base, Basic, Growth, Business, Professional &amp; Enterprise</div>
+      <div class="sub-eyebrow">Starting plan</div>
+      <div class="sub-price"><span class="sub-currency">AED</span>&nbsp;299<span class="sub-period"><span class="sub-unit">/year</span></span></div>
+      <div class="sub-billed">for teams of up to 5 employees · billed annually</div>
+      <div class="sub-note">3-year packages available — save up to 25%</div>
     </div>
 
-    <div class="plans-section-label">Annual subscription by plan</div>
+    <div class="plans-section-label">Price by employee count</div>
 
-    <div class="pricing-grid">
+    <table class="price-table">
+      <thead>
+        <tr>
+          <th>Employees</th>
+          <th>Annual</th>
+          <th>3-year package</th>
+          <th>You save with 3 years</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Up to 5</td>
+          <td class="num">AED 299</td>
+          <td class="num">AED 699</td>
+          <td class="save">AED 198</td>
+        </tr>
+        <tr>
+          <td>Up to 10</td>
+          <td class="num">AED 499</td>
+          <td class="num">AED 1,149</td>
+          <td class="save">AED 348</td>
+        </tr>
+        <tr class="popular">
+          <td>Up to 25 <span class="tag">Most popular</span></td>
+          <td class="num">AED 1,199</td>
+          <td class="num">AED 2,699</td>
+          <td class="save">AED 898</td>
+        </tr>
+        <tr>
+          <td>Up to 50</td>
+          <td class="num">AED 2,199</td>
+          <td class="num">AED 4,999</td>
+          <td class="save">AED 1,598</td>
+        </tr>
+        <tr>
+          <td>Up to 100</td>
+          <td class="num">AED 3,999</td>
+          <td class="num">AED 8,999</td>
+          <td class="save">AED 2,998</td>
+        </tr>
+        <tr>
+          <td>Up to 200</td>
+          <td class="num">AED 6,999</td>
+          <td class="num">AED 15,999</td>
+          <td class="save">AED 4,998</td>
+        </tr>
+        <tr>
+          <td>200+</td>
+          <td class="num" colspan="2">Custom quote</td>
+          <td class="save">Volume pricing</td>
+        </tr>
+      </tbody>
+    </table>
 
-      <div class="plan-card">
-        <div class="plan-name">Base</div>
-        <div class="plan-license">
-          <span class="plan-license-label">Annual subscription</span>
-          <span class="plan-license-price">AED 499</span>
-        </div>
-        <div class="plan-limit">Up to 10 Employees</div>
-        <div class="plan-divider" style="margin-top:10px;"></div>
+    <div class="includes-box">
+      <div class="plans-section-label" style="margin-bottom:0;">Every plan includes the full PunchPay software</div>
+      <div class="includes-grid">
         <div class="plan-feature">Attendance Tracking</div>
         <div class="plan-feature">UAE Payroll (AED)</div>
-        <div class="plan-feature">WPS Export</div>
+        <div class="plan-feature">WPS Salary File Export</div>
+        <div class="plan-feature">Gratuity on Payslips</div>
         <div class="plan-feature">WhatsApp Payslips</div>
-        <div class="plan-feature">PDF Reports</div>
-        <div class="plan-feature dim">Multi-Branch</div>
-      </div>
-
-      <div class="plan-card">
-        <div class="plan-name">Basic</div>
-        <div class="plan-license">
-          <span class="plan-license-label">Annual subscription</span>
-          <span class="plan-license-price">AED 1,149</span>
-        </div>
-        <div class="plan-limit">Up to 25 Employees</div>
-        <div class="plan-divider" style="margin-top:10px;"></div>
-        <div class="plan-feature">Attendance Tracking</div>
-        <div class="plan-feature">UAE Payroll (AED)</div>
-        <div class="plan-feature">WPS Export</div>
-        <div class="plan-feature">WhatsApp Payslips</div>
-        <div class="plan-feature">PDF Reports</div>
-        <div class="plan-feature dim">Multi-Branch</div>
-      </div>
-
-      <div class="plan-card popular">
-        <div class="plan-name">Growth</div>
-        <div class="plan-license">
-          <span class="plan-license-label">Annual subscription</span>
-          <span class="plan-license-price">AED 2,149</span>
-        </div>
-        <div class="plan-limit">Up to 50 Employees</div>
-        <div class="plan-divider" style="margin-top:10px;"></div>
-        <div class="plan-feature">Attendance Tracking</div>
-        <div class="plan-feature">UAE Payroll (AED)</div>
-        <div class="plan-feature">WPS Export</div>
-        <div class="plan-feature">WhatsApp Payslips</div>
-        <div class="plan-feature">PDF Reports</div>
+        <div class="plan-feature">Daily WhatsApp Summary</div>
+        <div class="plan-feature">Biometric ADMS Sync</div>
         <div class="plan-feature">Multi-Branch Support</div>
+        <div class="plan-feature">PDF Reports</div>
       </div>
-
-      <div class="plan-card">
-        <div class="plan-name">Business</div>
-        <div class="plan-license">
-          <span class="plan-license-label">Annual subscription</span>
-          <span class="plan-license-price">AED 3,799</span>
-        </div>
-        <div class="plan-limit">Up to 100 Employees</div>
-        <div class="plan-divider" style="margin-top:10px;"></div>
-        <div class="plan-feature">Attendance Tracking</div>
-        <div class="plan-feature">UAE Payroll (AED)</div>
-        <div class="plan-feature">WPS Export</div>
-        <div class="plan-feature">WhatsApp Payslips</div>
-        <div class="plan-feature">Multi-Branch Support</div>
-        <div class="plan-feature">Priority Support</div>
-      </div>
-
-      <div class="plan-card">
-        <div class="plan-name">Professional</div>
-        <div class="plan-license">
-          <span class="plan-license-label">Annual subscription</span>
-          <span class="plan-license-price">AED 6,499</span>
-        </div>
-        <div class="plan-limit">Up to 200 Employees</div>
-        <div class="plan-divider" style="margin-top:10px;"></div>
-        <div class="plan-feature">Attendance Tracking</div>
-        <div class="plan-feature">UAE Payroll (AED)</div>
-        <div class="plan-feature">WPS Export</div>
-        <div class="plan-feature">WhatsApp Payslips</div>
-        <div class="plan-feature">Multi-Branch Support</div>
-        <div class="plan-feature">Priority Support</div>
-      </div>
-
-      <div class="plan-card">
-        <div class="plan-name">Enterprise</div>
-        <div class="plan-license">
-          <span class="plan-license-label">Annual subscription</span>
-          <span class="plan-license-price">Custom</span>
-        </div>
-        <div class="plan-limit">200+ Employees</div>
-        <div class="plan-divider" style="margin-top:10px;"></div>
-        <div class="plan-feature">Everything in Professional</div>
-        <div class="plan-feature">Custom Integrations</div>
-        <div class="plan-feature">Dedicated Support</div>
-        <div class="plan-feature">On-site Onboarding</div>
-        <div class="plan-feature">Custom Reports</div>
-        <div class="plan-feature">Negotiable Pricing</div>
-      </div>
-
     </div>
 
     <div style="margin-top:16px;padding:14px 20px;background:rgba(212,168,67,0.06);border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--white-dim);display:flex;align-items:center;gap:12px;">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2" stroke-linecap="round" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span>All prices are <strong style="color:var(--white)">exclusive of 5% UAE VAT</strong>. Annual subscription renews each year — no one-time license or separate AMC. For businesses with <strong style="color:var(--white)">multiple branches</strong>, pricing may vary. <strong style="color:var(--white)">Contact us for a demo</strong> — Thanveer: <strong style="color:var(--gold)">+91 96008 44041</strong></span>
+      <span>All prices are <strong style="color:var(--white)">exclusive of 5% UAE VAT</strong>. Pay yearly or lock in 3 years — no one-time license or separate AMC. <strong style="color:var(--white)">Contact us for a demo</strong> — Thanveer: <strong style="color:var(--gold)">+91 96008 44041</strong></span>
     </div>
 
   </div>

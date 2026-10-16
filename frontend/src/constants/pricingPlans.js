@@ -169,54 +169,54 @@ export const PEPM_ADMIN_HINT =
   '₹499/mo includes 10 staff. Extra +₹49. Yearly amount = monthly × 12.';
 
 /**
- * UAE yearly subscription only (excl. VAT). No one-time or separate AMC.
- * Anchored at Base (AED 499 / up to 10). Higher tiers use volume discounts
- * so AED-per-employee falls as headcount rises (~50 → ~46 → ~43 → ~38 → ~32).
+ * UAE subscription (excl. VAT): yearly or 3-year prepaid. No one-time or separate AMC.
+ * These are PunchPay's prices to the UAE partner (and for direct sales); the partner adds his margin.
  */
 export const PRICING_PLANS_AE = [
-  {
-    code: 'base',
-    name: 'Base',
-    emp: 'Up to 10',
-    annual: '499',
-    currency: 'AED',
-  },
-  {
-    code: 'starter',
-    name: 'Basic',
-    emp: 'Up to 25',
-    annual: '1,149',
-    currency: 'AED',
-  },
-  {
-    code: 'growth',
-    name: 'Growth',
-    emp: 'Up to 50',
-    annual: '2,149',
-    currency: 'AED',
-  },
-  {
-    code: 'business',
-    name: 'Business',
-    emp: 'Up to 100',
-    annual: '3,799',
-    currency: 'AED',
-  },
+  { code: 'micro', name: 'Up to 5', emp: 'Up to 5', annual: '299', triennial: '699', currency: 'AED' },
+  { code: 'base', name: 'Up to 10', emp: 'Up to 10', annual: '499', triennial: '1,149', currency: 'AED' },
+  { code: 'starter', name: 'Up to 25', emp: 'Up to 25', annual: '1,199', triennial: '2,699', currency: 'AED' },
+  { code: 'growth', name: 'Up to 50', emp: 'Up to 50', annual: '2,199', triennial: '4,999', currency: 'AED' },
+  { code: 'business', name: 'Up to 100', emp: 'Up to 100', annual: '3,999', triennial: '8,999', currency: 'AED' },
   {
     code: 'professional',
-    name: 'Professional',
+    name: 'Up to 200',
     emp: 'Up to 200',
-    annual: '6,499',
+    annual: '6,999',
+    triennial: '15,999',
     currency: 'AED',
   },
-  {
-    code: 'enterprise',
-    name: 'Enterprise',
-    emp: '200+',
-    annual: 'Custom',
-    currency: 'AED',
-  },
+  { code: 'enterprise', name: 'Enterprise', emp: '200+', annual: 'Custom', triennial: 'Custom', currency: 'AED' },
 ];
+
+export const AE_BILLING_TYPE_YEARLY = 'annual';
+export const AE_BILLING_TYPE_TRIENNIAL = 'triennial';
+
+export const AE_BILLING_TYPE_OPTIONS = [
+  { value: AE_BILLING_TYPE_YEARLY, label: 'Yearly' },
+  { value: AE_BILLING_TYPE_TRIENNIAL, label: '3-year package' },
+];
+
+/** UAE companies store `annual` (1 year) or `triennial` (3 years). */
+export function normalizeAeBillingType(billingCycle) {
+  const c = String(billingCycle || '').toLowerCase();
+  if (c === 'triennial' || c === '3years' || c === '3year' || c === '3-year') {
+    return AE_BILLING_TYPE_TRIENNIAL;
+  }
+  return AE_BILLING_TYPE_YEARLY;
+}
+
+export function billingTypeOptionsForCountry(countryCode = 'IN') {
+  return isAnnualOnlyBilling(countryCode) ? AE_BILLING_TYPE_OPTIONS : INDIA_BILLING_TYPE_OPTIONS;
+}
+
+/** Subscription term in years for any country (UAE yearly/3-year; India yearly/3-year/OTC). */
+export function billingTermYearsForCountry(countryCode, billingCycle, planCode) {
+  if (isAnnualOnlyBilling(countryCode)) {
+    return normalizeAeBillingType(billingCycle) === AE_BILLING_TYPE_TRIENNIAL ? 3 : 1;
+  }
+  return indiaBillingTermYears(normalizeIndiaBillingType(billingCycle, planCode));
+}
 
 export function pricingPlansForCountry(countryCode = 'IN') {
   const code = String(countryCode || 'IN').toUpperCase();
@@ -260,15 +260,15 @@ export function indiaBillingTypeLabel(billingType) {
 }
 
 export function accessEndFromStart(startIso, billingCycle, countryCode = 'IN', planCode) {
-  if (isAnnualOnlyBilling(countryCode)) return addCalendarYearsIso(startIso, 1);
-  return addCalendarYearsIso(
-    startIso,
-    indiaBillingTermYears(normalizeIndiaBillingType(billingCycle, planCode))
-  );
+  return addCalendarYearsIso(startIso, billingTermYearsForCountry(countryCode, billingCycle, planCode));
 }
 
 export function softwareFeeLabel(countryCode, billingCycle, planCode) {
-  if (isAnnualOnlyBilling(countryCode)) return 'Annual subscription';
+  if (isAnnualOnlyBilling(countryCode)) {
+    return normalizeAeBillingType(billingCycle) === AE_BILLING_TYPE_TRIENNIAL
+      ? '3-year subscription'
+      : 'Annual subscription';
+  }
   if (isPepmPlan(planCode)) return 'Yearly (legacy monthly)';
   const t = normalizeIndiaBillingType(billingCycle, planCode);
   if (t === INDIA_BILLING_TYPE_TRIENNIAL) return '3-year package';
@@ -282,18 +282,17 @@ function parsePlanPrice(value) {
   return Number.isFinite(n) && n >= 0 ? String(n) : '';
 }
 
-/** Amount shown on the tenant company page (catalog for standard AE plans; DB for custom). */
-export function tenantDisplayAmcAmount(planCode, countryCode = 'IN', storedAmcAmount) {
-  const pricing = planPricingForCountry(planCode, countryCode);
-  if (isAnnualOnlyBilling(countryCode) && pricing.amc) {
-    return pricing.amc;
+/** Amount shown on the tenant company page (stored deal amount; AE falls back to catalog). */
+export function tenantDisplayAmcAmount(planCode, countryCode = 'IN', storedAmcAmount, billingCycle) {
+  if (storedAmcAmount != null && storedAmcAmount !== '') return storedAmcAmount;
+  if (isAnnualOnlyBilling(countryCode)) {
+    return planPricingForCountry(planCode, countryCode, billingCycle).amc || null;
   }
-  if (storedAmcAmount == null || storedAmcAmount === '') return null;
-  return storedAmcAmount;
+  return null;
 }
 
 /** Parsed billing amounts for admin lead/convert forms. */
-export function planPricingForCountry(planCode, countryCode = 'IN') {
+export function planPricingForCountry(planCode, countryCode = 'IN', billingCycle) {
   const currency = pricingCurrencyForCountry(countryCode);
   if (isPepmPlan(planCode) && !isAnnualOnlyBilling(countryCode)) {
     const yearly = String(pepmYearlyInr(PEPM_INCLUDED_STAFF));
@@ -310,10 +309,14 @@ export function planPricingForCountry(planCode, countryCode = 'IN') {
 
   if (isAnnualOnlyBilling(countryCode)) {
     const annual = parsePlanPrice(plan.annual);
+    const term =
+      normalizeAeBillingType(billingCycle) === AE_BILLING_TYPE_TRIENNIAL
+        ? parsePlanPrice(plan.triennial)
+        : annual;
     return {
       annual,
       onetime: '',
-      amc: annual,
+      amc: term,
       currency,
     };
   }
@@ -384,7 +387,7 @@ export function adminPlanFormDefaults(
   const country = String(countryCode || 'IN').toUpperCase();
   const annualOnly = isAnnualOnlyBilling(country);
   const type = annualOnly
-    ? 'annual'
+    ? normalizeAeBillingType(billingType)
     : normalizeIndiaBillingType(billingType || INDIA_BILLING_TYPE_YEARLY, planCode);
 
   if (isPepmPlan(planCode) && !annualOnly) {
@@ -426,7 +429,7 @@ export function adminPlanFormDefaults(
     requested === 'custom' || plans.some((p) => p.code === requested)
       ? requested
       : plans[0]?.code || 'base';
-  const pricing = planPricingForCountry(resolved, country);
+  const pricing = planPricingForCountry(resolved, country, type);
   const limits = planDefaultLimits(resolved);
   return {
     plan_code: resolved,
@@ -435,7 +438,7 @@ export function adminPlanFormDefaults(
     onetime_fee_amount: annualOnly ? '' : pricing.onetime || '',
     amc_amount: pricing.amc || '',
     onetime_fee_paid: annualOnly,
-    billing_cycle: annualOnly ? 'annual' : INDIA_BILLING_TYPE_OTC,
+    billing_cycle: annualOnly ? type : INDIA_BILLING_TYPE_OTC,
   };
 }
 
@@ -477,7 +480,7 @@ export function syncPepmFormAmounts(target, countryCode = 'IN') {
   return target;
 }
 
-/** Labels for SuperAdmin <select>s. billingType: yearly | triennial | otc */
+/** Labels for SuperAdmin <select>s. billingType: yearly | triennial | otc (AE: annual | triennial) */
 export function planOptionsForAdminSelect(
   countryCode = 'IN',
   billingType = INDIA_BILLING_TYPE_YEARLY
@@ -487,14 +490,19 @@ export function planOptionsForAdminSelect(
   const taxNote = annualOnly ? 'excl. VAT' : 'excl. GST';
 
   if (annualOnly) {
+    const triennial = normalizeAeBillingType(billingType) === AE_BILLING_TYPE_TRIENNIAL;
+    const period = triennial ? '3 years' : 'year';
     return [
-      ...pricingPlansForCountry(countryCode).map((p) => ({
-        value: p.code,
-        label:
-          p.annual === 'Custom'
-            ? `${p.name} — ${p.emp} employees · custom annual subscription`
-            : `${p.name} — ${p.emp} employees · ${sym}${p.annual}/year (${taxNote})`,
-      })),
+      ...pricingPlansForCountry(countryCode).map((p) => {
+        const amt = triennial ? p.triennial : p.annual;
+        return {
+          value: p.code,
+          label:
+            amt === 'Custom'
+              ? `${p.emp} employees · custom subscription`
+              : `${p.emp} employees · ${sym} ${amt} / ${period} (${taxNote})`,
+        };
+      }),
       { value: 'custom', label: 'Custom — bespoke agreement (no default employee cap)' },
     ];
   }

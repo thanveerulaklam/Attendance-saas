@@ -3,981 +3,582 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PunchPay UAE — Product Catalogue 2026</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<title>PunchPay UAE — Partner Brief 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --black: #0A0A0A;
-    --gold: #D4A843;
-    --gold-light: #F0C96A;
-    --white: #F5F1EA;
-    --white-dim: #C8C0B0;
-    --card: #121212;
-    --border: rgba(212,168,67,0.22);
-    --ok: #3D9B6E;
+    --navy-950: #070D1A;
+    --navy-900: #0B1324;
+    --navy-800: #121D35;
+    --navy-700: #1B2846;
+    --gold: #C8A15A;
+    --gold-soft: #E4CC97;
+    --gold-tint: rgba(200,161,90,0.12);
+    --ivory: #FBF8F2;
+    --paper: #FFFFFF;
+    --ink: #0E1628;
+    --muted: #5C6578;
+    --line: #E8E1D3;
+    --win: #17805B;
+    --win-tint: #E7F4EE;
   }
 
-  html { background: #1a1a1a; }
+  html, body { background: #2a2d33; }
 
   body {
-    font-family: 'DM Sans', sans-serif;
-    background: #1a1a1a;
-    color: var(--white);
+    font-family: 'Inter', sans-serif;
+    color: var(--ink);
     width: 794px;
     margin: 0 auto;
+    -webkit-font-smoothing: antialiased;
   }
 
   .page {
     width: 794px;
     height: 1123px;
-    background: var(--black);
     position: relative;
     overflow: hidden;
     page-break-after: always;
     page-break-inside: avoid;
+    background: var(--ivory);
   }
 
-  .page::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
-    pointer-events: none;
-    z-index: 1;
+  .page.dark {
+    background:
+      radial-gradient(900px 520px at 85% -10%, rgba(200,161,90,0.20), transparent 60%),
+      radial-gradient(700px 500px at -10% 110%, rgba(64,96,170,0.22), transparent 60%),
+      var(--navy-900);
+    color: #EEF1F7;
   }
 
   .inner {
     position: relative;
     z-index: 2;
-    padding: 36px 48px 28px;
+    padding: 38px 50px 26px;
     height: 100%;
     display: flex;
     flex-direction: column;
   }
 
-  /* ── Shared ── */
-  .logo-row {
+  .serif { font-family: 'Fraunces', serif; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ── Header ── */
+  .top {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 28px;
+    padding-bottom: 16px;
+    margin-bottom: 26px;
+    border-bottom: 1px solid var(--line);
+  }
+  .dark .top { border-bottom-color: rgba(200,161,90,0.28); }
+
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand-mark {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--gold-soft), var(--gold));
+    display: flex; align-items: center; justify-content: center;
+  }
+  .brand-mark svg { width: 19px; height: 19px; }
+  .brand-name { font-family: 'Fraunces', serif; font-size: 21px; font-weight: 700; letter-spacing: -0.3px; }
+  .brand-name span { color: var(--gold); }
+
+  .top-meta { text-align: right; font-size: 9.5px; letter-spacing: 1.8px; text-transform: uppercase; line-height: 1.6; color: var(--muted); }
+  .dark .top-meta { color: var(--gold-soft); }
+  .confidential {
+    display: inline-block; margin-top: 3px; padding: 2px 8px; border-radius: 99px;
+    border: 1px solid var(--gold); color: var(--gold); font-size: 8.5px; letter-spacing: 1.6px; font-weight: 600;
   }
 
-  .logo-lockup {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
+  .eyebrow { font-size: 10px; letter-spacing: 2.6px; text-transform: uppercase; color: var(--gold); font-weight: 600; margin-bottom: 10px; }
 
-  .logo-mark {
-    width: 36px;
-    height: 36px;
-    background: var(--gold);
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
+  .h2 { font-family: 'Fraunces', serif; font-size: 31px; font-weight: 600; letter-spacing: -0.8px; line-height: 1.1; margin-bottom: 9px; }
+  .h2 em { font-style: italic; color: var(--gold); font-weight: 600; }
+  .lede { font-size: 12.5px; color: var(--muted); line-height: 1.6; max-width: 640px; margin-bottom: 20px; }
 
-  .logo-mark svg { width: 20px; height: 20px; }
-
-  .logo-name {
-    font-family: 'Syne', sans-serif;
-    font-size: 20px;
-    font-weight: 800;
-    letter-spacing: -0.4px;
-  }
-
-  .logo-name span { color: var(--gold); }
-
-  .logo-meta {
-    font-size: 10px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--gold);
-    text-align: right;
-    line-height: 1.5;
-  }
-
-  .eyebrow {
-    font-size: 10px;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    color: var(--gold);
-    font-weight: 600;
+  .section-label {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 10px; letter-spacing: 2.2px; text-transform: uppercase; font-weight: 600; color: var(--navy-700);
     margin-bottom: 10px;
   }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  .dark .section-label { color: var(--gold-soft); }
+  .dark .section-label::after { background: rgba(200,161,90,0.25); }
 
-  .page-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 34px;
-    font-weight: 800;
-    letter-spacing: -1.2px;
-    line-height: 1.05;
-    margin-bottom: 10px;
+  .footer {
+    margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; font-size: 9.5px; color: var(--muted); letter-spacing: 0.3px;
   }
-
-  .page-title .accent { color: var(--gold); }
-
-  .lede {
-    font-size: 13px;
-    color: var(--white-dim);
-    line-height: 1.55;
-    max-width: 620px;
-    font-weight: 300;
-    margin-bottom: 22px;
-  }
-
-  .footer-bar {
-    margin-top: auto;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 10px;
-    color: var(--white-dim);
-    letter-spacing: 0.3px;
-  }
-
-  .footer-bar strong { color: var(--gold); font-weight: 600; }
+  .footer strong { color: var(--ink); font-weight: 600; }
+  .dark .footer { border-top-color: rgba(200,161,90,0.25); color: #9AA4B8; }
+  .dark .footer strong { color: var(--gold-soft); }
 
   /* ── PAGE 1 ── */
-  .hero-h1 {
-    font-family: 'Syne', sans-serif;
-    font-size: 46px;
-    font-weight: 800;
-    letter-spacing: -1.8px;
-    line-height: 0.98;
-    margin-bottom: 14px;
-    max-width: 640px;
+  .hero-h1 { font-family: 'Fraunces', serif; font-size: 44px; font-weight: 600; letter-spacing: -1.4px; line-height: 1.04; margin-bottom: 14px; }
+  .hero-h1 em { font-style: italic; color: var(--gold-soft); }
+  .hero-sub { font-size: 13.5px; line-height: 1.6; color: #B9C2D3; max-width: 610px; margin-bottom: 24px; font-weight: 300; }
+  .hero-sub strong { color: #fff; font-weight: 500; }
+
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 22px; }
+  .kpi {
+    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+    border: 1px solid rgba(200,161,90,0.30); border-radius: 12px; padding: 14px 14px 13px;
+  }
+  .kpi-val { font-family: 'Fraunces', serif; font-size: 25px; font-weight: 600; color: var(--gold-soft); letter-spacing: -0.5px; line-height: 1.05; white-space: nowrap; }
+  .kpi-val small { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 500; color: var(--gold); letter-spacing: 0; }
+  .kpi-lbl { margin-top: 6px; font-size: 10.5px; line-height: 1.4; color: #B9C2D3; }
+
+  .kiosk {
+    display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px; align-items: center;
+    background: linear-gradient(135deg, rgba(200,161,90,0.18), rgba(200,161,90,0.04));
+    border: 1px solid rgba(200,161,90,0.40); border-radius: 14px; padding: 18px 20px; margin-bottom: 22px;
+  }
+  .kiosk h2 { font-family: 'Fraunces', serif; font-size: 20px; font-weight: 600; letter-spacing: -0.3px; margin-bottom: 6px; color: #fff; }
+  .kiosk p { font-size: 11.5px; color: #C3CBDA; line-height: 1.55; }
+  .kiosk p strong { color: var(--gold-soft); font-weight: 600; }
+  .kiosk-steps { display: flex; flex-direction: column; gap: 7px; }
+  .kstep { display: flex; gap: 10px; align-items: flex-start; font-size: 11px; color: #D5DBE6; line-height: 1.4; }
+  .kstep b {
+    flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--gold); color: var(--navy-900);
+    font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
   }
 
-  .hero-h1 .accent { color: var(--gold); }
-
-  .hero-sub {
-    font-size: 14px;
-    color: var(--white-dim);
-    line-height: 1.55;
-    max-width: 560px;
-    font-weight: 300;
-    margin-bottom: 22px;
+  .incl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .incl-item {
+    background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 11px 12px;
   }
+  .incl-item h4 { font-size: 11.5px; font-weight: 600; color: #fff; margin-bottom: 3px; display: flex; align-items: center; gap: 7px; }
+  .incl-item h4::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex: none; }
+  .incl-item p { font-size: 10px; color: #A9B3C6; line-height: 1.45; }
 
-  .android-banner {
-    background: linear-gradient(135deg, rgba(212,168,67,0.14), rgba(212,168,67,0.04));
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px 20px;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 16px;
-    align-items: center;
-    margin-bottom: 20px;
+  .why-strip {
+    display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 18px;
+    border-top: 1px solid rgba(200,161,90,0.25); border-bottom: 1px solid rgba(200,161,90,0.25);
   }
+  .why-strip div { padding: 12px 12px; border-left: 1px solid rgba(200,161,90,0.18); }
+  .why-strip div:first-child { border-left: 0; padding-left: 0; }
+  .why-strip strong { display: block; font-family: 'Fraunces', serif; font-size: 14px; font-weight: 600; color: var(--gold-soft); margin-bottom: 2px; }
+  .why-strip span { font-size: 10px; color: #A9B3C6; line-height: 1.4; }
 
-  .android-banner h2 {
-    font-family: 'Syne', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.4px;
-    margin-bottom: 6px;
+  /* ── Tables ── */
+  .tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 11.5px; background: var(--paper); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .tbl th {
+    background: var(--navy-900); color: #E6EAF2; font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase; font-weight: 600;
+    padding: 10px 10px; text-align: right; line-height: 1.3;
   }
+  .tbl th:first-child, .tbl td:first-child { text-align: left; padding-left: 14px; }
+  .tbl th.gold { background: #1E2B4A; color: var(--gold-soft); }
+  .tbl td.plan { white-space: nowrap; }
+  .tbl td { padding: 7px 10px; text-align: right; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+  .tbl tr:first-child td { border-top: 0; }
+  .tbl td.plan { font-weight: 600; color: var(--ink); }
+  .tbl td.plan span { display: block; font-size: 9.5px; color: var(--muted); font-weight: 400; margin-top: 1px; }
+  .tbl td.price { font-weight: 700; font-size: 13px; color: var(--ink); }
+  .tbl td.pem { color: var(--navy-700); }
+  .tbl td.pem b { font-weight: 700; }
+  .tbl td.gold-cell { background: #FBF5E8; }
+  .tbl td.save { color: var(--win); font-weight: 600; }
+  .tbl td.muted { color: var(--muted); }
+  .tbl tr.hl td { background: #FFFBF2; }
+  .tbl tr.hl td.gold-cell { background: #F7EBCF; }
+  .tag { font-style: normal; display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 4px; background: var(--gold); color: var(--navy-900); font-size: 8px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; vertical-align: 1px; }
 
-  .android-banner p {
-    font-size: 12px;
-    color: var(--white-dim);
-    line-height: 1.5;
-    max-width: 480px;
+  .cmp td.pp { background: #FBF5E8; color: var(--ink); font-weight: 700; }
+  .cmp td.pp3 { background: #F7EBCF; color: var(--ink); font-weight: 700; }
+  .cmp td.rival { color: #6B7385; }
+  .cmp td.cheapest { color: var(--ink); font-weight: 600; }
+  .cmp td.win { color: var(--win); font-weight: 700; background: var(--win-tint); }
+  .cmp th.win { background: var(--win); color: #fff; }
+
+  .note-row { display: flex; gap: 10px; margin: 10px 0 16px; }
+  .chip {
+    flex: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px;
+    font-size: 10.5px; color: var(--muted); line-height: 1.45;
   }
+  .chip strong { display: block; color: var(--ink); font-size: 11.5px; margin-bottom: 2px; }
 
-  .android-pill {
-    background: var(--gold);
-    color: var(--black);
-    font-family: 'Syne', sans-serif;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    padding: 10px 14px;
-    border-radius: 8px;
-    text-align: center;
-    line-height: 1.35;
-    white-space: nowrap;
-  }
-
-  .android-steps {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-
-  .step-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 14px 12px;
-  }
-
-  .step-num {
-    font-family: 'Syne', sans-serif;
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--gold);
-    letter-spacing: 1px;
-    margin-bottom: 6px;
-  }
-
-  .step-card h3 {
-    font-family: 'Syne', sans-serif;
-    font-size: 13px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .step-card p {
-    font-size: 11px;
-    color: var(--white-dim);
-    line-height: 1.45;
-  }
-
-  .why-grid {
-    display: grid;
-    grid-template-columns: 1.15fr 1fr;
-    gap: 12px;
-    flex: 1;
-  }
-
-  .why-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px 18px;
-  }
-
-  .why-card h3 {
-    font-family: 'Syne', sans-serif;
-    font-size: 14px;
-    font-weight: 700;
-    margin-bottom: 10px;
-  }
-
-  .why-list {
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .why-list li {
-    font-size: 11.5px;
-    color: var(--white-dim);
-    line-height: 1.4;
-    padding-left: 16px;
-    position: relative;
-  }
-
-  .why-list li::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 5px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--gold);
-  }
-
-  .compare-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 11px;
-  }
-
-  .compare-table th,
-  .compare-table td {
-    text-align: left;
-    padding: 7px 6px;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-  }
-
-  .compare-table th {
-    color: var(--gold);
-    font-weight: 600;
-    font-size: 10px;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-  }
-
-  .compare-table td:first-child { color: var(--white-dim); width: 42%; }
-  .compare-table .yes { color: var(--ok); font-weight: 600; }
-  .compare-table .no { color: #8a6a6a; }
-  .compare-table .pp { color: var(--gold-light); font-weight: 600; }
-
-  /* ── PAGE 2 ── */
-  .feat-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    flex: 1;
-  }
-
-  .feat {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 13px 14px;
-  }
-
-  .feat-icon {
-    width: 22px;
-    height: 22px;
-    border-radius: 6px;
-    background: rgba(212,168,67,0.15);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 8px;
-  }
-
-  .feat-icon svg {
-    width: 12px;
-    height: 12px;
-    stroke: var(--gold);
-    fill: none;
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .feat h3 {
-    font-family: 'Syne', sans-serif;
-    font-size: 13px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .feat p {
-    font-size: 11px;
-    color: var(--white-dim);
-    line-height: 1.45;
-  }
-
-  .feat ul {
-    list-style: none;
-    margin-top: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .feat ul li {
-    font-size: 10.5px;
-    color: var(--white-dim);
-    padding-left: 12px;
-    position: relative;
-    line-height: 1.35;
-  }
-
-  .feat ul li::before {
-    content: '–';
-    position: absolute;
-    left: 0;
-    color: var(--gold);
-  }
+  .fine { font-size: 9px; color: var(--muted); line-height: 1.5; margin-top: 10px; }
 
   /* ── PAGE 3 ── */
-  .price-hero {
-    text-align: center;
-    margin-bottom: 16px;
-  }
+  .p3-top { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; margin-bottom: 18px; }
+  .card { background: var(--paper); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card h3 { font-family: 'Fraunces', serif; font-size: 16px; font-weight: 600; margin-bottom: 3px; letter-spacing: -0.2px; }
+  .card .sub { font-size: 10px; color: var(--muted); margin-bottom: 12px; }
 
-  .price-hero .from-label {
-    font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--gold);
-    margin-bottom: 4px;
-  }
+  .bars { display: flex; flex-direction: column; gap: 8px; }
+  .bar-row { display: grid; grid-template-columns: 118px 1fr 52px; align-items: center; gap: 8px; font-size: 10.5px; }
+  .bar-row .lbl { color: var(--muted); line-height: 1.2; }
+  .bar-row .lbl small { display: block; font-size: 8.5px; color: #9AA1AE; }
+  .bar-track { height: 13px; background: #F2EEE6; border-radius: 99px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 99px; background: #B8BFCC; }
+  .bar.pp { background: linear-gradient(90deg, var(--gold), var(--gold-soft)); }
+  .bar-row .val { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+  .bar-row.pp .lbl { color: var(--ink); font-weight: 600; }
 
-  .price-hero .from-price {
-    font-family: 'Syne', sans-serif;
-    font-size: 42px;
-    font-weight: 800;
-    letter-spacing: -1.5px;
-    line-height: 1;
+  .hook {
+    background: linear-gradient(160deg, var(--navy-800), var(--navy-950)); color: #E9EDF5;
+    border-radius: 12px; padding: 18px 18px 16px; display: flex; flex-direction: column; justify-content: center;
+    border: 1px solid rgba(200,161,90,0.35);
   }
+  .hook .eyebrow { margin-bottom: 8px; }
+  .hook-big { font-family: 'Fraunces', serif; font-size: 34px; font-weight: 600; color: var(--gold-soft); letter-spacing: -0.8px; line-height: 1; }
+  .hook-big small { font-family: 'Inter', sans-serif; font-size: 13px; color: var(--gold); font-weight: 500; letter-spacing: 0; }
+  .hook p { font-size: 11px; line-height: 1.55; color: #B9C2D3; margin-top: 8px; }
+  .hook p strong { color: #fff; font-weight: 600; }
 
-  .price-hero .from-price small {
-    font-size: 16px;
-    font-weight: 600;
-    color: var(--white-dim);
-    letter-spacing: 0;
+  .model { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 18px 0 16px; }
+  .model .card { padding: 14px 15px; }
+  .model .step { font-family: 'Fraunces', serif; font-size: 22px; color: var(--gold); font-weight: 600; line-height: 1; margin-bottom: 6px; }
+  .model h4 { font-size: 12px; font-weight: 700; margin-bottom: 4px; color: var(--ink); }
+  .model p { font-size: 10.5px; color: var(--muted); line-height: 1.5; }
+
+  .cta {
+    display: grid; grid-template-columns: 1fr auto; gap: 18px; align-items: center;
+    background: linear-gradient(135deg, var(--navy-900), var(--navy-700)); color: #EEF1F7;
+    border-radius: 14px; padding: 18px 22px; border: 1px solid rgba(200,161,90,0.4);
   }
-
-  .price-hero .from-note {
-    font-size: 11px;
-    color: var(--white-dim);
-    margin-top: 6px;
-  }
-
-  .plans {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-
-  .plan {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 12px 12px 11px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .plan.popular {
-    border-color: var(--gold);
-    background: linear-gradient(180deg, rgba(212,168,67,0.12), var(--card) 55%);
-    position: relative;
-  }
-
-  .plan.popular::after {
-    content: 'Popular';
-    position: absolute;
-    top: -8px;
-    right: 10px;
-    background: var(--gold);
-    color: var(--black);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    padding: 2px 7px;
-    border-radius: 4px;
-  }
-
-  .plan-name {
-    font-family: 'Syne', sans-serif;
-    font-size: 14px;
-    font-weight: 700;
-    margin-bottom: 2px;
-  }
-
-  .plan-emp {
-    font-size: 10px;
-    color: var(--white-dim);
-    margin-bottom: 8px;
-  }
-
-  .plan-price {
-    font-family: 'Syne', sans-serif;
-    font-size: 22px;
-    font-weight: 800;
-    letter-spacing: -0.6px;
-    color: var(--gold-light);
-    margin-bottom: 2px;
-  }
-
-  .plan-price.custom { font-size: 18px; }
-
-  .plan-unit {
-    font-size: 10px;
-    color: var(--white-dim);
-    margin-bottom: 8px;
-  }
-
-  .plan-per {
-    font-size: 10px;
-    color: rgba(212,168,67,0.85);
-    margin-top: auto;
-    padding-top: 6px;
-    border-top: 1px solid rgba(255,255,255,0.06);
-  }
-
-  .value-strip {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    margin-bottom: 14px;
-  }
-
-  .value-item {
-    background: rgba(212,168,67,0.06);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 10px;
-    text-align: center;
-  }
-
-  .value-item strong {
-    display: block;
-    font-family: 'Syne', sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 3px;
-  }
-
-  .value-item span {
-    font-size: 10px;
-    color: var(--white-dim);
-    line-height: 1.35;
-  }
-
-  .cta-box {
-    background: linear-gradient(135deg, rgba(212,168,67,0.18), rgba(212,168,67,0.05));
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px 20px;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 16px;
-    align-items: center;
-  }
-
-  .cta-box h3 {
-    font-family: 'Syne', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    margin-bottom: 4px;
-  }
-
-  .cta-box p {
-    font-size: 12px;
-    color: var(--white-dim);
-    line-height: 1.45;
-  }
-
-  .cta-contacts {
-    text-align: right;
-  }
-
-  .cta-contacts .phone {
-    font-family: 'Syne', sans-serif;
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--gold);
-    margin-bottom: 4px;
-  }
-
-  .cta-contacts .web {
-    font-size: 12px;
-    color: var(--white);
-  }
-
-  .cta-contacts .note {
-    font-size: 10px;
-    color: var(--white-dim);
-    margin-top: 4px;
-  }
-
-  .vat-note {
-    font-size: 10px;
-    color: var(--white-dim);
-    text-align: center;
-    margin: 10px 0 0;
-  }
+  .cta h3 { font-family: 'Fraunces', serif; font-size: 20px; font-weight: 600; margin-bottom: 4px; letter-spacing: -0.3px; }
+  .cta h3 em { color: var(--gold-soft); font-style: italic; }
+  .cta p { font-size: 11px; color: #B9C2D3; line-height: 1.5; max-width: 420px; }
+  .cta-contact { text-align: right; }
+  .cta-contact .phone { font-family: 'Fraunces', serif; font-size: 19px; font-weight: 600; color: var(--gold-soft); white-space: nowrap; }
+  .cta-contact .web { font-size: 11.5px; color: #fff; margin-top: 2px; }
+  .cta-contact .who { font-size: 9.5px; color: #9AA4B8; margin-top: 3px; }
 
   @media print {
-    html, body {
-      background: white;
-      width: auto;
-      margin: 0;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    .page {
-      margin: 0;
-      box-shadow: none;
-      page-break-after: always;
-    }
+    html, body { background: none; width: auto; margin: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { margin: 0; box-shadow: none; }
     .page:last-child { page-break-after: auto; }
   }
-
-  @page {
-    size: A4;
-    margin: 0;
+  @media screen {
+    .page { margin: 0 auto 24px; box-shadow: 0 10px 40px rgba(0,0,0,0.35); }
   }
+  @page { size: A4; margin: 0; }
 </style>
 </head>
 <body>
 
-<!-- ══════════════════════════════════════
-     PAGE 1 — Why PunchPay UAE
-══════════════════════════════════════ -->
-<div class="page">
+<!-- ══════════════ PAGE 1 — The opportunity ══════════════ -->
+<div class="page dark">
   <div class="inner">
-    <div class="logo-row">
-      <div class="logo-lockup">
-        <div class="logo-mark">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0A0A0A" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0A0A0A" stroke-width="2.2"/></svg>
+    <div class="top">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0B1324" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0B1324" stroke-width="2.2"/></svg>
         </div>
-        <div class="logo-name">Punch<span>Pay</span></div>
+        <div class="brand-name">Punch<span>Pay</span></div>
       </div>
-      <div class="logo-meta">UAE Product Catalogue<br/>Attendance · Payroll · WPS</div>
+      <div class="top-meta">UAE Partner Brief · 2026<br/><span class="confidential">Confidential · Partner only</span></div>
     </div>
 
-    <h1 class="hero-h1">Attendance &amp; payroll<br/>built for <span class="accent">UAE business</span></h1>
+    <div class="eyebrow">The UAE opportunity</div>
+    <h1 class="hero-h1">UAE attendance &amp; payroll,<br/>priced below every major rival —<br/><em>with room for your margin.</em></h1>
     <p class="hero-sub">
-      Track attendance, run AED payroll, export WPS files, and send WhatsApp payslips —
-      without buying an expensive biometric machine. One annual subscription. Live in days, not months.
+      PunchPay runs attendance, AED payroll, WPS salary files and WhatsApp payslips in one cloud system.
+      Clients <strong>don't need a biometric machine</strong>, and your partner price is low enough to
+      <strong>double it and still undercut every major competitor that includes attendance</strong>.
     </p>
 
-    <div class="android-banner">
+    <div class="kpis">
+      <div class="kpi">
+        <div class="kpi-val num"><small>AED</small> 2.22</div>
+        <div class="kpi-lbl">Your lowest cost per employee per month (3-year, 200 staff)</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val num">58–71%</div>
+        <div class="kpi-lbl">Cheaper than the cheapest competitor that includes attendance</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val num">2×</div>
+        <div class="kpi-lbl">Resell at double our price and the client still pays less than elsewhere</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-val num"><small>AED</small> 0</div>
+        <div class="kpi-lbl">Hardware cost. A spare Android phone becomes the face kiosk</div>
+      </div>
+    </div>
+
+    <div class="kiosk">
       <div>
-        <h2>No dedicated biometric device needed</h2>
+        <h2>No biometric device needed</h2>
         <p>
-          An <strong style="color:var(--white)">old Android phone or tablet</strong> becomes your office face-attendance kiosk.
-          Employees look at the camera to punch IN/OUT. Same payroll path as a fingerprint machine —
-          at a fraction of the hardware cost.
+          Any <strong>old Android phone or tablet</strong> becomes a face-recognition attendance kiosk at reception.
+          Clients skip buying a fingerprint machine, so there's one less objection and the deal closes faster.
+          Already own ZKTeco devices? They plug in through cloud ADMS too.
         </p>
       </div>
-      <div class="android-pill">Any Android<br/>with a camera</div>
-    </div>
-
-    <div class="android-steps">
-      <div class="step-card">
-        <div class="step-num">01</div>
-        <h3>Install the kiosk app</h3>
-        <p>Download PunchPay Kiosk APK on a spare Android phone or tablet at reception.</p>
-      </div>
-      <div class="step-card">
-        <div class="step-num">02</div>
-        <h3>Enroll faces once</h3>
-        <p>Take a clear front-facing photo per employee. Recognition works for daily punches.</p>
-      </div>
-      <div class="step-card">
-        <div class="step-num">03</div>
-        <h3>Payroll is automatic</h3>
-        <p>Punches sync to the cloud. Month-end salary, WPS export, and WhatsApp payslips follow.</p>
+      <div class="kiosk-steps">
+        <div class="kstep"><b>1</b><span>Install the PunchPay Kiosk app on a spare Android device</span></div>
+        <div class="kstep"><b>2</b><span>Enroll each employee's face once with a front photo</span></div>
+        <div class="kstep"><b>3</b><span>Punches sync to the cloud, and payroll, WPS and payslips follow</span></div>
       </div>
     </div>
 
-    <div class="why-grid">
-      <div class="why-card">
-        <h3>Why UAE teams choose PunchPay</h3>
-        <ul class="why-list">
-          <li><strong style="color:var(--white)">Start from AED 499/year</strong> — designed for teams under 10, with volume discounts as you grow.</li>
-          <li><strong style="color:var(--white)">Zero hardware lock-in</strong> — use Android face kiosk, or connect ZKTeco ADMS if you already own devices.</li>
-          <li><strong style="color:var(--white)">UAE-native payroll</strong> — AED salaries, Dubai timezone, gratuity on payslips, WPS CSV for banks.</li>
-          <li><strong style="color:var(--white)">No setup fee</strong> — one annual subscription, excl. VAT. No separate AMC or license charge.</li>
-          <li><strong style="color:var(--white)">Cloud from day one</strong> — dashboard, reports, and payslips accessible anywhere.</li>
-        </ul>
-      </div>
-      <div class="why-card">
-        <h3>vs typical competitors</h3>
-        <table class="compare-table">
-          <thead>
-            <tr>
-              <th></th>
-              <th>Others</th>
-              <th>PunchPay</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Must buy biometric hardware</td>
-              <td class="no">Often yes</td>
-              <td class="pp">No — Android works</td>
-            </tr>
-            <tr>
-              <td>Entry price for micro teams</td>
-              <td class="no">High / custom</td>
-              <td class="pp">AED 499/yr</td>
-            </tr>
-            <tr>
-              <td>WPS + AED payroll built-in</td>
-              <td class="no">Add-on / missing</td>
-              <td class="yes">Included</td>
-            </tr>
-            <tr>
-              <td>WhatsApp payslips</td>
-              <td class="no">Rare</td>
-              <td class="yes">Included</td>
-            </tr>
-            <tr>
-              <td>Setup fee / AMC split</td>
-              <td class="no">Common</td>
-              <td class="pp">None — annual only</td>
-            </tr>
-            <tr>
-              <td>Time to go live</td>
-              <td class="no">Weeks</td>
-              <td class="pp">Days</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <div class="section-label">Everything included in every plan</div>
+    <div class="incl">
+      <div class="incl-item"><h4>Face attendance kiosk</h4><p>Android face IN/OUT, branch kiosk code, settings PIN</p></div>
+      <div class="incl-item"><h4>Biometric ADMS sync</h4><p>ZKTeco &amp; compatible devices, no on-site PC</p></div>
+      <div class="incl-item"><h4>Live dashboard</h4><p>Who's in, on break or absent, plus a 7-day trend</p></div>
+      <div class="incl-item"><h4>Shifts &amp; work rules</h4><p>Grace, lunch, late deductions, weekly offs, holidays</p></div>
+      <div class="incl-item"><h4>AED payroll engine</h4><p>Gross, overtime, deductions, advances and net in one click</p></div>
+      <div class="incl-item"><h4>Gratuity on payslips</h4><p>End-of-service shown on every payslip</p></div>
+      <div class="incl-item"><h4>WPS salary file</h4><p>Bank-ready export with IBAN &amp; labour card</p></div>
+      <div class="incl-item"><h4>WhatsApp payslips</h4><p>PDF payslips to staff in one tap, plus a daily summary</p></div>
+      <div class="incl-item"><h4>Multi-branch &amp; reports</h4><p>Branch-scoped HR, attendance and payroll PDF/CSV</p></div>
     </div>
 
-    <div class="footer-bar">
+    <div class="why-strip">
+      <div><strong>Live in days</strong><span>Not a months-long HR rollout</span></div>
+      <div><strong>No setup fee</strong><span>One subscription, yearly or 3-year</span></div>
+      <div><strong>UAE-native</strong><span>AED, Dubai time, WPS, gratuity</span></div>
+      <div><strong>Cloud</strong><span>Dashboard &amp; payslips from anywhere</span></div>
+    </div>
+
+    <div class="footer">
       <span>punchpay.in · UAE</span>
-      <span>Page 1 of 3</span>
-      <span>Demo: <strong>+91 96008 44041</strong></span>
+      <span>Partner Brief · Page 1 of 3</span>
+      <span>Thanveer: <strong>+91 96008 44041</strong></span>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     PAGE 2 — Features & functions
-══════════════════════════════════════ -->
+<!-- ══════════════ PAGE 2 — Partner pricing & competitor comparison ══════════════ -->
 <div class="page">
   <div class="inner">
-    <div class="logo-row">
-      <div class="logo-lockup">
-        <div class="logo-mark">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0A0A0A" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0A0A0A" stroke-width="2.2"/></svg>
+    <div class="top">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0B1324" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0B1324" stroke-width="2.2"/></svg>
         </div>
-        <div class="logo-name">Punch<span>Pay</span></div>
+        <div class="brand-name">Punch<span>Pay</span></div>
       </div>
-      <div class="logo-meta">Complete feature set<br/>Everything in one system</div>
+      <div class="top-meta">Partner pricing · AED<br/><span class="confidential">Excl. 5% VAT</span></div>
     </div>
 
-    <div class="eyebrow">Features &amp; functions</div>
-    <h2 class="page-title">Everything you need to run<br/><span class="accent">attendance and payroll</span></h2>
+    <div class="eyebrow">Your partner price</div>
+    <h2 class="h2">One price list. <em>Your margin on top.</em></h2>
     <p class="lede">
-      One cloud platform — from punch capture to WPS bank file. Built for UAE SMEs, multi-branch teams, and growing headcounts.
+      You buy at these prices and sell at whatever price you choose. There's no setup fee, separate AMC or hardware
+      to bundle. Cost per employee falls as teams grow, and the 3-year package locks clients in for 22–25% less.
     </p>
 
-    <div class="feat-grid">
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="18" r="1"/></svg></div>
-        <h3>Android face attendance kiosk</h3>
-        <p>Turn any Android phone/tablet into a reception punch station. Face recognition IN/OUT — no fingerprint machine required.</p>
-        <ul>
-          <li>One-time face enrollment per employee</li>
-          <li>Branch kiosk code + settings PIN</li>
-          <li>Same punch → payroll path as biometrics</li>
-        </ul>
-      </div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Plan</th>
+          <th class="gold">1 year<br/>AED</th>
+          <th class="gold">Per employee<br/>/ month</th>
+          <th>3 years<br/>AED</th>
+          <th>Per employee<br/>/ month</th>
+          <th>3-year saving<br/>vs 3 × yearly</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="plan">Up to 5<span>Micro teams, shops, clinics</span></td>
+          <td class="price gold-cell">299</td>
+          <td class="pem gold-cell"><b>4.98</b></td>
+          <td class="price">699</td>
+          <td class="pem"><b>3.88</b></td>
+          <td class="save">198 · 22%</td>
+        </tr>
+        <tr>
+          <td class="plan">Up to 10<span>Small offices &amp; restaurants</span></td>
+          <td class="price gold-cell">499</td>
+          <td class="pem gold-cell"><b>4.16</b></td>
+          <td class="price">1,149</td>
+          <td class="pem"><b>3.19</b></td>
+          <td class="save">348 · 23%</td>
+        </tr>
+        <tr class="hl">
+          <td class="plan">Up to 25 <i class="tag">Sweet spot</i><span>Most SME deals</span></td>
+          <td class="price gold-cell">1,199</td>
+          <td class="pem gold-cell"><b>4.00</b></td>
+          <td class="price">2,699</td>
+          <td class="pem"><b>3.00</b></td>
+          <td class="save">898 · 25%</td>
+        </tr>
+        <tr>
+          <td class="plan">Up to 50<span>Growing teams, 1–2 branches</span></td>
+          <td class="price gold-cell">2,199</td>
+          <td class="pem gold-cell"><b>3.67</b></td>
+          <td class="price">4,999</td>
+          <td class="pem"><b>2.78</b></td>
+          <td class="save">1,598 · 24%</td>
+        </tr>
+        <tr>
+          <td class="plan">Up to 100<span>Multi-branch businesses</span></td>
+          <td class="price gold-cell">3,999</td>
+          <td class="pem gold-cell"><b>3.33</b></td>
+          <td class="price">8,999</td>
+          <td class="pem"><b>2.50</b></td>
+          <td class="save">2,998 · 25%</td>
+        </tr>
+        <tr>
+          <td class="plan">Up to 200<span>Contractors, facilities, retail</span></td>
+          <td class="price gold-cell">6,999</td>
+          <td class="pem gold-cell"><b>2.92</b></td>
+          <td class="price">15,999</td>
+          <td class="pem"><b>2.22</b></td>
+          <td class="save">4,998 · 24%</td>
+        </tr>
+        <tr>
+          <td class="plan">200+<span>Enterprise &amp; multi-site</span></td>
+          <td class="muted gold-cell" colspan="2" style="text-align:right;">Custom quote</td>
+          <td class="muted" colspan="2" style="text-align:right;">Custom quote</td>
+          <td class="muted">—</td>
+        </tr>
+      </tbody>
+    </table>
 
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M12 2a5 5 0 015 5v2h2a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2v-9a2 2 0 012-2h2V7a5 5 0 015-5z"/><circle cx="12" cy="15" r="2"/></svg></div>
-        <h3>Optional biometric devices</h3>
-        <p>Already own ZKTeco (or compatible) machines? Connect via cloud ADMS — punches sync automatically to PunchPay.</p>
-        <ul>
-          <li>No on-site PC required for ADMS mode</li>
-          <li>Device register, activate, last-seen status</li>
-          <li>Mix Android kiosk + devices if needed</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
-        <h3>Live attendance dashboard</h3>
-        <p>See who’s in, on break, or absent — in real time. Weekly presence trend at a glance.</p>
-        <ul>
-          <li>Today present / total headcount</li>
-          <li>Lunch break &amp; absent lists</li>
-          <li>7-day attendance chart</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
-        <h3>Attendance management</h3>
-        <p>Monthly and daily views with punch-level detail. Fix mistakes without spreadsheets.</p>
-        <ul>
-          <li>Present, absent, late, overtime</li>
-          <li>Manual / bulk punch entry</li>
-          <li>Edit punch time &amp; type</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div>
-        <h3>Shifts &amp; work rules</h3>
-        <p>Define timings once — the system applies them fairly across your team.</p>
-        <ul>
-          <li>Shift start/end, grace, lunch minutes</li>
-          <li>Weekly offs &amp; company holidays (paid)</li>
-          <li>Late &amp; lunch-over deductions</li>
-          <li>No-leave incentive option</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg></div>
-        <h3>Employee directory</h3>
-        <p>One place for workforce records linked to salary, shift, and branch.</p>
-        <ul>
-          <li>Employee code, salary, join date, status</li>
-          <li>UAE fields: IBAN, labour card, MOL</li>
-          <li>Search, filter, activate / deactivate</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></div>
-        <h3>AED payroll engine</h3>
-        <p>One-click month-end payroll from attendance — transparent net salary every time.</p>
-        <ul>
-          <li>Gross, OT, deductions, advances, net</li>
-          <li>Gratuity / end-of-service on payslips</li>
-          <li>Dubai timezone · UAE payroll rules</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg></div>
-        <h3>WPS salary file export</h3>
-        <p>Download monthly WPS-compatible CSV ready for bank salary transfers.</p>
-        <ul>
-          <li>IBAN &amp; labour card supported</li>
-          <li>Filter by branch / period</li>
-          <li>Built for UAE bank submissions</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/></svg></div>
-        <h3>WhatsApp payslips &amp; PDF</h3>
-        <p>Professional AED payslips as PDF — shared on WhatsApp in one tap.</p>
-        <ul>
-          <li>Instant delivery to employees</li>
-          <li>No printing required</li>
-          <li>Attendance, payroll &amp; OT reports (CSV/PDF)</li>
-        </ul>
-      </div>
-
-      <div class="feat">
-        <div class="feat-icon"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg></div>
-        <h3>Multi-branch &amp; advances</h3>
-        <p>Run several locations under one company account. Track salary advances automatically.</p>
-        <ul>
-          <li>Branches with separate headcount</li>
-          <li>HR scoped by branch access</li>
-          <li>Advances deducted in payroll</li>
-        </ul>
-      </div>
+    <div class="note-row">
+      <div class="chip"><strong>No setup or AMC</strong>One subscription covers software, hosting and updates.</div>
+      <div class="chip"><strong>All features, all plans</strong>Plans differ only by employee count, never by features.</div>
+      <div class="chip"><strong>Per employee figures</strong>Plan price ÷ plan capacity ÷ months in the term.</div>
     </div>
 
-    <div class="footer-bar">
+    <div class="section-label">Cost per employee per month vs competitors · AED</div>
+    <table class="tbl cmp">
+      <thead>
+        <tr>
+          <th>Team size</th>
+          <th class="gold">PunchPay<br/>1 year</th>
+          <th class="gold">PunchPay<br/>3 years</th>
+          <th>Zoho Payroll<br/>Standard*</th>
+          <th>Zoho Payroll<br/>Premium</th>
+          <th>HRX360<br/>Professional</th>
+          <th>greytHR<br/>Growth</th>
+          <th class="win">PunchPay<br/>cheaper by**</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="plan">5 staff</td><td class="pp">4.98</td><td class="pp3">3.88</td><td class="rival">7.00</td><td class="cheapest">15.00</td><td class="rival">20.00</td><td class="rival">44.07</td><td class="win">67%</td></tr>
+        <tr><td class="plan">10 staff</td><td class="pp">4.16</td><td class="pp3">3.19</td><td class="rival">7.00</td><td class="rival">15.00</td><td class="cheapest">10.00</td><td class="rival">22.03</td><td class="win">58%</td></tr>
+        <tr><td class="plan">25 staff</td><td class="pp">4.00</td><td class="pp3">3.00</td><td class="rival">7.00</td><td class="rival">15.00</td><td class="cheapest">10.00</td><td class="rival">15.42</td><td class="win">60%</td></tr>
+        <tr><td class="plan">50 staff</td><td class="pp">3.67</td><td class="pp3">2.78</td><td class="rival">7.00</td><td class="rival">15.00</td><td class="cheapest">10.00</td><td class="rival">13.22</td><td class="win">63%</td></tr>
+        <tr><td class="plan">100 staff</td><td class="pp">3.33</td><td class="pp3">2.50</td><td class="rival">7.00</td><td class="rival">15.00</td><td class="cheapest">10.00</td><td class="rival">12.12</td><td class="win">67%</td></tr>
+        <tr><td class="plan">200 staff</td><td class="pp">2.92</td><td class="pp3">2.22</td><td class="rival">7.00</td><td class="rival">15.00</td><td class="cheapest">10.00</td><td class="rival">11.57</td><td class="win">71%</td></tr>
+      </tbody>
+    </table>
+
+    <p class="fine">
+      * Zoho Payroll Standard covers payroll and WPS only, with no attendance module.
+      ** PunchPay 1-year price vs the cheapest competitor that includes attendance (bold in each row).
+      Competitor figures use published list prices for annual billing at the time of writing: Zoho Payroll UAE Standard AED 35/month incl. 5 employees + AED 7 each,
+      Premium AED 75 + AED 15; HRX360 AED 10/employee with a 10-employee minimum; greytHR Growth USD 60/month incl. 10 + USD 3 each (USD 1 = AED 3.6725).
+      Feature sets differ: Zoho and greytHR include broader HR modules such as employee self-service. All prices exclude 5% VAT.
+    </p>
+
+    <div class="footer">
       <span>punchpay.in · UAE</span>
-      <span>Page 2 of 3</span>
-      <span>Demo: <strong>+91 96008 44041</strong></span>
+      <span>Partner Brief · Page 2 of 3</span>
+      <span>Confidential: do not share with end clients</span>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════
-     PAGE 3 — Pricing & CTA
-══════════════════════════════════════ -->
+<!-- ══════════════ PAGE 3 — Your margin & how we work together ══════════════ -->
 <div class="page">
   <div class="inner">
-    <div class="logo-row">
-      <div class="logo-lockup">
-        <div class="logo-mark">
-          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0A0A0A" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0A0A0A" stroke-width="2.2"/></svg>
+    <div class="top">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke="#0B1324" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="12" r="3.5" stroke="#0B1324" stroke-width="2.2"/></svg>
         </div>
-        <div class="logo-name">Punch<span>Pay</span></div>
+        <div class="brand-name">Punch<span>Pay</span></div>
       </div>
-      <div class="logo-meta">Transparent UAE pricing<br/>Annual · excl. 5% VAT</div>
+      <div class="top-meta">Partner economics<br/><span class="confidential">Confidential · Partner only</span></div>
     </div>
 
-    <div class="eyebrow">Simple annual pricing</div>
-    <h2 class="page-title">Start small. <span class="accent">Grow without penalty.</span></h2>
-    <p class="lede" style="margin-bottom:14px;">
-      No setup fee. No separate AMC. One yearly subscription. Higher plans cost less per employee — so scaling is rewarded, not punished.
+    <div class="eyebrow">Your margin</div>
+    <h2 class="h2">Price it your way. <em>Still the cheapest in the room.</em></h2>
+    <p class="lede">
+      Every competitor that includes attendance costs clients far more than your partner price. That gap is your margin,
+      and you can still undercut the market on every deal.
     </p>
 
-    <div class="price-hero">
-      <div class="from-label">From</div>
-      <div class="from-price">AED 499 <small>/ year</small></div>
-      <div class="from-note">Base plan · up to 10 employees · Android kiosk included · excl. VAT</div>
-    </div>
-
-    <div class="plans">
-      <div class="plan">
-        <div class="plan-name">Base</div>
-        <div class="plan-emp">Up to 10 employees</div>
-        <div class="plan-price">499</div>
-        <div class="plan-unit">AED / year</div>
-        <div class="plan-per">~AED 50 / employee</div>
+    <div class="p3-top">
+      <div class="card">
+        <h3>50-employee client: cost per employee</h3>
+        <div class="sub">AED per employee per month · annual billing · published list prices</div>
+        <div class="bars">
+          <div class="bar-row pp"><div class="lbl">PunchPay 3-year</div><div class="bar-track"><div class="bar pp" style="width:18.5%"></div></div><div class="val">2.78</div></div>
+          <div class="bar-row pp"><div class="lbl">PunchPay 1-year</div><div class="bar-track"><div class="bar pp" style="width:24.5%"></div></div><div class="val">3.67</div></div>
+          <div class="bar-row"><div class="lbl">Zoho Payroll Standard<small>No attendance module</small></div><div class="bar-track"><div class="bar" style="width:46.7%"></div></div><div class="val">7.00</div></div>
+          <div class="bar-row"><div class="lbl">HRX360 Professional</div><div class="bar-track"><div class="bar" style="width:66.7%"></div></div><div class="val">10.00</div></div>
+          <div class="bar-row"><div class="lbl">greytHR Growth</div><div class="bar-track"><div class="bar" style="width:88.1%"></div></div><div class="val">13.22</div></div>
+          <div class="bar-row"><div class="lbl">Zoho Payroll Premium</div><div class="bar-track"><div class="bar" style="width:100%"></div></div><div class="val">15.00</div></div>
+        </div>
       </div>
-      <div class="plan">
-        <div class="plan-name">Basic</div>
-        <div class="plan-emp">Up to 25 employees</div>
-        <div class="plan-price">1,149</div>
-        <div class="plan-unit">AED / year</div>
-        <div class="plan-per">~AED 46 / employee</div>
-      </div>
-      <div class="plan popular">
-        <div class="plan-name">Growth</div>
-        <div class="plan-emp">Up to 50 employees</div>
-        <div class="plan-price">2,149</div>
-        <div class="plan-unit">AED / year</div>
-        <div class="plan-per">~AED 43 / employee</div>
-      </div>
-      <div class="plan">
-        <div class="plan-name">Business</div>
-        <div class="plan-emp">Up to 100 employees</div>
-        <div class="plan-price">3,799</div>
-        <div class="plan-unit">AED / year</div>
-        <div class="plan-per">~AED 38 / employee</div>
-      </div>
-      <div class="plan">
-        <div class="plan-name">Professional</div>
-        <div class="plan-emp">Up to 200 employees</div>
-        <div class="plan-price">6,499</div>
-        <div class="plan-unit">AED / year</div>
-        <div class="plan-per">~AED 32 / employee</div>
-      </div>
-      <div class="plan">
-        <div class="plan-name">Enterprise</div>
-        <div class="plan-emp">200+ employees</div>
-        <div class="plan-price custom">Custom</div>
-        <div class="plan-unit">AED / year</div>
-        <div class="plan-per">Volume &amp; multi-site quote</div>
-      </div>
-    </div>
-
-    <div class="value-strip">
-      <div class="value-item">
-        <strong>No biometric buy</strong>
-        <span>Spare Android is enough</span>
-      </div>
-      <div class="value-item">
-        <strong>No setup fee</strong>
-        <span>Annual subscription only</span>
-      </div>
-      <div class="value-item">
-        <strong>WPS ready</strong>
-        <span>Bank file every month</span>
-      </div>
-      <div class="value-item">
-        <strong>WhatsApp slips</strong>
-        <span>PDF to staff in one tap</span>
-      </div>
-    </div>
-
-    <div class="cta-box">
-      <div>
-        <h3>Book a UAE demo</h3>
+      <div class="hook">
+        <div class="eyebrow">Recurring income example</div>
+        <div class="hook-big num">23,980 <small>AED / year</small></div>
         <p>
-          We’ll walk through Android kiosk setup, AED payroll, and WPS export on your sample headcount —
-          usually under 30 minutes.
+          Sell <strong>20 clients</strong> the Up to 25 plan at <strong>2× our price</strong> (AED 2,398) and keep
+          <strong>AED 1,199 per client, every year</strong>. Each client still pays 20% less than with HRX360,
+          the cheapest rival with attendance.
         </p>
       </div>
-      <div class="cta-contacts">
+    </div>
+
+    <div class="section-label">Your room on every deal · AED per year</div>
+    <table class="tbl">
+      <thead>
+        <tr>
+          <th>Team size</th>
+          <th class="gold">Your cost<br/>1 year</th>
+          <th>Cheapest rival<br/>with attendance</th>
+          <th>Rival list<br/>price / year</th>
+          <th class="gold">Your room<br/>per client</th>
+          <th>Sell at 2×: client<br/>still saves</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="plan">Up to 5</td><td class="price gold-cell">299</td><td class="muted">Zoho Premium</td><td>900</td><td class="save gold-cell">601</td><td class="save">34%</td></tr>
+        <tr><td class="plan">Up to 10</td><td class="price gold-cell">499</td><td class="muted">HRX360</td><td>1,200</td><td class="save gold-cell">701</td><td class="save">17%</td></tr>
+        <tr class="hl"><td class="plan">Up to 25</td><td class="price gold-cell">1,199</td><td class="muted">HRX360</td><td>3,000</td><td class="save gold-cell">1,801</td><td class="save">20%</td></tr>
+        <tr><td class="plan">Up to 50</td><td class="price gold-cell">2,199</td><td class="muted">HRX360</td><td>6,000</td><td class="save gold-cell">3,801</td><td class="save">27%</td></tr>
+        <tr><td class="plan">Up to 100</td><td class="price gold-cell">3,999</td><td class="muted">HRX360</td><td>12,000</td><td class="save gold-cell">8,001</td><td class="save">33%</td></tr>
+        <tr><td class="plan">Up to 200</td><td class="price gold-cell">6,999</td><td class="muted">HRX360</td><td>24,000</td><td class="save gold-cell">17,001</td><td class="save">42%</td></tr>
+      </tbody>
+    </table>
+
+    <div class="model">
+      <div class="card">
+        <div class="step">01</div>
+        <h4>You sell &amp; set the price</h4>
+        <p>Quote clients at your own margin. You own the client relationship in the UAE.</p>
+      </div>
+      <div class="card">
+        <div class="step">02</div>
+        <h4>We activate the account</h4>
+        <p>PunchPay sets up the company, plan and limits. Hosting, updates and product support are on us.</p>
+      </div>
+      <div class="card">
+        <div class="step">03</div>
+        <h4>Renewals keep paying</h4>
+        <p>Yearly or 3-year renewals bring repeat income with no hardware to service.</p>
+      </div>
+    </div>
+
+    <div class="cta">
+      <div>
+        <h3>Let's close the <em>first UAE clients</em> together</h3>
+        <p>We give your team a demo account and onboarding support. A live client demo usually takes under 30 minutes.</p>
+      </div>
+      <div class="cta-contact">
         <div class="phone">+91 96008 44041</div>
         <div class="web">punchpay.in</div>
-        <div class="note">Thanveer · PunchPay UAE</div>
+        <div class="who">Thanveer · Founder, PunchPay</div>
       </div>
     </div>
 
-    <p class="vat-note">
-      All prices exclusive of 5% UAE VAT. Multi-branch pricing may vary. Optional ZKTeco ADMS devices supported if you already own hardware.
-    </p>
-
-    <div class="footer-bar">
-      <span>punchpay.in · UAE Product Catalogue 2026</span>
-      <span>Page 3 of 3</span>
-      <span>Print · Share · Close the deal</span>
+    <div class="footer">
+      <span>All prices in AED, excl. 5% VAT · Partner prices, not for client distribution</span>
+      <span>Partner Brief · Page 3 of 3</span>
     </div>
   </div>
 </div>
