@@ -94,6 +94,7 @@ async function getAdminOverview(req, res, next) {
          c.onetime_payment_status,
          c.amc_payment_status,
          c.last_onetime_payment_date,
+         c.payroll_profile,
          c.country_code,
          c.timezone,
          c.currency,
@@ -665,6 +666,9 @@ async function updateCompanyBilling(req, res, next) {
       amc_amount,
       last_amc_payment_date,
       last_onetime_payment_date,
+      ...(Object.prototype.hasOwnProperty.call(req.body || {}, 'payroll_profile')
+        ? { payroll_profile: req.body.payroll_profile || null }
+        : {}),
     });
 
     if (!updated) {
@@ -1048,7 +1052,8 @@ async function getCompanyDetails(req, res, next) {
          employee_limit_override,
          branch_limit_override,
          onetime_fee_paid, onetime_fee_amount, amc_amount, last_amc_payment_date,
-         onetime_payment_status, amc_payment_status, last_onetime_payment_date
+         onetime_payment_status, amc_payment_status, last_onetime_payment_date,
+         payroll_profile
        FROM companies WHERE id = $1`,
       [companyId]
     );

@@ -6,6 +6,7 @@ const {
   computeNextAmcDueDate,
   branchesAllowedTotal,
 } = require('../services/companyService');
+const { updateProfileConfig } = require('../services/payrollProfiles/sriSabariPayroll');
 const { getEffectiveEmployeeLimit } = require('../services/employeeService');
 const branchService = require('../services/branchService');
 const { getFeaturesForCountry } = require('../config/region');
@@ -264,9 +265,19 @@ async function deleteBranchHandler(req, res, next) {
   }
 }
 
+async function updatePayrollProfileConfig(req, res, next) {
+  try {
+    const row = await updateProfileConfig(req.companyId, req.body || {});
+    return res.json({ success: true, data: row });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getCurrentCompany,
   updateCurrentCompany,
+  updatePayrollProfileConfig,
   updateSubscriptionHandler,
   listBranchesHandler,
   createBranchHandler,

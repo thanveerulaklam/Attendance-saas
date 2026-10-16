@@ -79,6 +79,11 @@ export default function EmployeeFormModal({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useAutoDismiss(null);
+  const [sabariProfile, setSabariProfile] = useState(false);
+  const [weekOffDay, setWeekOffDay] = useState('');
+  const [carryAmount, setCarryAmount] = useState('');
+  const [carryNote, setCarryNote] = useState('');
+  const [carryRows, setCarryRows] = useState([]);
 
   useEffect(() => {
     if (open) {
@@ -110,6 +115,7 @@ export default function EmployeeFormModal({
           setCompanyCurrency(json?.data?.currency || 'INR');
           setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled));
           setFieldAttendanceEnabled(Boolean(json?.data?.field_attendance_enabled));
+          setSabariProfile(json?.data?.payroll_profile === 'sri_sabari_v1');
         })
         .catch(() => {
           setMonthlyOnlyPayroll(false);
@@ -117,9 +123,21 @@ export default function EmployeeFormModal({
           setCountryCode('IN');
           setCompanyCurrency('INR');
           setMobileAttendanceEnabled(false);
+          setSabariProfile(false);
         });
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !sabariProfile || !employee?.id) {
+      setCarryRows([]);
+      return;
+    }
+    authFetch(`/api/payroll/carry/${employee.id}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setCarryRows(json?.data || []))
+      .catch(() => setCarryRows([]));
+  }, [open, sabariProfile, employee?.id]);
 
   useEffect(() => {
     if (open) {
@@ -128,6 +146,7 @@ export default function EmployeeFormModal({
         setEmployeeCode(employee.employee_code || '');
         setDepartment(employee.department || '');
         setGender(employee.gender || '');
+        setWeekOffDay(employee.week_off_day == null ? '' : String(employee.week_off_day));
         setPhoneNumber(employee.phone_number || '');
         setAadharNumber(employee.aadhar_number || '');
         setEsiNumber(employee.esi_number || '');
@@ -188,6 +207,7 @@ export default function EmployeeFormModal({
         setEmployeeCode('');
         setDepartment('');
         setGender('');
+        setWeekOffDay('');
         setPhoneNumber('');
         setAadharNumber('');
         setEsiNumber('');
@@ -398,6 +418,15 @@ export default function EmployeeFormModal({
       nextErrors.joinDate = 'Join date is required';
     }
 
+    if (sabariProfile) {
+      if (gender !== 'male' && gender !== 'female') {
+        nextErrors.gender = 'Choose male or female for this store’s pay rules';
+      }
+      if (weekOffDay === '') {
+        nextErrors.weekOffDay = 'Choose the employee’s week-off';
+      }
+    }
+
     if (!STATUS_OPTIONS.some((opt) => opt.value === status)) {
       nextErrors.status = 'Invalid status';
     }
@@ -426,6 +455,7 @@ export default function EmployeeFormModal({
         employee_code: employeeCode.trim(),
         department: department.trim() === '' ? null : department.trim(),
         gender: gender === '' ? null : gender,
+        week_off_day: weekOffDay === '' ? null : Number(weekOffDay),
         phone_number: normalizedPhone === '' ? null : normalizedPhone,
         aadhar_number: showIndiaStatutory && normalizedAadhar !== '' ? normalizedAadhar : null,
         esi_number: showIndiaStatutory && esiNumber.trim() !== '' ? esiNumber.trim() : null,
@@ -750,7 +780,7 @@ export default function EmployeeFormModal({
 
             <div>
               <label className="block text-xs font-medium text-slate-700">
-                {salaryType === 'per_day' ? 'Daily salary' : 'Basic salary'}
+                {sabariProfile ? 'Hourly rate' : salaryType === 'per_day' ? 'Daily salary' : 'Basic salary'}
                 <input
                   type="number"
                   min="0"
@@ -789,7 +819,7 @@ export default function EmployeeFormModal({
 
             <div>
               <label className="block text-xs font-medium text-slate-700">
-                Gender (optional)
+                {sabariProfile ? 'Gender' : 'Gender (optional)'}
                 <select
                   value={gender}
                   onChange={(e) => setGender(e.target.value)}
@@ -802,8 +832,78 @@ export default function EmployeeFormModal({
                   ))}
                 </select>
               </label>
+              {errors.gender && <p className="mt-1 text-[11px] text-rose-600">{errors.gender}</p>}
             </div>
+            {sabariProfile && (
+              <div>
+                <label className="block text-xs font-medium text-slate-700">
+                  Week-off
+                  <select
+                    value={weekOffDay}
+                    onChange={(e) => setWeekOffDay(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                  >
+                    <option value="">Select a day</option>
+                    {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((label, index) => (
+                      <option key={label} value={index}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+                {errors.weekOffDay && <p className="mt-1 text-[11px] text-rose-600">{errors.weekOffDay}</p>}
+              </div>
+            )}
           </div>
+
+          {sabariProfile && employee?.id && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-700">
+              <p className="font-medium text-slate-800">Hold a deduction for the next salary</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={carryAmount}
+                  onChange={(e) => setCarryAmount(e.target.value)}
+                  placeholder="Amount"
+                  className="w-28 rounded-lg border border-slate-200 px-2 py-1.5"
+                />
+                <input
+                  value={carryNote}
+                  onChange={(e) => setCarryNote(e.target.value)}
+                  placeholder="Note"
+                  className="min-w-[140px] flex-1 rounded-lg border border-slate-200 px-2 py-1.5"
+                />
+                <button
+                  type="button"
+                  className="rounded-lg bg-slate-800 px-3 py-1.5 text-white"
+                  onClick={async () => {
+                    const res = await authFetch(`/api/payroll/carry/${employee.id}`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ amount: Number(carryAmount), note: carryNote }),
+                    });
+                    const json = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                      setToast({ type: 'error', message: json.message || 'Could not save the amount' });
+                      return;
+                    }
+                    setCarryAmount('');
+                    setCarryNote('');
+                    setCarryRows((rows) => [json.data, ...rows]);
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+              {carryRows.filter((row) => row.status === 'pending').length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {carryRows.filter((row) => row.status === 'pending').map((row) => (
+                    <li key={row.id}>₹{row.amount}{row.note ? ` — ${row.note}` : ''}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>

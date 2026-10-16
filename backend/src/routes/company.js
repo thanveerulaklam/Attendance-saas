@@ -2,6 +2,7 @@ const express = require('express');
 const {
   getCurrentCompany,
   updateCurrentCompany,
+  updatePayrollProfileConfig,
   updateSubscriptionHandler,
   listBranchesHandler,
   createBranchHandler,
@@ -59,6 +60,7 @@ router.get('/', withCompanyAuth, getCurrentCompany);
 
 // PUT /api/company
 router.put('/', withCompanyAuth, updateCurrentCompany);
+router.put('/payroll-profile-config', adminOnly, updatePayrollProfileConfig);
 
 // Branches (list: admin+hr with HR scope; create: admin only)
 router.get('/branches', withBranchScope, listBranchesHandler);

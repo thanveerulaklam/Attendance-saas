@@ -464,6 +464,7 @@ async function updateBillingMetadata(companyId, data) {
     'subscription_start_date',
     'subscription_end_date',
     'is_active',
+    'payroll_profile',
   ];
 
   const rawEntries = Object.entries(data || {});
@@ -496,8 +497,17 @@ async function updateBillingMetadata(companyId, data) {
   let paramIndex = 2;
 
   for (const [key, value] of entries) {
-    fields.push(`${key} = $${paramIndex}`);
-    values.push(value);
+    if (key === 'payroll_profile') {
+      const profile = value == null || value === '' ? null : String(value).trim();
+      if (profile && profile !== 'sri_sabari_v1') {
+        throw new AppError('Unknown payroll profile', 400);
+      }
+      fields.push(`${key} = $${paramIndex}`);
+      values.push(profile);
+    } else {
+      fields.push(`${key} = $${paramIndex}`);
+      values.push(value);
+    }
     paramIndex += 1;
   }
 
@@ -509,8 +519,16 @@ async function updateBillingMetadata(companyId, data) {
     values
   );
 
-  const row = result.rows[0] || null;
+  let row = result.rows[0] || null;
   if (!row) return null;
+  if (row.payroll_profile === 'sri_sabari_v1' && row.payroll_profile_config == null) {
+    const { DEFAULT_CONFIG } = require('./payrollProfiles/sriSabari');
+    const seeded = await pool.query(
+      `UPDATE companies SET payroll_profile_config = $2::jsonb WHERE id = $1 RETURNING *`,
+      [companyId, JSON.stringify(DEFAULT_CONFIG)]
+    );
+    row = seeded.rows[0] || row;
+  }
   return attachWpsCompanyFields(companyId, normalizeCompanyLocale(row));
 }
 

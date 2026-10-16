@@ -100,6 +100,11 @@ export default function CompanySettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saved, setSaved] = useAutoDismiss(false);
+  const [payrollProfile, setPayrollProfile] = useState(null);
+  const [sabariConfig, setSabariConfig] = useState(null);
+  const [sabariSaving, setSabariSaving] = useState(false);
+  const [sabariSaved, setSabariSaved] = useAutoDismiss(false);
+  const [sabariError, setSabariError] = useState(null);
 
   /** Enriched from GET /api/company (plan, AMC, caps). */
   const [planSnapshot, setPlanSnapshot] = useState(null);
@@ -209,6 +214,25 @@ export default function CompanySettingsPage() {
           country_code: data.country_code || 'IN',
           currency: data.currency || 'INR',
         });
+        setPayrollProfile(data.payroll_profile || null);
+        setSabariConfig(
+          data.payroll_profile === 'sri_sabari_v1'
+            ? data.payroll_profile_config || {
+                shiftStart: '10:00',
+                lateGraceMinutes: 0,
+                requiredHours: { male: 11, female: 10 },
+                lateDeduction: 100,
+                shortHoursDeduction: 100,
+                ot: {
+                  male: { aboveHours: 13, amount: 100 },
+                  female: { aboveHours: 11.5, amount: 25 },
+                },
+                sundayBonus: { male: 300, female: 200 },
+                fullWeekBonus: { male: 300, female: 200 },
+                absence: { sevenDays: 600, monToSat: 300 },
+              }
+            : null
+        );
       } catch (err) {
         if (!isMounted) return;
         setError(err.message || 'Unable to load company profile');
@@ -780,6 +804,145 @@ export default function CompanySettingsPage() {
           </div>
         </form>
       </section>
+
+      {isAdmin && payrollProfile === 'sri_sabari_v1' && sabariConfig && (
+        <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
+          <h2 className="text-sm font-semibold text-slate-900">Store pay rules</h2>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Timings and amounts for this store. The pay week stays Sunday to Saturday.
+          </p>
+          {sabariError && (
+            <p className="mt-3 text-[11px] text-rose-600">{sabariError}</p>
+          )}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-slate-700">
+              Shift start
+              <input
+                type="time"
+                value={sabariConfig.shiftStart || '10:00'}
+                onChange={(e) => setSabariConfig((c) => ({ ...c, shiftStart: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              Late grace (minutes)
+              <input
+                type="number"
+                min="0"
+                value={sabariConfig.lateGraceMinutes ?? 0}
+                onChange={(e) => setSabariConfig((c) => ({ ...c, lateGraceMinutes: Number(e.target.value) }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            {[
+              ['requiredHours', 'male', 'Minimum hours, gents'],
+              ['requiredHours', 'female', 'Minimum hours, ladies'],
+              ['ot', 'male', 'aboveHours', 'Overtime starts after (hours), gents'],
+              ['ot', 'female', 'aboveHours', 'Overtime starts after (hours), ladies'],
+              ['ot', 'male', 'amount', 'Overtime amount, gents'],
+              ['ot', 'female', 'amount', 'Overtime amount, ladies'],
+              ['sundayBonus', 'male', 'Sunday bonus, gents'],
+              ['sundayBonus', 'female', 'Sunday bonus, ladies'],
+              ['fullWeekBonus', 'male', 'Full-week bonus, gents'],
+              ['fullWeekBonus', 'female', 'Full-week bonus, ladies'],
+            ].map((field) => {
+              const [group, gender, leaf, label] = field.length === 4 ? field : [field[0], field[1], null, field[2]];
+              const value = leaf ? sabariConfig[group]?.[gender]?.[leaf] : sabariConfig[group]?.[gender];
+              return (
+                <label key={label} className="text-xs font-medium text-slate-700">
+                  {label}
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={value ?? ''}
+                    onChange={(e) => {
+                      const next = Number(e.target.value);
+                      setSabariConfig((c) => ({
+                        ...c,
+                        [group]: {
+                          ...c[group],
+                          [gender]: leaf ? { ...c[group]?.[gender], [leaf]: next } : next,
+                        },
+                      }));
+                    }}
+                    className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </label>
+              );
+            })}
+            <label className="text-xs font-medium text-slate-700">
+              Late deduction
+              <input
+                type="number"
+                min="0"
+                value={sabariConfig.lateDeduction ?? 0}
+                onChange={(e) => setSabariConfig((c) => ({ ...c, lateDeduction: Number(e.target.value) }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              Short-day deduction
+              <input
+                type="number"
+                min="0"
+                value={sabariConfig.shortHoursDeduction ?? 0}
+                onChange={(e) => setSabariConfig((c) => ({ ...c, shortHoursDeduction: Number(e.target.value) }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              No punch all 7 days
+              <input
+                type="number"
+                min="0"
+                value={sabariConfig.absence?.sevenDays ?? 0}
+                onChange={(e) => setSabariConfig((c) => ({ ...c, absence: { ...c.absence, sevenDays: Number(e.target.value) } }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+            <label className="text-xs font-medium text-slate-700">
+              Monday–Saturday with no punch
+              <input
+                type="number"
+                min="0"
+                value={sabariConfig.absence?.monToSat ?? 0}
+                onChange={(e) => setSabariConfig((c) => ({ ...c, absence: { ...c.absence, monToSat: Number(e.target.value) } }))}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex items-center gap-3">
+            {sabariSaved && <span className="text-sm font-medium text-emerald-600">Saved</span>}
+            <button
+              type="button"
+              disabled={sabariSaving}
+              onClick={async () => {
+                setSabariSaving(true);
+                setSabariError(null);
+                try {
+                  const res = await authFetch('/api/company/payroll-profile-config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sabariConfig),
+                  });
+                  const json = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(json.message || 'Could not save pay rules');
+                  setSabariConfig(json.data?.payroll_profile_config || sabariConfig);
+                  setSabariSaved(true);
+                } catch (err) {
+                  setSabariError(err.message || 'Could not save pay rules');
+                } finally {
+                  setSabariSaving(false);
+                }
+              }}
+              className="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
+            >
+              {sabariSaving ? 'Saving…' : 'Save pay rules'}
+            </button>
+          </div>
+        </section>
+      )}
 
       {isAdmin && (
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">

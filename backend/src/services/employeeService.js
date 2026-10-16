@@ -32,6 +32,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         employee_code,
         department,
         gender,
+        week_off_day,
         phone_number,
         aadhar_number,
         esi_number,
@@ -66,6 +67,7 @@ const EMPLOYEE_LIST_SELECT_FIELDS = `
         e.employee_code,
         e.department,
         e.gender,
+        e.week_off_day,
         e.phone_number,
         e.aadhar_number,
         e.esi_number,
@@ -278,6 +280,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
     payload.permission_hours_override != null ? payload.permission_hours_override : null;
   const department = payload.department != null ? payload.department : null;
   const gender = payload.gender != null ? payload.gender : null;
+  const weekOffDay = payload.week_off_day != null && payload.week_off_day !== '' ? Number(payload.week_off_day) : null;
   const phoneNumber = payload.phone_number != null ? payload.phone_number : null;
   const aadharNumber = payload.aadhar_number != null ? payload.aadhar_number : null;
   const esiNumber = payload.esi_number != null ? payload.esi_number : null;
@@ -301,6 +304,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         employee_code,
         department,
         gender,
+        week_off_day,
         phone_number,
         aadhar_number,
         esi_number,
@@ -325,7 +329,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         contract_type,
         attendance_channel
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -334,6 +338,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         payload.employee_code,
         department,
         gender,
+        weekOffDay,
         phoneNumber,
         aadharNumber,
         esiNumber,

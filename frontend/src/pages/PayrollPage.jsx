@@ -568,6 +568,8 @@ export default function PayrollPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [sabariPreview, setSabariPreview] = useState({ deferrable: [], pending: [] });
+  const [sabariHoldKeys, setSabariHoldKeys] = useState([]);
   const [generateForm, setGenerateForm] = useState({
     year: currentYear(),
     month: String(new Date().getMonth() + 1),
@@ -737,6 +739,46 @@ export default function PayrollPage() {
       employeesEligibleForGenerate.find((e) => String(e.id) === String(modalEmployeeId)) || null,
     [employeesEligibleForGenerate, modalEmployeeId]
   );
+
+  useEffect(() => {
+    if (!modalOpen || company?.payroll_profile !== 'sri_sabari_v1' || !modalEmployeeId) {
+      setSabariPreview({ deferrable: [], pending: [] });
+      setSabariHoldKeys([]);
+      return;
+    }
+    const params = new URLSearchParams({ employee_id: String(modalEmployeeId) });
+    if (payrollMode === 'monthly') {
+      params.set('year', generateForm.year);
+      params.set('month', generateForm.month);
+    } else {
+      params.set('week_start_date', weekStartDate);
+    }
+    let cancelled = false;
+    authFetch(`/api/payroll/sabari-lines?${params}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (cancelled) return;
+        setSabariPreview({
+          deferrable: json?.data?.deferrable || [],
+          pending: json?.data?.pending || [],
+        });
+        setSabariHoldKeys([]);
+      })
+      .catch(() => {
+        if (!cancelled) setSabariPreview({ deferrable: [], pending: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    modalOpen,
+    company?.payroll_profile,
+    modalEmployeeId,
+    payrollMode,
+    generateForm.year,
+    generateForm.month,
+    weekStartDate,
+  ]);
 
   useEffect(() => {
     if (monthlyOnlyPayroll && payrollMode !== 'monthly') {
@@ -2134,6 +2176,9 @@ export default function PayrollPage() {
         }
         if (isSingle) {
           payload.employee_id = Number(selectedEmployeeId);
+          if (company?.payroll_profile === 'sri_sabari_v1' && sabariHoldKeys.length) {
+            payload.defer_keys = sabariHoldKeys;
+          }
         } else if (generateForm.branch_id) {
           payload.branch_id = Number(generateForm.branch_id);
         }
@@ -2215,6 +2260,9 @@ export default function PayrollPage() {
       };
       if (isSingle) {
         payload.employee_id = Number(selectedEmployeeId);
+        if (company?.payroll_profile === 'sri_sabari_v1' && sabariHoldKeys.length) {
+          payload.defer_keys = sabariHoldKeys;
+        }
       } else if (weeklyGenerateForm.branch_id) {
         payload.branch_id = Number(weeklyGenerateForm.branch_id);
       }
@@ -3277,6 +3325,43 @@ export default function PayrollPage() {
                   <p className="text-[10px] text-slate-500">
                     Deducts each employee’s pending advance for this month, across all their loans. Money already recorded on the Advance page is not deducted again. If unchecked, the pending amount stays due and can be deducted per employee from the payroll table.
                   </p>
+                </div>
+              )}
+              {company?.payroll_profile === 'sri_sabari_v1' && modalEmployeeId && (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <p className="text-[11px] font-medium text-slate-800">
+                    Deductions on this salary
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    Untick a line to hold it for the next salary instead of deducting it now.
+                  </p>
+                  {[
+                    ...sabariPreview.deferrable,
+                    ...sabariPreview.pending.map((row) => ({
+                      key: `carry:${row.id}`,
+                      label: row.note ? `Brought forward — ${row.note}` : 'Brought forward',
+                      amount: row.amount,
+                    })),
+                  ].map((line) => (
+                    <label key={line.key} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!sabariHoldKeys.includes(line.key)}
+                        onChange={(e) => {
+                          setSabariHoldKeys((keys) =>
+                            e.target.checked ? keys.filter((key) => key !== line.key) : [...keys, line.key]
+                          );
+                        }}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-[11px] text-slate-700">
+                        {line.label} · ₹{line.amount}
+                      </span>
+                    </label>
+                  ))}
+                  {sabariPreview.deferrable.length === 0 && sabariPreview.pending.length === 0 && (
+                    <p className="text-[10px] text-slate-500">No deductions to hold for this period.</p>
+                  )}
                 </div>
               )}
               </div>

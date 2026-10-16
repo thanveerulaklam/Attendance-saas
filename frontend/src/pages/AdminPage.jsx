@@ -452,6 +452,7 @@ export default function AdminPage() {
     amc_amount: '',
     last_amc_payment_date: '',
     last_onetime_payment_date: '',
+    payroll_profile: '',
   });
   const [billingSaving, setBillingSaving] = useState(false);
   const [resetModalCompany, setResetModalCompany] = useState(null);
@@ -708,6 +709,7 @@ export default function AdminPage() {
       amc_amount: company.amc_amount != null ? String(company.amc_amount) : '',
       last_amc_payment_date: toDateInput(company.last_amc_payment_date),
       last_onetime_payment_date: toDateInput(company.last_onetime_payment_date),
+      payroll_profile: company.payroll_profile || '',
     });
   }, [detailsCompany]);
 
@@ -1318,6 +1320,7 @@ export default function AdminPage() {
             amc_amount: amcAmt,
             last_amc_payment_date: billingForm.last_amc_payment_date || null,
             last_onetime_payment_date: billingForm.last_onetime_payment_date || null,
+            payroll_profile: billingForm.payroll_profile || null,
           }),
         },
         adminKey
@@ -2806,6 +2809,22 @@ export default function AdminPage() {
                           })}
                         </p>
                       )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Payroll profile</label>
+                      <select
+                        name="payroll_profile"
+                        value={billingForm.payroll_profile || ''}
+                        onChange={handleBillingChange}
+                        className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm bg-white"
+                      >
+                        <option value="">Standard payroll</option>
+                        <option value="sri_sabari_v1">Sri Sabari Store</option>
+                      </select>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Only this company uses the store’s hourly pay rules. The store cannot turn this on or off.
+                      </p>
                     </div>
 
                     <div>

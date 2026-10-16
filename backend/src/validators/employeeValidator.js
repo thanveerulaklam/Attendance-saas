@@ -178,6 +178,14 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, 'week_off_day')) {
+    if (payload.week_off_day == null || payload.week_off_day === '') {
+      // optional
+    } else if (![0, 1, 2, 3, 4, 5, 6].includes(Number(payload.week_off_day))) {
+      errors.week_off_day = 'Week-off day must be 0 (Sunday) through 6 (Saturday).';
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
     if (payload.phone_number == null || payload.phone_number === '') {
       // optional: store as NULL
@@ -295,6 +303,13 @@ const validateCreateEmployee = (payload = {}) => {
       payload.gender == null || payload.gender === ''
         ? null
         : String(payload.gender).toLowerCase();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'week_off_day')) {
+    result.week_off_day =
+      payload.week_off_day == null || payload.week_off_day === ''
+        ? null
+        : Number(payload.week_off_day);
   }
 
   if (Object.prototype.hasOwnProperty.call(payload, 'phone_number')) {
@@ -562,6 +577,16 @@ const validateUpdateEmployee = (payload = {}) => {
       } else {
         clean.gender = g;
       }
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'week_off_day')) {
+    if (payload.week_off_day == null || payload.week_off_day === '') {
+      clean.week_off_day = null;
+    } else if (![0, 1, 2, 3, 4, 5, 6].includes(Number(payload.week_off_day))) {
+      errors.week_off_day = 'Week-off day must be 0 (Sunday) through 6 (Saturday).';
+    } else {
+      clean.week_off_day = Number(payload.week_off_day);
     }
   }
 

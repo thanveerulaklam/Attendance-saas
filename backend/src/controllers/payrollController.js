@@ -20,6 +20,12 @@ const {
 } = require('../services/attendanceOverrideService');
 const { pool } = require('../config/database');
 const auditService = require('../services/auditService');
+const {
+  previewForEmployee,
+  createManualCarry,
+  listCarry,
+} = require('../services/payrollProfiles/sriSabariPayroll');
+const { todayYmd } = require('../utils/companyDate');
 const { resolveBranchScope } = require('../utils/branchScope');
 
 /**
@@ -79,6 +85,7 @@ async function generate(req, res, next) {
       apply_advance_repayments: applyAdvanceRepaymentsRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
       encash_unused_paid_leave: encashUnusedPaidLeaveRaw,
+      defer_keys: deferKeysRaw,
     } = req.body || {};
 
     const employeeId = Number(employeeIdRaw);
@@ -110,6 +117,7 @@ async function generate(req, res, next) {
       noLeaveIncentive,
       encashUnusedPaidLeave,
       allowedBranchIds: req.allowedBranchIds,
+      defer_keys: Array.isArray(deferKeysRaw) ? deferKeysRaw : [],
     });
 
     auditService.log(companyId, req.user?.user_id, 'payroll.generate', 'payroll', result.payroll?.id, { employee_id: employeeId, year, month }).catch(() => {});
@@ -283,6 +291,7 @@ async function generateWeekly(req, res, next) {
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       apply_salary_advances: applySalaryAdvancesRaw,
       apply_advance_repayments: applyAdvanceRepaymentsRaw,
+      defer_keys: weeklyDeferKeysRaw,
     } = req.body || {};
 
     const employeeId = Number(employeeIdRaw);
@@ -306,6 +315,7 @@ async function generateWeekly(req, res, next) {
       allowedBranchIds: req.allowedBranchIds,
       apply_salary_advances: applySalaryAdvances,
       apply_advance_repayments: applyAdvanceRepayments,
+      defer_keys: Array.isArray(weeklyDeferKeysRaw) ? weeklyDeferKeysRaw : [],
     });
 
     auditService
@@ -734,9 +744,77 @@ async function setWeeklyPayrollAttendanceOverride(req, res, next) {
   }
 }
 
+async function sabariLines(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    const employeeId = Number(req.query.employee_id);
+    const weekStart = req.query.week_start_date ? String(req.query.week_start_date).slice(0, 10) : null;
+    const year = Number(req.query.year);
+    const month = Number(req.query.month);
+    if (!employeeId) {
+      return res.status(400).json({ success: false, message: 'employee_id is required' });
+    }
+    let rangeStart;
+    let rangeEnd;
+    if (weekStart) {
+      rangeStart = weekStart;
+      const end = new Date(`${weekStart}T12:00:00Z`);
+      end.setUTCDate(end.getUTCDate() + 6);
+      rangeEnd = end.toISOString().slice(0, 10);
+    } else if (year && month) {
+      rangeStart = `${year}-${String(month).padStart(2, '0')}-01`;
+      const last = new Date(year, month, 0).getDate();
+      rangeEnd = `${year}-${String(month).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+    } else {
+      return res.status(400).json({ success: false, message: 'week_start_date or year and month are required' });
+    }
+    const today = todayYmd();
+    const asOfDate = today >= rangeStart && today <= rangeEnd ? today : null;
+    const data = await previewForEmployee(companyId, employeeId, { rangeStart, rangeEnd, asOfDate });
+    return res.json({
+      success: true,
+      data: {
+        deferrable: data.settlement?.deferrable || [],
+        pending: data.pending || [],
+        payslipLines: data.settlement?.payslipLines || [],
+        error: null,
+      },
+    });
+  } catch (err) {
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ success: false, message: err.message });
+    }
+    next(err);
+  }
+}
+
+async function listEmployeeCarry(req, res, next) {
+  try {
+    const rows = await listCarry(req.companyId, Number(req.params.employeeId));
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function addEmployeeCarry(req, res, next) {
+  try {
+    const row = await createManualCarry(req.companyId, Number(req.params.employeeId), {
+      amount: req.body?.amount,
+      note: req.body?.note,
+    });
+    return res.status(201).json({ success: true, data: row });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   list,
   generate,
+  sabariLines,
+  listEmployeeCarry,
+  addEmployeeCarry,
   generateAll,
   breakdown,
   listWeekly,

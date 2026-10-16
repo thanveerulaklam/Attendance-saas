@@ -8,6 +8,9 @@ const {
   generateWeekly,
   generateAllWeekly,
   breakdownWeekly,
+  sabariLines,
+  listEmployeeCarry,
+  addEmployeeCarry,
   updateAdvanceDeduction,
   updateWeeklyAdvanceDeduction,
   updateManualAdvance,
@@ -35,6 +38,9 @@ const withAuth = [
 
 router.get('/', withAuth, list);
 router.get('/breakdown', withAuth, breakdown);
+router.get('/sabari-lines', withAuth, sabariLines);
+router.get('/carry/:employeeId', withAuth, listEmployeeCarry);
+router.post('/carry/:employeeId', withAuth, requireHrBranchForMutation, addEmployeeCarry);
 router.patch(
   '/:id/advance-deduction',
   withAuth,

@@ -23,6 +23,12 @@ const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted, revertRepaymentDeducted, ensureDueRepaymentsForPayrollMonth } = require('./advanceLoanService');
 const { loadOverridesMap, normalizeAttendanceDateKey } = require('./attendanceOverrideService');
 const { isShiftRotationEnabled } = require('./shiftRotationPolicyService');
+const {
+  settleSriSabari,
+  finalizeSriSabariCarry,
+  saveRuleBreakdown,
+} = require('./payrollProfiles/sriSabariPayroll');
+const { mergeSriSabariTotals } = require('./payrollProfiles/sriSabari');
 const { resolveShiftIdForEmployeeOnDate } = require('./shiftAssignmentService');
 const {
   computeMonthlyBaseAndAbsence,
@@ -1870,6 +1876,8 @@ async function generateWeeklyPayroll(
     allowedBranchIds = null,
     apply_salary_advances: applySalaryAdvancesRaw = true,
     apply_advance_repayments: applyAdvanceRepaymentsRaw = true,
+    deferKeys = null,
+    defer_keys: deferKeysSnake = null,
   } = payrollOptions;
 
   const applySalaryAdvances = applySalaryAdvancesRaw !== false;
@@ -1894,7 +1902,7 @@ async function generateWeeklyPayroll(
     const employeeResult = await client.query(
       `SELECT id, basic_salary, status, daily_travel_allowance, other_allowance,
               esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type,
-              join_date, contract_type
+              join_date, contract_type, gender, week_off_day
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -1971,7 +1979,7 @@ async function generateWeeklyPayroll(
     const lunchOverDeduction = overstay.lunchOverDeduction;
     const otherBreakOverDeduction = overstay.otherBreakOverDeduction;
 
-    const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
+    let grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance;
     let statutoryEarnedBasic = earnedBasic;
     let statutoryGross = grossSalary;
     if (
@@ -2002,7 +2010,7 @@ async function generateWeeklyPayroll(
           asOfDate: weekEnd,
         })
       : { esiDeduction: 0, pfDeduction: 0, gratuityAccrual: 0, gratuityEstimate: 0 };
-    const deductions = absenceDeduction + lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
+    let deductions = absenceDeduction + lateDeduction + lunchOverDeduction + otherBreakOverDeduction + esiDeduction + pfDeduction;
 
     const salaryAdvanceBase = applySalaryAdvances
       ? await getAdvanceForEmployeeMonth(companyId, employeeId, endYear, endMonth)
@@ -2039,9 +2047,35 @@ async function generateWeeklyPayroll(
 
     const salaryAdvance = salaryAdvanceBase + monthRepaymentAdvance;
 
-    const netSalary = grossSalary - deductions - salaryAdvance;
+    let netSalary = grossSalary - deductions - salaryAdvance;
 
-    const weeklyOvertimeHoursBillable = shiftConfig.allowOvertime
+    const sabariWeek = await settleSriSabari(client, {
+      companyId,
+      employee,
+      rangeStart: weekStart,
+      rangeEnd: weekEnd,
+      asOfDate,
+      deferKeys: deferKeys || deferKeysSnake || [],
+    });
+    if (sabariWeek) {
+      const statutory = shouldDeductStatutory
+        ? resolveStatutoryDeductions(payrollRules, employee, {
+            earnedBasic: sabariWeek.hourlyPay,
+            grossSalary: sabariWeek.grossSalary,
+            asOfDate: weekEnd,
+          })
+        : { esiDeduction: 0, pfDeduction: 0 };
+      const merged = mergeSriSabariTotals({ salaryAdvance }, sabariWeek, statutory);
+      grossSalary = merged.grossSalary;
+      deductions = merged.deductions;
+      netSalary = merged.netSalary;
+      sabariWeek.breakdown.esiDeduction = merged.esiDeduction;
+      sabariWeek.breakdown.pfDeduction = merged.pfDeduction;
+    }
+
+    const weeklyOvertimeHoursBillable = sabariWeek
+      ? sabariWeek.overtimeHours
+      : shiftConfig.allowOvertime
       ? Number(summary.overtimeHours || 0)
       : 0;
 
@@ -2082,8 +2116,8 @@ async function generateWeeklyPayroll(
         weekStart,
         weekEnd,
         summary.daysInRange,
-        summary.presentDays,
-        summary.absenceDays,
+        sabariWeek ? sabariWeek.presentDays : summary.presentDays,
+        sabariWeek ? sabariWeek.absentDays : summary.absenceDays,
         weeklyOvertimeHoursBillable,
         grossSalary,
         deductions,
@@ -2104,6 +2138,16 @@ async function generateWeeklyPayroll(
           { client }
         );
       }
+    }
+
+    if (sabariWeek) {
+      await saveRuleBreakdown(client, 'weekly_payroll_records', insertResult.rows[0].id, sabariWeek.breakdown);
+      await finalizeSriSabariCarry(client, companyId, employeeId, sabariWeek, {
+        kind: 'weekly',
+        payrollId: insertResult.rows[0].id,
+        originPeriod: weekStart,
+      });
+      insertResult.rows[0].rule_breakdown = sabariWeek.breakdown;
     }
 
     await client.query('COMMIT');
@@ -2526,8 +2570,10 @@ async function getWeeklyPayrollBreakdown(
   const salaryAdvance = Number(weekPayrollRow.salary_advance || 0);
   const netSalary = Number(weekPayrollRow.net_salary || 0);
   const companyProfile = await getCompanyProfileForPayslip(companyId);
+  const sabari = weekPayrollRow.rule_breakdown || null;
 
   return {
+    sabari,
     company: companyProfile,
     employee: {
       id: employee.id,
@@ -2603,6 +2649,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     noLeaveIncentive = undefined,
     encashUnusedPaidLeave = false,
     allowedBranchIds = null,
+    deferKeys = null,
+    defer_keys: deferKeysSnake = null,
   } = payrollOptions;
   const applyAdvanceRepayments = applyAdvanceRepaymentsRaw !== false;
 
@@ -2616,7 +2664,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const employeeResult = await client.query(
       `SELECT id, basic_salary, status, join_date, daily_travel_allowance, other_allowance,
               esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
-              payroll_frequency, salary_type, permission_hours_override, contract_type
+              payroll_frequency, salary_type, permission_hours_override, contract_type,
+              gender, week_off_day
        FROM employees
        WHERE company_id = $1 AND id = $2`,
       [companyId, employeeId]
@@ -2674,8 +2723,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const isMonthComplete = !isCurrentMonth || td >= lastDayOfMonth;
 
     const allowOvertime = Boolean(shiftConfig.allowOvertime);
-    const overtimeHoursBillable = allowOvertime ? Number(summary.overtimeHours || 0) : 0;
-    const overtimePay = resolveOvertimePay({
+    let overtimeHoursBillable = allowOvertime ? Number(summary.overtimeHours || 0) : 0;
+    let overtimePay = resolveOvertimePay({
       includeOvertime,
       shiftConfig,
       summary,
@@ -2735,7 +2784,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const lunchOverDeduction = overstay.lunchOverDeduction;
     const otherBreakOverDeduction = overstay.otherBreakOverDeduction;
 
-    const grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentAmount;
+    let grossSalary = earnedBasic + overtimePay + travelAllowance + otherAllowance + paidLeaveEncashmentAmount;
     const monthLastDay = summary.daysInMonth || getDaysInMonth(year, month);
     const gratuityAsOf =
       asOfDate || `${year}-${String(month).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
@@ -2761,7 +2810,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           deductionsBeforeOffset: deductionsBeforePermission,
           workDayHoursForPermission,
         });
-    const deductions = deductionsBeforePermission - permissionOffset.offsetAmount;
+    let deductions = deductionsBeforePermission - permissionOffset.offsetAmount;
     const oldSalaryAdvance = await getAdvanceForEmployeeMonth(companyId, employeeId, year, month);
     const repaymentRowsResult = applyAdvanceRepayments
       ? await client.query(
@@ -2802,13 +2851,45 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       ? manualNoLeaveIncentive
       : shiftIncentive;
     /** No unpaid absence days after applying shift paid leave (fractional-safe). */
-    const noLeaveIncentiveAmount =
+    let noLeaveIncentiveAmount =
       effectiveNoLeaveIncentive > 0 &&
       isMonthComplete &&
       Number(absenceDaysForPayroll || 0) <= 1e-6
         ? effectiveNoLeaveIncentive
         : 0;
-    const netSalary = grossSalary - deductions - salaryAdvance + noLeaveIncentiveAmount;
+    let netSalary = grossSalary - deductions - salaryAdvance + noLeaveIncentiveAmount;
+
+    const monthStartStr = `${year}-${String(month).padStart(2, '0')}-01`;
+    const monthEndStr = `${year}-${String(month).padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`;
+    const sabari = await settleSriSabari(client, {
+      companyId,
+      employee,
+      rangeStart: monthStartStr,
+      rangeEnd: monthEndStr,
+      asOfDate,
+      deferKeys: deferKeys || deferKeysSnake || [],
+    });
+    if (sabari) {
+      const statutory = resolveStatutoryDeductions(payrollRules, employee, {
+        earnedBasic: sabari.hourlyPay,
+        grossSalary: sabari.grossSalary,
+        asOfDate: gratuityAsOf,
+      });
+      const merged = mergeSriSabariTotals({ salaryAdvance }, sabari, statutory);
+      overtimePay = merged.overtimePay;
+      overtimeHoursBillable = merged.overtimeHours;
+      grossSalary = merged.grossSalary;
+      deductions = merged.deductions;
+      noLeaveIncentiveAmount = merged.noLeaveIncentive;
+      netSalary = merged.netSalary;
+      summary.presentDays = merged.presentDays;
+      summary.absenceDays = merged.absenceDays;
+      permissionOffset.allocatedHours = 0;
+      permissionOffset.usedMinutes = 0;
+      permissionOffset.offsetAmount = 0;
+      sabari.breakdown.esiDeduction = merged.esiDeduction;
+      sabari.breakdown.pfDeduction = merged.pfDeduction;
+    }
 
     const result = await client.query(
       `INSERT INTO payroll_records (
@@ -2869,8 +2950,8 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
         permissionOffset.allocatedHours,
         permissionOffset.usedMinutes,
         permissionOffset.offsetAmount,
-        unusedPaidLeaveDays,
-        paidLeaveEncashmentAmount,
+        sabari ? 0 : unusedPaidLeaveDays,
+        sabari ? 0 : paidLeaveEncashmentAmount,
         netSalary,
       ]
     );
@@ -2886,6 +2967,16 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
           { client }
         );
       }
+    }
+
+    if (sabari) {
+      await saveRuleBreakdown(client, 'payroll_records', result.rows[0].id, sabari.breakdown);
+      await finalizeSriSabariCarry(client, companyId, employeeId, sabari, {
+        kind: 'monthly',
+        payrollId: result.rows[0].id,
+        originPeriod: `${year}-${String(month).padStart(2, '0')}`,
+      });
+      result.rows[0].rule_breakdown = sabari.breakdown;
     }
 
     await client.query('COMMIT');
@@ -2937,7 +3028,8 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
        permission_offset_amount,
        unused_paid_leave_days,
        paid_leave_encashment_amount,
-       generated_at
+       generated_at,
+       rule_breakdown
      FROM payroll_records
      WHERE company_id = $1 AND employee_id = $2 AND year = $3 AND month = $4`,
     [companyId, employeeId, year, month]
@@ -2959,7 +3051,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const employeeResult = await pool.query(
     `SELECT id, name, employee_code, basic_salary, status, join_date, daily_travel_allowance, other_allowance,
             esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent,
-            shift_id, salary_type, permission_hours_override, contract_type
+            shift_id, salary_type, permission_hours_override, contract_type, gender, week_off_day
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -3259,6 +3351,24 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
       : grossSalary - totalDeductions - salaryAdvance + noLeaveIncentive;
 
   const companyProfile = await getCompanyProfileForPayslip(companyId);
+  let sabari = payrollRecordSnap?.rule_breakdown || null;
+  if (!sabari) {
+    const monthStartStr = `${year}-${String(month).padStart(2, '0')}-01`;
+    const monthEndStr = `${year}-${String(month).padStart(2, '0')}-${String(summary.daysInMonth || lastDayOfMonth).padStart(2, '0')}`;
+    try {
+      const live = await settleSriSabari(pool, {
+        companyId,
+        employee,
+        rangeStart: monthStartStr,
+        rangeEnd: monthEndStr,
+        asOfDate,
+        deferKeys: [],
+      });
+      sabari = live ? live.breakdown : null;
+    } catch (err) {
+      if (err.statusCode) sabari = { error: err.message };
+    }
+  }
 
   /** Attendance numbers shown on payslip: match payroll run when snapshot exists. */
   const presentDaysForDisplay =
@@ -3277,6 +3387,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   }
 
   return {
+    sabari,
     company: companyProfile,
     employee: {
       id: employee.id,

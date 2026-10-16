@@ -215,6 +215,10 @@ const APPLIED_CHECKS = {
     SELECT 1 FROM information_schema.tables
     WHERE table_schema = 'public' AND table_name = 'field_days'
   )`,
+  '102_sri_sabari_payroll_profile.sql': `EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'companies' AND column_name = 'payroll_profile'
+  )`,
 };
 
 async function hasExistingSchema(client) {

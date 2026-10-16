@@ -258,6 +258,8 @@ export default function PayslipModal({
   const currency = companyCurrency(company);
   const regionFeatures = company?.region_features || regionFeaturesForCountry(company?.country_code);
   const showIndiaStatutory = !!regionFeatures.esi;
+  const sabariLines = Array.isArray(breakdown?.sabari?.payslipLines) ? breakdown.sabari.payslipLines : null;
+  const sabariError = breakdown?.sabari?.error || null;
   const showGratuity = !!regionFeatures.wps;
   const fmtSym = (n) => formatMoneyWithSymbol(n, currency);
   const fmtAmt = (n) => formatMoneyAmount(n, currency);
@@ -626,6 +628,58 @@ export default function PayslipModal({
             </div>
           </section>
 
+          {sabariError && (
+            <p className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-[11px] text-rose-700">
+              {sabariError}
+            </p>
+          )}
+          {sabariLines ? (
+            <section className="grid gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3 text-[11px] text-slate-700 sm:grid-cols-2">
+              <div>
+                <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">EARNINGS</h3>
+                <div className="space-y-1.5">
+                  {sabariLines.filter((line) => line.earning).map((line) => (
+                    <div key={line.key} className="flex justify-between">
+                      <span>{line.label}</span>
+                      <span className="font-medium text-emerald-700">{fmtSym(line.amount)}</span>
+                    </div>
+                  ))}
+                  {breakdown.sabari?.insideHours != null && (
+                    <p className="pt-1 text-[10px] text-slate-500">
+                      Inside hours {breakdown.sabari.insideHours}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">DEDUCTIONS</h3>
+                <div className="space-y-1.5">
+                  {sabariLines.filter((line) => !line.earning).map((line) => (
+                    <div key={line.key} className="flex justify-between">
+                      <span>{line.label}</span>
+                      <span className="font-medium text-amber-700">{fmtSym(line.amount)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between">
+                    <span>Advance Repayment</span>
+                    <span className="font-medium text-amber-700">{fmtSym(breakdown.breakdown?.salaryAdvance)}</span>
+                  </div>
+                  {showIndiaStatutory && Number(breakdown.sabari?.esiDeduction || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span>ESI Deduction</span>
+                      <span className="font-medium text-amber-700">{fmtSym(breakdown.sabari.esiDeduction)}</span>
+                    </div>
+                  )}
+                  {showIndiaStatutory && Number(breakdown.sabari?.pfDeduction || 0) > 0 && (
+                    <div className="flex justify-between">
+                      <span>PF Deduction</span>
+                      <span className="font-medium text-amber-700">{fmtSym(breakdown.sabari.pfDeduction)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          ) : !sabariError ? (
           <section className="grid gap-4 rounded-xl border border-slate-100 bg-white px-4 py-3 text-[11px] text-slate-700 sm:grid-cols-2">
             <div>
               <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">
@@ -758,6 +812,7 @@ export default function PayslipModal({
               </div>
             </div>
           </section>
+          ) : null}
 
           <section className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-[11px] text-slate-800">
             <div className="flex flex-wrap items-center justify-between gap-3">
