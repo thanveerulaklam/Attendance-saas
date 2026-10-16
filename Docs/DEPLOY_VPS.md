@@ -323,6 +323,8 @@ The connector sends punches to `https://yourdomain.com/api/device/push` (API key
 
 ## Deploying Updates
 
+**Copy-paste production updates (punchpay.in):** see [DEPLOY_UPDATES.md](./DEPLOY_UPDATES.md).
+
 When you change the app locally, deploy like this.
 
 ### Using Git (recommended)
