@@ -14,7 +14,9 @@ import { colors, formatTime, statusLabel } from '../theme';
 
 export default function TodayScreen() {
   const { profile } = useAuth();
-  const beatEnabled = Boolean(profile?.employee?.field_beat_enabled);
+  const beatEnabled = Boolean(
+    profile?.company?.field_visits_enabled && profile?.employee?.field_beat_enabled
+  );
   const [punches, setPunches] = useState<Punch[]>([]);
   const [visits, setVisits] = useState<BeatVisit[]>([]);
   const [visitCount, setVisitCount] = useState(0);

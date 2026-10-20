@@ -58,7 +58,34 @@ async function requireFieldAttendanceEnabledForAdmin(req, res, next) {
   }
 }
 
+async function requireFieldVisitsEnabled(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId is required',
+      });
+    }
+
+    const company = await loadCompanyForMobile(companyId);
+    if (!company.field_visits_enabled) {
+      return res.status(403).json({
+        success: false,
+        code: 'FIELD_VISITS_DISABLED',
+        message: 'Field visits are not enabled for your company.',
+      });
+    }
+
+    req.fieldCompany = company;
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+}
+
 module.exports = {
   requireFieldAttendanceEnabled,
   requireFieldAttendanceEnabledForAdmin,
+  requireFieldVisitsEnabled,
 };

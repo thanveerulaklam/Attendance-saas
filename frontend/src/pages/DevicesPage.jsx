@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
+import { patchFieldSettings } from '../utils/companyFieldFlags';
 import { useAuth } from '../context/AuthContext';
 
 function maskKey(apiKey) {
@@ -49,6 +50,7 @@ export default function DevicesPage() {
   const [deleteTypedName, setDeleteTypedName] = useState('');
   const [mobileAttendanceEnabled, setMobileAttendanceEnabled] = useState(false);
   const [fieldAttendanceEnabled, setFieldAttendanceEnabled] = useState(false);
+  const [fieldVisitsEnabled, setFieldVisitsEnabled] = useState(false);
   const [mobileSaving, setMobileSaving] = useState(false);
   const [mobileToast, setMobileToast] = useAutoDismiss(null);
   const [kioskBusyBranchId, setKioskBusyBranchId] = useState(null);
@@ -100,6 +102,7 @@ export default function DevicesPage() {
       .then((json) => {
         setMobileAttendanceEnabled(Boolean(json?.data?.mobile_attendance_enabled));
         setFieldAttendanceEnabled(Boolean(json?.data?.field_attendance_enabled));
+        setFieldVisitsEnabled(Boolean(json?.data?.field_visits_enabled));
       })
       .catch(() => setMobileAttendanceEnabled(false));
   }, []);
@@ -718,24 +721,19 @@ export default function DevicesPage() {
                 const nextEnabled = e.target.checked;
                 if (!nextEnabled && fieldAttendanceEnabled) {
                   const ok = window.confirm(
-                    'Turn off field attendance? Employees will no longer punch from PunchPay Field.'
+                    'Turn off field sites? Assigned-site punch in PunchPay Field will stop.'
                   );
                   if (!ok) return;
                 }
                 try {
                   setMobileSaving(true);
                   setMobileToast(null);
-                  const res = await authFetch('/api/company/field-settings', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ field_attendance_enabled: nextEnabled }),
-                  });
-                  const json = await res.json().catch(() => ({}));
-                  if (!res.ok) throw new Error(json.message || 'Failed to save field settings');
-                  setFieldAttendanceEnabled(Boolean(json.data?.field_attendance_enabled));
+                  const data = await patchFieldSettings({ field_attendance_enabled: nextEnabled });
+                  setFieldAttendanceEnabled(Boolean(data.field_attendance_enabled));
+                  setFieldVisitsEnabled(Boolean(data.field_visits_enabled));
                   setMobileToast({
                     type: 'success',
-                    message: nextEnabled ? 'Field attendance enabled.' : 'Field attendance disabled.',
+                    message: nextEnabled ? 'Field sites enabled.' : 'Field sites disabled.',
                   });
                 } catch (err) {
                   setMobileToast({ type: 'error', message: err.message || 'Failed to save' });
@@ -746,18 +744,66 @@ export default function DevicesPage() {
               disabled={mobileSaving}
             />
             <span>
-              <span className="font-medium">Enable field attendance</span>
+              <span className="font-medium">Enable field sites</span>
               <span className="mt-0.5 block text-[11px] text-slate-500">
-                PunchPay Field app for staff who punch at assigned GPS sites with an on-device selfie. Separate from office QR / tablet.
+                PunchPay Field assigned GPS sites. Shows Field sites in the side menu.
               </span>
             </span>
           </label>
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={fieldVisitsEnabled}
+              onChange={async (e) => {
+                const nextEnabled = e.target.checked;
+                if (!nextEnabled && fieldVisitsEnabled) {
+                  const ok = window.confirm(
+                    'Turn off field visits? Door-to-door Start / Visit / End in PunchPay Field will stop.'
+                  );
+                  if (!ok) return;
+                }
+                try {
+                  setMobileSaving(true);
+                  setMobileToast(null);
+                  const data = await patchFieldSettings({ field_visits_enabled: nextEnabled });
+                  setFieldAttendanceEnabled(Boolean(data.field_attendance_enabled));
+                  setFieldVisitsEnabled(Boolean(data.field_visits_enabled));
+                  setMobileToast({
+                    type: 'success',
+                    message: nextEnabled ? 'Field visits enabled.' : 'Field visits disabled.',
+                  });
+                } catch (err) {
+                  setMobileToast({ type: 'error', message: err.message || 'Failed to save' });
+                } finally {
+                  setMobileSaving(false);
+                }
+              }}
+              disabled={mobileSaving}
+            />
+            <span>
+              <span className="font-medium">Enable field visits</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                Door-to-door Start / Visit / End. Shows Field visits in the side menu.
+              </span>
+            </span>
+          </label>
+          {(fieldAttendanceEnabled || fieldVisitsEnabled) && (
           <p className="mt-2 text-[11px] text-slate-500">
-            <Link to="/field-sites" className="font-medium text-indigo-600 underline">
-              Manage field sites
-            </Link>
-            {' · then assign sites on each employee.'}
+            {fieldAttendanceEnabled ? (
+              <Link to="/field-sites" className="font-medium text-indigo-600 underline">
+                Manage field sites
+              </Link>
+            ) : null}
+            {fieldAttendanceEnabled && fieldVisitsEnabled ? ' · ' : null}
+            {fieldVisitsEnabled ? (
+              <Link to="/field-visits" className="font-medium text-indigo-600 underline">
+                View field visits
+              </Link>
+            ) : null}
+            {fieldAttendanceEnabled ? ' · then assign sites on each employee.' : ''}
           </p>
+          )}
           <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
             <input
               type="checkbox"

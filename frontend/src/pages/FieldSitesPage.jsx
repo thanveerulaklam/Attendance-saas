@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { Link } from 'react-router-dom';
 import { authFetch } from '../utils/api';
+import { patchFieldSettings } from '../utils/companyFieldFlags';
 import { useAuth } from '../context/AuthContext';
 import FieldEmployeesPanel from '../components/employees/FieldEmployeesPanel';
 import SiteLocationMap from '../components/field/SiteLocationMap';
@@ -22,6 +23,7 @@ export default function FieldSitesPage() {
   const isAdmin = user?.role === 'admin';
   const canManageEmployees = isAdmin || user?.role === 'hr';
   const [enabled, setEnabled] = useState(false);
+  const [visitsEnabled, setVisitsEnabled] = useState(false);
   const [savingFlag, setSavingFlag] = useState(false);
   const [sites, setSites] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,6 +46,7 @@ export default function FieldSitesPage() {
       const sitesJson = await sitesRes.json().catch(() => ({}));
       if (companyRes.ok) {
         setEnabled(Boolean(companyJson.data?.field_attendance_enabled));
+        setVisitsEnabled(Boolean(companyJson.data?.field_visits_enabled));
       }
       if (!sitesRes.ok) {
         throw new Error(sitesJson.message || 'Failed to load field sites');
@@ -60,28 +63,36 @@ export default function FieldSitesPage() {
     load();
   }, [load]);
 
-  const handleToggle = async (nextEnabled) => {
+  const handleToggle = async (flag, nextEnabled) => {
     if (!isAdmin) return;
-    if (!nextEnabled && enabled) {
+    if (flag === 'field_attendance_enabled' && !nextEnabled && enabled) {
       const ok = window.confirm(
-        'Turn off field attendance? Employees will no longer be able to punch from PunchPay Field. Office kiosk and biometric punches are not affected.'
+        'Turn off field sites? Assigned-site punch in PunchPay Field will stop. Office kiosk and biometric punches are not affected.'
+      );
+      if (!ok) return;
+    }
+    if (flag === 'field_visits_enabled' && !nextEnabled && visitsEnabled) {
+      const ok = window.confirm(
+        'Turn off field visits? Door-to-door Start / Visit / End in PunchPay Field will stop.'
       );
       if (!ok) return;
     }
     try {
       setSavingFlag(true);
       setToast(null);
-      const res = await authFetch('/api/company/field-settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field_attendance_enabled: nextEnabled }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.message || 'Failed to save');
-      setEnabled(Boolean(json.data?.field_attendance_enabled));
+      const data = await patchFieldSettings({ [flag]: nextEnabled });
+      setEnabled(Boolean(data.field_attendance_enabled));
+      setVisitsEnabled(Boolean(data.field_visits_enabled));
       setToast({
         type: 'success',
-        message: nextEnabled ? 'Field attendance enabled.' : 'Field attendance disabled.',
+        message:
+          flag === 'field_visits_enabled'
+            ? nextEnabled
+              ? 'Field visits enabled.'
+              : 'Field visits disabled.'
+            : nextEnabled
+              ? 'Field sites enabled.'
+              : 'Field sites disabled.',
       });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'Failed to save' });
@@ -200,10 +211,14 @@ export default function FieldSitesPage() {
           </Link>
           {' · '}
           PunchPay Field
-          {' · '}
-          <Link to="/field-visits" className="font-medium text-indigo-600 underline">
-            Field visits
-          </Link>
+          {visitsEnabled ? (
+            <>
+              {' · '}
+              <Link to="/field-visits" className="font-medium text-indigo-600 underline">
+                Field visits
+              </Link>
+            </>
+          ) : null}
         </p>
         <h1 className="text-lg font-semibold text-slate-900">Field sites</h1>
         <p className="mt-0.5 text-xs text-slate-500">
@@ -236,14 +251,28 @@ export default function FieldSitesPage() {
             type="checkbox"
             className="mt-0.5 rounded border-slate-300"
             checked={enabled}
-            onChange={(e) => handleToggle(e.target.checked)}
+            onChange={(e) => handleToggle('field_attendance_enabled', e.target.checked)}
             disabled={!isAdmin || savingFlag}
           />
           <span>
-            <span className="font-medium">Enable field attendance</span>
+            <span className="font-medium">Enable field sites</span>
             <span className="mt-0.5 block text-[11px] text-slate-500">
-              Employees with a mobile/both attendance channel, app login, and either an assigned site
-              or door-to-door mode can punch from PunchPay Field. Office tablet QR stays unchanged.
+              Assigned GPS sites for PunchPay Field. Shows Field sites in the side menu.
+            </span>
+          </span>
+        </label>
+        <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+          <input
+            type="checkbox"
+            className="mt-0.5 rounded border-slate-300"
+            checked={visitsEnabled}
+            onChange={(e) => handleToggle('field_visits_enabled', e.target.checked)}
+            disabled={!isAdmin || savingFlag}
+          />
+          <span>
+            <span className="font-medium">Enable field visits</span>
+            <span className="mt-0.5 block text-[11px] text-slate-500">
+              Door-to-door Start / Visit / End. Shows Field visits in the side menu.
             </span>
           </span>
         </label>

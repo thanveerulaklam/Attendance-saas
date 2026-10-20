@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAutoDismiss } from '../hooks/useAutoDismiss';
 import { authFetch } from '../utils/api';
+import { patchFieldSettings } from '../utils/companyFieldFlags';
 import { useAuth } from '../context/AuthContext';
 import {
   PLAN_DISPLAY_NAME,
@@ -91,6 +92,10 @@ export default function CompanySettingsPage() {
   const [flexibleHoursEnabled, setFlexibleHoursEnabled] = useState(false);
   const [flexibleHoursSaving, setFlexibleHoursSaving] = useState(false);
   const [flexibleHoursToast, setFlexibleHoursToast] = useAutoDismiss(null);
+  const [fieldAttendanceEnabled, setFieldAttendanceEnabled] = useState(false);
+  const [fieldVisitsEnabled, setFieldVisitsEnabled] = useState(false);
+  const [fieldFlagsSaving, setFieldFlagsSaving] = useState(false);
+  const [fieldFlagsToast, setFieldFlagsToast] = useAutoDismiss(null);
   const [subscriptionForm, setSubscriptionForm] = useState({
     subscription_start_date: '',
     subscription_end_date: '',
@@ -190,6 +195,8 @@ export default function CompanySettingsPage() {
         setShiftRotationEnabled(Boolean(data.enable_shift_rotation));
         setFlexibleHoursEnabled(Boolean(data.flexible_hours_mode));
         setMobileAttendanceEnabled(Boolean(data.mobile_attendance_enabled));
+        setFieldAttendanceEnabled(Boolean(data.field_attendance_enabled));
+        setFieldVisitsEnabled(Boolean(data.field_visits_enabled));
         setSubscriptionForm({
           subscription_start_date: toDateInputValue(data.subscription_start_date),
           subscription_end_date: toDateInputValue(data.subscription_end_date),
@@ -411,6 +418,43 @@ export default function CompanySettingsPage() {
       setShiftRotationToast({ type: 'error', message: err.message || 'Failed to save' });
     } finally {
       setShiftRotationSaving(false);
+    }
+  };
+
+  const handleToggleFieldFlag = async (flag, nextEnabled) => {
+    if (flag === 'field_attendance_enabled' && !nextEnabled && fieldAttendanceEnabled) {
+      const ok = window.confirm(
+        'Turn off field sites? Assigned-site punch in PunchPay Field will stop. Office kiosk and biometric punches are not affected.'
+      );
+      if (!ok) return;
+    }
+    if (flag === 'field_visits_enabled' && !nextEnabled && fieldVisitsEnabled) {
+      const ok = window.confirm(
+        'Turn off field visits? Door-to-door Start / Visit / End in PunchPay Field will stop.'
+      );
+      if (!ok) return;
+    }
+    try {
+      setFieldFlagsSaving(true);
+      setFieldFlagsToast(null);
+      const data = await patchFieldSettings({ [flag]: nextEnabled });
+      setFieldAttendanceEnabled(Boolean(data.field_attendance_enabled));
+      setFieldVisitsEnabled(Boolean(data.field_visits_enabled));
+      setFieldFlagsToast({
+        type: 'success',
+        message:
+          flag === 'field_visits_enabled'
+            ? nextEnabled
+              ? 'Field visits enabled. Field visits now appears in the menu.'
+              : 'Field visits disabled.'
+            : nextEnabled
+              ? 'Field sites enabled. Field sites now appears in the menu.'
+              : 'Field sites disabled.',
+      });
+    } catch (err) {
+      setFieldFlagsToast({ type: 'error', message: err.message || 'Failed to save' });
+    } finally {
+      setFieldFlagsSaving(false);
     }
   };
 
@@ -1137,14 +1181,65 @@ export default function CompanySettingsPage() {
         <section className="rounded-xl border border-slate-100 bg-white px-5 py-4 shadow-soft">
           <h2 className="text-sm font-semibold text-slate-900">PunchPay Field</h2>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            Selfie + GPS attendance for staff who punch at assigned sites, not the office geofence.
+            Turn on each product to show it in the side menu. Selfie + GPS stays in PunchPay Field;
+            office kiosk and biometric punches are unchanged.
           </p>
-          <a
-            href="/field-sites"
-            className="mt-3 inline-flex text-xs font-medium text-indigo-600 underline"
-          >
-            Manage field sites and enable field attendance
-          </a>
+          {fieldFlagsToast && (
+            <div
+              className={`mt-3 rounded-md border px-3 py-2 text-[11px] ${
+                fieldFlagsToast.type === 'error'
+                  ? 'border-rose-100 bg-rose-50 text-rose-700'
+                  : 'border-emerald-100 bg-emerald-50 text-emerald-700'
+              }`}
+            >
+              {fieldFlagsToast.message}
+            </div>
+          )}
+          <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={fieldAttendanceEnabled}
+              onChange={(e) => handleToggleFieldFlag('field_attendance_enabled', e.target.checked)}
+              disabled={loading || fieldFlagsSaving}
+            />
+            <span>
+              <span className="font-medium">Enable field sites</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                Assigned GPS sites (warehouse, shop, house). Adds Field sites to the menu.
+              </span>
+            </span>
+          </label>
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-slate-800">
+            <input
+              type="checkbox"
+              className="mt-0.5 rounded border-slate-300"
+              checked={fieldVisitsEnabled}
+              onChange={(e) => handleToggleFieldFlag('field_visits_enabled', e.target.checked)}
+              disabled={loading || fieldFlagsSaving}
+            />
+            <span>
+              <span className="font-medium">Enable field visits</span>
+              <span className="mt-0.5 block text-[11px] text-slate-500">
+                Door-to-door Start day / Visit / End day. Adds Field visits to the menu.
+              </span>
+            </span>
+          </label>
+          {(fieldAttendanceEnabled || fieldVisitsEnabled) && (
+            <p className="mt-3 text-[11px] text-slate-500">
+              {fieldAttendanceEnabled ? (
+                <a href="/field-sites" className="font-medium text-indigo-600 underline">
+                  Manage field sites
+                </a>
+              ) : null}
+              {fieldAttendanceEnabled && fieldVisitsEnabled ? ' · ' : null}
+              {fieldVisitsEnabled ? (
+                <a href="/field-visits" className="font-medium text-indigo-600 underline">
+                  View field visits
+                </a>
+              ) : null}
+            </p>
+          )}
         </section>
       )}
 

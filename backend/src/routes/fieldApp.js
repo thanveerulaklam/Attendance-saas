@@ -6,7 +6,10 @@ const {
   enforceCompanyFromToken,
 } = require('../middleware/auth');
 const { requireActiveSubscription } = require('../middleware/subscription');
-const { requireFieldAttendanceEnabled } = require('../middleware/fieldAttendance');
+const {
+  requireFieldAttendanceEnabled,
+  requireFieldVisitsEnabled,
+} = require('../middleware/fieldAttendance');
 const {
   getMe,
   getToday,
@@ -83,12 +86,12 @@ router.post(
   fieldPunchLimiter,
   punch
 );
-router.get('/beat/today', ...employeeAuth, requireFieldAttendanceEnabled, getBeatTodayHandler);
+router.get('/beat/today', ...employeeAuth, requireFieldVisitsEnabled, getBeatTodayHandler);
 router.post(
   '/beat/start',
   ...employeeAuth,
   requireActiveSubscription,
-  requireFieldAttendanceEnabled,
+  requireFieldVisitsEnabled,
   fieldPunchLimiter,
   beatStart
 );
@@ -96,7 +99,7 @@ router.post(
   '/beat/visit',
   ...employeeAuth,
   requireActiveSubscription,
-  requireFieldAttendanceEnabled,
+  requireFieldVisitsEnabled,
   fieldVisitLimiter,
   beatVisit
 );
@@ -104,7 +107,7 @@ router.post(
   '/beat/end',
   ...employeeAuth,
   requireActiveSubscription,
-  requireFieldAttendanceEnabled,
+  requireFieldVisitsEnabled,
   fieldPunchLimiter,
   beatEnd
 );

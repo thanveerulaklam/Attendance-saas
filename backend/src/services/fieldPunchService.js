@@ -253,6 +253,7 @@ async function getFieldMe(companyId, employeeId) {
     company: {
       ...me.company,
       field_attendance_enabled: Boolean(company.field_attendance_enabled),
+      field_visits_enabled: Boolean(company.field_visits_enabled),
     },
     sites,
     enrolled: Boolean(profile),

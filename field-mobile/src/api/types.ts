@@ -60,6 +60,7 @@ export type MeResponse = {
     name: string;
     mobile_attendance_enabled?: boolean;
     field_attendance_enabled?: boolean;
+    field_visits_enabled?: boolean;
   };
   branch: { id: number; name: string };
   shift: { id: number; shift_name: string; start_time: string; end_time: string } | null;

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getSubscriptionStatus } from '../utils/subscription';
 import { authFetch } from '../utils/api';
+import { COMPANY_FIELD_FLAGS_EVENT } from '../utils/companyFieldFlags';
 import WhatsAppHelpButton from '../components/WhatsAppHelpButton';
 
 // Keep /dashboard route available, but hide it from the sidebar for now.
@@ -28,7 +29,15 @@ export default function DashboardLayout() {
   const isSuperAdmin =
     user?.role === 'admin' &&
     (user?.company_id == null || Number(user?.company_id) === 0);
-  const navItems = baseNavItems;
+  const navItems = useMemo(
+    () =>
+      baseNavItems.filter((item) => {
+        if (item.to === '/field-sites') return Boolean(company?.field_attendance_enabled);
+        if (item.to === '/field-visits') return Boolean(company?.field_visits_enabled);
+        return true;
+      }),
+    [company?.field_attendance_enabled, company?.field_visits_enabled]
+  );
   const adminNavItems = isSuperAdmin ? [{ to: '/enquiries', label: 'Enquiries' }] : [];
   const subscription = getSubscriptionStatus(company);
   const showBanner = company && (
@@ -46,6 +55,15 @@ export default function DashboardLayout() {
       })
       .catch(() => {});
     return () => { isMounted = false; };
+  }, []);
+
+  useEffect(() => {
+    const onFlags = (event) => {
+      const flags = event.detail || {};
+      setCompany((prev) => (prev ? { ...prev, ...flags } : prev));
+    };
+    window.addEventListener(COMPANY_FIELD_FLAGS_EVENT, onFlags);
+    return () => window.removeEventListener(COMPANY_FIELD_FLAGS_EVENT, onFlags);
   }, []);
 
   return (

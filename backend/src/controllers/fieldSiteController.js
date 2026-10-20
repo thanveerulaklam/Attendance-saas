@@ -27,16 +27,30 @@ const branchContext = (req) => ({
 async function updateFieldSettings(req, res, next) {
   try {
     const companyId = req.companyId;
-    if (typeof req.body?.field_attendance_enabled !== 'boolean') {
-      throw new AppError('field_attendance_enabled (boolean) is required', 400);
+    const sets = [];
+    const params = [companyId];
+
+    if (typeof req.body?.field_attendance_enabled === 'boolean') {
+      params.push(req.body.field_attendance_enabled);
+      sets.push(`field_attendance_enabled = $${params.length}`);
+    }
+    if (typeof req.body?.field_visits_enabled === 'boolean') {
+      params.push(req.body.field_visits_enabled);
+      sets.push(`field_visits_enabled = $${params.length}`);
+    }
+    if (sets.length === 0) {
+      throw new AppError(
+        'field_attendance_enabled or field_visits_enabled (boolean) is required',
+        400
+      );
     }
 
     const result = await pool.query(
       `UPDATE companies
-       SET field_attendance_enabled = $2
+       SET ${sets.join(', ')}
        WHERE id = $1
-       RETURNING id, name, field_attendance_enabled`,
-      [companyId, req.body.field_attendance_enabled]
+       RETURNING id, name, field_attendance_enabled, field_visits_enabled`,
+      params
     );
 
     if (result.rowCount === 0) {

@@ -28,7 +28,9 @@ export default function PunchScreen({ onEnroll }: Props) {
     );
   }
 
-  if (!profile.company?.field_attendance_enabled) {
+  const sitesOn = Boolean(profile.company?.field_attendance_enabled);
+  const visitsOn = Boolean(profile.company?.field_visits_enabled);
+  if (!sitesOn && !visitsOn) {
     return (
       <View style={styles.center}>
         <Text style={styles.help}>Field attendance is not enabled for your company. Contact HR.</Text>
@@ -37,11 +39,15 @@ export default function PunchScreen({ onEnroll }: Props) {
   }
 
   const sites = profile.sites || [];
-  const beatEnabled = Boolean(profile.employee?.field_beat_enabled);
-  if (!beatEnabled && !sites.length) {
+  const beatEnabled = visitsOn && Boolean(profile.employee?.field_beat_enabled);
+  if (!beatEnabled && !(sitesOn && sites.length)) {
     return (
       <View style={styles.center}>
-        <Text style={styles.help}>No field sites are assigned to you. Contact HR.</Text>
+        <Text style={styles.help}>
+          {visitsOn
+            ? 'Door-to-door is not enabled on your profile. Contact HR.'
+            : 'No field sites are assigned to you. Contact HR.'}
+        </Text>
       </View>
     );
   }
