@@ -200,7 +200,7 @@ async function buildSabariPayTemplateBuffer(employees = []) {
     ['Name', 'Staff name. Required for someone who is not already in PunchPay.'],
     ['Employee code', 'A short unique code, for example SS01. Same code updates that person if they already exist.'],
     ['Gender', 'Male or Female. Salary will not run without this.'],
-    ['Week-off', 'Their weekly off: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, or Saturday.'],
+    ['Week-off', 'Their weekly off, or leave blank if they work all seven days.'],
     ['Hourly rate', 'Rupees per hour while they are inside the shop. Example: 50'],
     ['Pay cycle', 'Monthly or Weekly. Leave Monthly if they are paid once a month.'],
     ['Join date', 'Optional. Use YYYY-MM-DD. Blank means today, and only for new staff.'],

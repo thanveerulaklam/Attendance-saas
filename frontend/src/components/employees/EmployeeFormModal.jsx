@@ -422,9 +422,6 @@ export default function EmployeeFormModal({
       if (gender !== 'male' && gender !== 'female') {
         nextErrors.gender = 'Choose male or female for this store’s pay rules';
       }
-      if (weekOffDay === '') {
-        nextErrors.weekOffDay = 'Choose the employee’s week-off';
-      }
     }
 
     if (!STATUS_OPTIONS.some((opt) => opt.value === status)) {
@@ -843,7 +840,7 @@ export default function EmployeeFormModal({
                     onChange={(e) => setWeekOffDay(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-100"
                   >
-                    <option value="">Select a day</option>
+                    <option value="">No week-off</option>
                     {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((label, index) => (
                       <option key={label} value={index}>{label}</option>
                     ))}

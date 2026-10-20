@@ -218,8 +218,13 @@ function parseGender(value) {
   return null;
 }
 
+function isNoWeekOff(value) {
+  const s = String(value || '').trim().toLowerCase();
+  return ['none', 'no', 'nil', 'na', 'n/a', '-', 'no week off', 'no week-off', 'no weekly off'].includes(s);
+}
+
 function parseWeekOffDay(value) {
-  if (value == null || String(value).trim() === '') return null;
+  if (value == null || String(value).trim() === '' || isNoWeekOff(value)) return null;
   if (typeof value === 'number' && value >= 0 && value <= 6) return value;
   const s = String(value).trim().toLowerCase();
   if (/^[0-6]$/.test(s)) return Number(s);
@@ -528,12 +533,12 @@ async function importSabariPaySheet(companyId, rows, headerMap, branchContext) {
       });
       continue;
     }
-    if (payload.week_off_day == null) {
+    if (weekRaw != null && String(weekRaw).trim() !== '' && !isNoWeekOff(weekRaw) && payload.week_off_day == null) {
       failures.push({
         row: rowNum,
         name: payload.name,
         code,
-        error: weekRaw ? 'Week-off must be a day name, Sunday to Saturday' : 'Week-off is required',
+        error: 'Week-off must be a day name, or leave it blank if they have no week-off',
       });
       continue;
     }
@@ -547,7 +552,7 @@ async function importSabariPaySheet(companyId, rows, headerMap, branchContext) {
       if (existingId != null) {
         const patch = {
           gender: payload.gender,
-          week_off_day: payload.week_off_day,
+          week_off_day: payload.week_off_day == null ? null : payload.week_off_day,
           basic_salary: Number(payload.basic_salary),
         };
         if (payload.payroll_frequency) patch.payroll_frequency = payload.payroll_frequency;
@@ -569,7 +574,7 @@ async function importSabariPaySheet(companyId, rows, headerMap, branchContext) {
             basic_salary: Number(payload.basic_salary),
             join_date: joinDate,
             gender: payload.gender,
-            week_off_day: payload.week_off_day,
+            week_off_day: payload.week_off_day == null ? null : payload.week_off_day,
             status: 'active',
             payroll_frequency: payload.payroll_frequency || 'monthly',
             salary_type: 'monthly',

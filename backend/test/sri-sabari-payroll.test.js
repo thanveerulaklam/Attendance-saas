@@ -258,7 +258,17 @@ test('a week-off alone is not an absence penalty, and missing gender is blocked'
   assert.equal(onlyOff.weekBonus, 300);
 
   assert.throws(() => calculateSriSabari(base({ gender: 'other' })), /male or female/);
-  assert.throws(() => calculateSriSabari(base({ weekOffDay: null })), /week-off/);
+
+  const noWeekOff = calculateSriSabari(base({
+    weekOffDay: null,
+    rangeStart: '2026-09-27',
+    rangeEnd: '2026-10-03',
+    punches: [
+      ...['2026-09-27', '2026-09-28', '2026-09-29', '2026-10-01', '2026-10-02', '2026-10-03']
+        .flatMap((date) => shift(date, 10, 0, 21, 0)),
+    ],
+  }));
+  assert.equal(noWeekOff.weekBonus, 0);
 });
 
 test('staff sheet accepts Male, Female, and day names', () => {

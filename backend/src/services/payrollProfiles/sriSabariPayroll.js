@@ -78,9 +78,6 @@ function assertEmployeeReady(employee) {
   if (gender !== 'male' && gender !== 'female') {
     throw new AppError('Set gender to male or female before payroll for this store', 400);
   }
-  if (employee.week_off_day == null || employee.week_off_day === '') {
-    throw new AppError('Set a week-off day before payroll for this store', 400);
-  }
   if (!(Number(employee.basic_salary) > 0)) {
     throw new AppError('Set an hourly rate before payroll for this store', 400);
   }
@@ -110,7 +107,10 @@ async function settleSriSabari(client, {
       rangeEnd,
       asOfDate,
       gender: employee.gender,
-      weekOffDay: Number(employee.week_off_day),
+      weekOffDay:
+        employee.week_off_day == null || employee.week_off_day === ''
+          ? null
+          : Number(employee.week_off_day),
       hourlyRate: Number(employee.basic_salary),
       config: profile.config,
       punches,

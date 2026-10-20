@@ -174,7 +174,7 @@ function evaluateWeek(weekStart, factsByDate, config, gender, weekOffDay) {
     absenceKind = 'monToSat';
   }
 
-  const requiredDays = days.filter((d) => d.weekday !== weekOffDay);
+  const requiredDays = days.filter((d) => weekOffDay == null || d.weekday !== weekOffDay);
   const fullWeek =
     requiredDays.length > 0 &&
     requiredDays.every((d) => !d.absent && !d.late && !d.short && d.inside >= config.requiredHours[gender]);
@@ -208,16 +208,14 @@ function calculateSriSabari(input) {
     err.statusCode = 400;
     throw err;
   }
-  if (input.weekOffDay == null || input.weekOffDay === '' || Number.isNaN(Number(input.weekOffDay))) {
-    const err = new Error('Set a week-off day before payroll');
-    err.statusCode = 400;
-    throw err;
-  }
-  const weekOffDay = Number(input.weekOffDay);
-  if (weekOffDay < 0 || weekOffDay > 6) {
-    const err = new Error('Week-off day must be Sunday through Saturday');
-    err.statusCode = 400;
-    throw err;
+  let weekOffDay = null;
+  if (input.weekOffDay != null && input.weekOffDay !== '') {
+    weekOffDay = Number(input.weekOffDay);
+    if (Number.isNaN(weekOffDay) || weekOffDay < 0 || weekOffDay > 6) {
+      const err = new Error('Week-off day must be Sunday through Saturday');
+      err.statusCode = 400;
+      throw err;
+    }
   }
   const hourlyRate = Number(input.hourlyRate || 0);
   if (!(hourlyRate > 0)) {
@@ -287,7 +285,7 @@ function calculateSriSabari(input) {
       });
     }
     if (day.inside > 0) presentDays += 1;
-    else if (weekday(date) !== weekOffDay) absentDays += 1;
+    else if (weekOffDay == null || weekday(date) !== weekOffDay) absentDays += 1;
   }
 
   let weekBonus = 0;
