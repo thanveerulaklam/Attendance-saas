@@ -7,6 +7,7 @@ const {
   mergeSriSabariTotals,
   DEFAULT_CONFIG,
 } = require('../src/services/payrollProfiles/sriSabari');
+const { parseGender, parseWeekOffDay } = require('../src/services/employeeBulkImportService');
 
 function punch(ymd, hh, mm, type) {
   const iso = `${ymd}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00+05:30`;
@@ -258,6 +259,15 @@ test('a week-off alone is not an absence penalty, and missing gender is blocked'
 
   assert.throws(() => calculateSriSabari(base({ gender: 'other' })), /male or female/);
   assert.throws(() => calculateSriSabari(base({ weekOffDay: null })), /week-off/);
+});
+
+test('staff sheet accepts Male, Female, and day names', () => {
+  assert.equal(parseGender('Male'), 'male');
+  assert.equal(parseGender('lady'), 'female');
+  assert.equal(parseGender('other'), null);
+  assert.equal(parseWeekOffDay('Wednesday'), 3);
+  assert.equal(parseWeekOffDay('sat'), 6);
+  assert.equal(parseWeekOffDay('holiday'), null);
 });
 
 test('deferred deductions and manual carry are held or brought forward', () => {

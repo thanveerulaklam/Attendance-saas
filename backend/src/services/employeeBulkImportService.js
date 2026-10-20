@@ -15,7 +15,7 @@ function normalizeHeaderKey(key) {
     .replace(/^\uFEFF/, '')
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, '_');
+    .replace(/[\s-]+/g, '_');
 }
 
 /** Map normalized header -> first seen original column key (scan first rows in case row 1 is sparse). */
@@ -187,7 +187,48 @@ function rowToPayload(row, headerMap) {
     payload.salary_type = salaryTypeHint;
   }
 
+  const hourly = pickRaw(row, ['hourly_rate', 'hourly', 'rate_per_hour'], headerMap);
+  if ((payload.basic_salary == null || payload.basic_salary === '') && hourly != null) {
+    payload.basic_salary = parseNumberish(hourly);
+  }
+
+  const gender = parseGender(pickRaw(row, ['gender', 'sex'], headerMap));
+  if (gender) payload.gender = gender;
+
+  const weekOff = parseWeekOffDay(pickRaw(row, ['week_off', 'week_off_day', 'weekly_off', 'weekoff'], headerMap));
+  if (weekOff != null) payload.week_off_day = weekOff;
+
+  const cycle = pickRaw(row, ['pay_cycle', 'payroll_frequency', 'salary_cycle'], headerMap);
+  if (cycle != null && String(cycle).trim() !== '' && !payload.payroll_frequency) {
+    const c = String(cycle).trim().toLowerCase();
+    if (c.startsWith('week')) payload.payroll_frequency = 'weekly';
+    else if (c.startsWith('month')) payload.payroll_frequency = 'monthly';
+  }
+
   return payload;
+}
+
+const WEEK_OFF_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+function parseGender(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const s = String(value).trim().toLowerCase();
+  if (['male', 'm', 'gent', 'gents', 'man', 'boy'].includes(s)) return 'male';
+  if (['female', 'f', 'lady', 'ladies', 'woman', 'women', 'girl'].includes(s)) return 'female';
+  return null;
+}
+
+function parseWeekOffDay(value) {
+  if (value == null || String(value).trim() === '') return null;
+  if (typeof value === 'number' && value >= 0 && value <= 6) return value;
+  const s = String(value).trim().toLowerCase();
+  if (/^[0-6]$/.test(s)) return Number(s);
+  if (s.length >= 3) {
+    const hits = WEEK_OFF_NAMES.filter((day) => day.startsWith(s));
+    if (hits.length === 1) return WEEK_OFF_NAMES.indexOf(hits[0]);
+  }
+  const exact = WEEK_OFF_NAMES.indexOf(s);
+  return exact >= 0 ? exact : null;
 }
 
 function isEmptyRow(row) {
@@ -203,7 +244,7 @@ async function loadExistingCodes(companyId) {
 async function findEmployeeIdByCode(companyId, employeeCode) {
   const code = String(employeeCode).trim();
   const r = await pool.query(
-    `SELECT id FROM employees WHERE company_id = $1 AND employee_code = $2`,
+    `SELECT id FROM employees WHERE company_id = $1 AND lower(employee_code) = lower($2)`,
     [companyId, code]
   );
   return r.rowCount > 0 ? Number(r.rows[0].id) : null;
@@ -282,6 +323,8 @@ function createPayloadToUpdatePayload(p) {
     aadhar_number: p.aadhar_number != null && p.aadhar_number !== '' ? p.aadhar_number : null,
     esi_number: p.esi_number != null && p.esi_number !== '' ? p.esi_number : null,
   };
+  if (p.gender != null && p.gender !== '') u.gender = p.gender;
+  if (p.week_off_day != null && p.week_off_day !== '') u.week_off_day = Number(p.week_off_day);
   if (
     p.branch_id != null &&
     p.branch_id !== '' &&
@@ -441,12 +484,121 @@ async function bulkImportEmployeesForApi(companyId, rows, headerMap, branchConte
   };
 }
 
+function todayYmd() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+}
+
+/**
+ * Sri Sabari staff sheet. Matching employee codes are updated (gender, week-off, hourly rate, pay cycle).
+ * New codes are created. Other companies should not call this.
+ */
+async function importSabariPaySheet(companyId, rows, headerMap, branchContext) {
+  const duplicates = findDuplicateEmployeeCodesInSheet(rows, headerMap);
+  if (duplicates.length > 0) {
+    return { error: 'DUPLICATE_CODES_IN_SHEET', duplicates };
+  }
+  if (rows.length > MAX_IMPORT_ROWS) {
+    return { error: 'TOO_MANY_ROWS', maxRows: MAX_IMPORT_ROWS, rowCount: rows.length };
+  }
+
+  let created = 0;
+  let updated = 0;
+  const failures = [];
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    const rowNum = i + 2;
+    if (isEmptyRow(row)) continue;
+
+    const payload = rowToPayload(row, headerMap);
+    const code = payload.employee_code ? String(payload.employee_code).trim() : '';
+    const genderRaw = pickRaw(row, ['gender', 'sex'], headerMap);
+    const weekRaw = pickRaw(row, ['week_off', 'week_off_day', 'weekly_off', 'weekoff'], headerMap);
+
+    if (!code) {
+      failures.push({ row: rowNum, name: payload.name, error: 'Employee code is required' });
+      continue;
+    }
+    if (!payload.gender) {
+      failures.push({
+        row: rowNum,
+        name: payload.name,
+        code,
+        error: genderRaw ? 'Gender must be Male or Female' : 'Gender is required',
+      });
+      continue;
+    }
+    if (payload.week_off_day == null) {
+      failures.push({
+        row: rowNum,
+        name: payload.name,
+        code,
+        error: weekRaw ? 'Week-off must be a day name, Sunday to Saturday' : 'Week-off is required',
+      });
+      continue;
+    }
+    if (!(Number(payload.basic_salary) > 0)) {
+      failures.push({ row: rowNum, name: payload.name, code, error: 'Hourly rate must be greater than 0' });
+      continue;
+    }
+
+    try {
+      const existingId = await findEmployeeIdByCode(companyId, code);
+      if (existingId != null) {
+        const patch = {
+          gender: payload.gender,
+          week_off_day: payload.week_off_day,
+          basic_salary: Number(payload.basic_salary),
+        };
+        if (payload.payroll_frequency) patch.payroll_frequency = payload.payroll_frequency;
+        await updateEmployee(companyId, existingId, patch, branchContext);
+        updated += 1;
+      } else {
+        const name = payload.name ? String(payload.name).trim() : '';
+        if (name.length < 2) {
+          failures.push({ row: rowNum, code, error: 'Name is required for a new staff member' });
+          continue;
+        }
+        const joinRaw = pickRaw(row, ['join_date', 'date_of_joining', 'doj', 'joining_date'], headerMap);
+        const joinDate = parseJoinDate(joinRaw) || todayYmd();
+        await createEmployee(
+          companyId,
+          {
+            name,
+            employee_code: code,
+            basic_salary: Number(payload.basic_salary),
+            join_date: joinDate,
+            gender: payload.gender,
+            week_off_day: payload.week_off_day,
+            status: 'active',
+            payroll_frequency: payload.payroll_frequency || 'monthly',
+            salary_type: 'monthly',
+          },
+          branchContext
+        );
+        created += 1;
+      }
+    } catch (err) {
+      failures.push({
+        row: rowNum,
+        name: payload.name,
+        code,
+        error: formatFailureError(err),
+      });
+    }
+  }
+
+  return { created, updated, failed: failures };
+}
+
 module.exports = {
   MAX_IMPORT_ROWS,
   normalizeHeaderKey,
   buildHeaderMap,
   pickRaw,
   parseNumberish,
+  parseGender,
+  parseWeekOffDay,
   parseBasicSalaryRaw,
   excelSerialToDate,
   parseJoinDate,
@@ -460,4 +612,5 @@ module.exports = {
   parseImportFile,
   processEmployeeImportRows,
   bulkImportEmployeesForApi,
+  importSabariPaySheet,
 };

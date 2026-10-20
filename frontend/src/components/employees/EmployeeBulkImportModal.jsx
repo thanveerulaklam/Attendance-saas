@@ -2,7 +2,17 @@ import { useEffect, useState } from 'react';
 import { useAutoDismiss } from '../../hooks/useAutoDismiss';
 import { authFetch } from '../../utils/api';
 
-export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
+export default function EmployeeBulkImportModal({
+  open,
+  onClose,
+  onComplete,
+  title = 'Bulk import employees',
+  description = 'Download the template, fill one row per employee, then upload. Rows with an employee code that already exists are skipped.',
+  templatePath = '/api/employees/import-template',
+  uploadPath = '/api/employees/bulk-import',
+  downloadName = 'employee-import-template.xlsx',
+  fileHint = null,
+}) {
   const [file, setFile] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useAutoDismiss(null);
@@ -19,7 +29,7 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
   const downloadTemplate = async () => {
     try {
       setToast(null);
-      const res = await authFetch('/api/employees/import-template');
+      const res = await authFetch(templatePath);
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         throw new Error(json?.message || 'Could not download template');
@@ -28,7 +38,7 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'employee-import-template.xlsx';
+      a.download = downloadName;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -56,7 +66,7 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await authFetch('/api/employees/bulk-import', {
+      const res = await authFetch(uploadPath, {
         method: 'POST',
         body: formData,
       });
@@ -78,6 +88,7 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
       const data = json.data || {};
       setResult({
         created: data.created ?? 0,
+        updated: data.updated ?? 0,
         skipped: data.skipped ?? 0,
         failed: Array.isArray(data.failed) ? data.failed : [],
       });
@@ -121,11 +132,10 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
         <header className="flex items-start justify-between border-b border-slate-200 px-5 py-4">
           <div>
             <h2 id="bulk-import-title" className="text-sm font-semibold text-slate-900">
-              Bulk import employees
+              {title}
             </h2>
             <p className="mt-1 text-xs text-slate-500">
-              Download the template, fill one row per employee, then upload. Rows with an employee
-              code that already exists are skipped.
+              {description}
             </p>
           </div>
           <button
@@ -178,12 +188,8 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
                 />
               </label>
               <p className="mt-1 text-[11px] text-slate-400">
-                .xlsx, .xls, or .csv — max 10 MB, up to 500 rows. Required columns (
-                <span className="font-medium text-rose-600">name</span>,{' '}
-                <span className="font-medium text-rose-600">employee_code</span>,{' '}
-                <span className="font-medium text-rose-600">basic_salary</span>,{' '}
-                <span className="font-medium text-rose-600">join_date</span>) are shown in red in
-                the Excel template.
+                {fileHint ||
+                  '.xlsx, .xls, or .csv — max 10 MB, up to 500 rows. Required columns (name, employee_code, basic_salary, join_date) are shown in red in the Excel template.'}
               </p>
             </div>
 
@@ -222,7 +228,9 @@ export default function EmployeeBulkImportModal({ open, onClose, onComplete }) {
           {result != null && Array.isArray(result.failed) && !result.duplicates && (
             <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3 text-xs text-slate-700">
               <p className="font-medium text-slate-900">
-                Summary: {result.created} added, {result.skipped} skipped (already in system)
+                Summary: {result.created} added
+                {result.updated ? `, ${result.updated} updated` : ''}
+                {result.skipped ? `, ${result.skipped} skipped` : ''}
                 {result.failed.length > 0 ? `, ${result.failed.length} row(s) failed` : ''}.
               </p>
               {result.failed.length > 0 && (

@@ -3,7 +3,9 @@ const employeeAppService = require('../services/employeeAppService');
 const faceEnrollmentService = require('../services/faceEnrollmentService');
 const employeeBulkImportService = require('../services/employeeBulkImportService');
 const { listAssignedFieldSiteIds } = require('../services/fieldSiteService');
-const { buildEmployeeImportTemplateBuffer } = require('../services/employeeImportTemplate');
+const { buildEmployeeImportTemplateBuffer, buildSabariPayTemplateBuffer } = require('../services/employeeImportTemplate');
+const { pool } = require('../config/database');
+const { loadCompanyProfile } = require('../services/payrollProfiles/sriSabariPayroll');
 const auditService = require('../services/auditService');
 const { AppError } = require('../utils/AppError');
 
@@ -88,6 +90,77 @@ const downloadEmployeeImportTemplate = asyncHandler(async (req, res) => {
   );
   res.setHeader('Content-Disposition', 'attachment; filename="employee-import-template.xlsx"');
   return res.send(Buffer.from(buffer));
+});
+
+async function assertSabariCompany(companyId) {
+  const profile = await loadCompanyProfile(null, companyId);
+  if (!profile) {
+    const err = new AppError('This staff sheet is only for the Sri Sabari pay rules', 400);
+    throw err;
+  }
+}
+
+const downloadSabariPayTemplate = asyncHandler(async (req, res) => {
+  await assertSabariCompany(req.companyId);
+  const staff = await pool.query(
+    `SELECT name, employee_code, gender, week_off_day, basic_salary, payroll_frequency, join_date
+     FROM employees
+     WHERE company_id = $1 AND status <> 'inactive'
+     ORDER BY name ASC`,
+    [req.companyId]
+  );
+  const buffer = await buildSabariPayTemplateBuffer(staff.rows);
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', 'attachment; filename="sri-sabari-staff-pay.xlsx"');
+  return res.send(Buffer.from(buffer));
+});
+
+const importSabariPaySheet = asyncHandler(async (req, res) => {
+  await assertSabariCompany(req.companyId);
+  if (!req.file?.buffer) {
+    return res.status(400).json({ success: false, message: 'No file uploaded. Use form field name "file".' });
+  }
+  const original = (req.file.originalname || '').toLowerCase();
+  if (!/\.(xlsx|xls|csv)$/.test(original)) {
+    return res.status(400).json({ success: false, message: 'Invalid file type. Use .xlsx, .xls, or .csv.' });
+  }
+  let rows;
+  let headerMap;
+  try {
+    const parsed = employeeBulkImportService.parseImportFile(req.file.buffer, {
+      filename: req.file.originalname,
+    });
+    rows = parsed.rows;
+    headerMap = parsed.headerMap;
+  } catch (e) {
+    if (e instanceof AppError) {
+      return res.status(e.statusCode).json({ success: false, message: e.message });
+    }
+    throw e;
+  }
+  const result = await employeeBulkImportService.importSabariPaySheet(
+    req.companyId,
+    rows,
+    headerMap,
+    branchContext(req)
+  );
+  if (result.error === 'DUPLICATE_CODES_IN_SHEET') {
+    return res.status(400).json({
+      success: false,
+      message: 'Duplicate employee codes in the file. Each code must appear only once.',
+      data: { duplicates: result.duplicates },
+    });
+  }
+  if (result.error === 'TOO_MANY_ROWS') {
+    return res.status(400).json({
+      success: false,
+      message: `This file has too many rows (${result.rowCount}). Maximum is ${result.maxRows}.`,
+    });
+  }
+  return res.status(200).json({ success: true, data: result });
 });
 
 /**
@@ -331,6 +404,8 @@ module.exports = {
   getEmployees,
   getDepartments,
   downloadEmployeeImportTemplate,
+  downloadSabariPayTemplate,
+  importSabariPaySheet,
   bulkImportEmployees,
   getEmployeeById,
   updateEmployee,

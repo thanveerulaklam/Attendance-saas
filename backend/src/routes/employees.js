@@ -5,6 +5,8 @@ const {
   getEmployees,
   getDepartments,
   downloadEmployeeImportTemplate,
+  downloadSabariPayTemplate,
+  importSabariPaySheet,
   bulkImportEmployees,
   getEmployeeById,
   updateEmployee,
@@ -63,6 +65,15 @@ const withEmployeeAuth = [
 
 // Register specific paths before /:id and before POST /
 router.get('/import-template', withEmployeeAuth, downloadEmployeeImportTemplate);
+router.get('/sabari-pay-template', withEmployeeAuth, downloadSabariPayTemplate);
+
+router.post(
+  '/sabari-pay-import',
+  withEmployeeAuth,
+  requireHrBranchForMutation,
+  handleMulterEmployeeImport,
+  importSabariPaySheet
+);
 
 router.post(
   '/bulk-import',

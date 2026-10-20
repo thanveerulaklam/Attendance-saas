@@ -62,6 +62,8 @@ export default function EmployeesPage() {
   const [error, setError] = useState(null);
   const [showModal, setShowModal] = useState(openFromOnboarding);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+  const [showPaySheetModal, setShowPaySheetModal] = useState(false);
+  const [sabariProfile, setSabariProfile] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [toast, setToast] = useAutoDismiss(null);
   const [departmentSuggestions, setDepartmentSuggestions] = useState([]);
@@ -146,6 +148,13 @@ export default function EmployeesPage() {
       .then((res) => res.json())
       .then((json) => setShifts(json.data || []))
       .catch(() => setShifts([]));
+  }, []);
+
+  useEffect(() => {
+    authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => setSabariProfile(json?.data?.payroll_profile === 'sri_sabari_v1'))
+      .catch(() => setSabariProfile(false));
   }, []);
 
   useEffect(() => {
@@ -419,6 +428,15 @@ export default function EmployeesPage() {
           >
             {pdfDownloading ? 'Preparing PDF…' : 'Download PDF'}
           </button>
+          {sabariProfile && (
+            <button
+              type="button"
+              onClick={() => setShowPaySheetModal(true)}
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:border-primary-200 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+            >
+              Staff pay sheet
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowBulkImportModal(true)}
@@ -701,6 +719,20 @@ export default function EmployeesPage() {
           onCreated={handleEmployeeCreated}
           onDeleted={handleEmployeeDeleted}
           departmentSuggestions={departmentSuggestions}
+        />
+      )}
+
+      {showPaySheetModal && (
+        <EmployeeBulkImportModal
+          open={showPaySheetModal}
+          onClose={() => setShowPaySheetModal(false)}
+          onComplete={() => fetchEmployees()}
+          title="Staff pay sheet"
+          description="Download the sheet, ask the store to fill gender, week-off, and hourly rate, then upload it here. A matching employee code is updated. A new code is added."
+          templatePath="/api/employees/sabari-pay-template"
+          uploadPath="/api/employees/sabari-pay-import"
+          downloadName="sri-sabari-staff-pay.xlsx"
+          fileHint="Columns: Name, Employee code, Gender (Male or Female), Week-off, Hourly rate. Pay cycle and join date are optional."
         />
       )}
 
