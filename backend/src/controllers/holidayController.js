@@ -4,7 +4,12 @@ const {
   deleteHoliday,
   getWeeklyOffs,
   setWeeklyOffs,
+  listDayOverrides,
+  upsertDayOverride,
+  deleteDayOverride,
 } = require('../services/holidayService');
+const { recalculatePayrollTouchingDate } = require('../services/payrollService');
+const auditService = require('../services/auditService');
 
 async function getHolidays(req, res, next) {
   try {
@@ -102,11 +107,87 @@ async function putWeeklyOffHandler(req, res, next) {
   }
 }
 
+async function getDayOverridesHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+    const rows = await listDayOverrides(companyId, req.query || {});
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function putDayOverrideHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+    const saved = await upsertDayOverride(companyId, req.body || {}, req.user?.user_id);
+    const recalc = await recalculatePayrollTouchingDate(companyId, saved.override_date, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+    auditService
+      .log(companyId, req.user?.user_id, 'holiday.day_override', 'company_day_override', saved.id, {
+        date: saved.override_date,
+        effect: saved.effect,
+        recalculated: recalc.updated,
+      })
+      .catch(() => {});
+    return res.json({
+      success: true,
+      data: { override: saved, recalculated: recalc.updated, failed: recalc.failed },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteDayOverrideHandler(req, res, next) {
+  try {
+    const companyId = req.companyId;
+    if (!companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+    const removed = await deleteDayOverride(companyId, req.params.date);
+    const recalc = await recalculatePayrollTouchingDate(companyId, removed.override_date, {
+      allowedBranchIds: req.allowedBranchIds,
+    });
+    auditService
+      .log(companyId, req.user?.user_id, 'holiday.day_override_clear', 'company_day_override', removed.override_date, {
+        date: removed.override_date,
+        recalculated: recalc.updated,
+      })
+      .catch(() => {});
+    return res.json({
+      success: true,
+      data: { override_date: removed.override_date, recalculated: recalc.updated, failed: recalc.failed },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getHolidays,
   createHolidayHandler,
   deleteHolidayHandler,
   getWeeklyOffHandler,
   putWeeklyOffHandler,
+  getDayOverridesHandler,
+  putDayOverrideHandler,
+  deleteDayOverrideHandler,
 };
 

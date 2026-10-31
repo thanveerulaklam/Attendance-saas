@@ -54,6 +54,25 @@ function dayOfWeekFromYmd(ymd) {
   return new Date(y, m - 1, d).getDay();
 }
 
+function isDeactivatedEmployee(emp, employeeById) {
+  const fromRow = String(emp?.status || '').toLowerCase();
+  if (fromRow === 'inactive') return true;
+  const meta = employeeById?.get(Number(emp?.employee_id));
+  return String(meta?.status || '').toLowerCase() === 'inactive';
+}
+
+function hasPunchesInRange(emp, fromDate, toDate) {
+  return (emp?.days || []).some((day) => {
+    const date = String(day?.date || '').slice(0, 10);
+    if (!date) return false;
+    if (fromDate && date < String(fromDate).slice(0, 10)) return false;
+    if (toDate && date > String(toDate).slice(0, 10)) return false;
+    return Array.isArray(day.punches) && day.punches.length > 0;
+  });
+}
+
+const DEACTIVATED_TEXT = [220, 38, 38];
+
 function getWeeklyOffDaysForEmployee(employeeRow, shiftById, companyWeeklyOffDays) {
   const sid = employeeRow?.shift_id != null ? Number(employeeRow.shift_id) : null;
   if (sid && shiftById.has(sid)) {
@@ -87,10 +106,14 @@ export async function generateDetailedAttendancePdf({
   const monthlyQuery = new URLSearchParams({
     year: String(effectiveYear),
     month: String(effectiveMonth),
+    include_inactive: '1',
     ...(department ? { department } : {}),
   }).toString();
 
-  const [companyRes, empRes, monthlyRes, holidaysRes, weeklyOffRes, shiftsRes] = await Promise.all([
+  const monthStart = `${effectiveYear}-${String(effectiveMonth).padStart(2, '0')}-01`;
+  const monthEndDay = new Date(effectiveYear, effectiveMonth, 0).getDate();
+  const monthEnd = `${effectiveYear}-${String(effectiveMonth).padStart(2, '0')}-${String(monthEndDay).padStart(2, '0')}`;
+  const [companyRes, empRes, monthlyRes, holidaysRes, weeklyOffRes, shiftsRes, dayOverrideRes] = await Promise.all([
     authFetch('/api/company', { headers: { 'Content-Type': 'application/json' } }),
     authFetch('/api/employees?limit=500', { headers: { 'Content-Type': 'application/json' } }),
     authFetch(`/api/attendance/monthly?${monthlyQuery}`, {
@@ -101,6 +124,9 @@ export async function generateDetailedAttendancePdf({
     }),
     authFetch('/api/holidays/weekly-off', { headers: { 'Content-Type': 'application/json' } }),
     authFetch('/api/shifts?limit=100', { headers: { 'Content-Type': 'application/json' } }),
+    authFetch(`/api/holidays/day-overrides?${new URLSearchParams({ from: monthStart, to: monthEnd }).toString()}`, {
+      headers: { 'Content-Type': 'application/json' },
+    }),
   ]);
 
   const companyJson = companyRes.ok ? await companyRes.json() : { data: {} };
@@ -109,6 +135,15 @@ export async function generateDetailedAttendancePdf({
   const holidaysJson = holidaysRes.ok ? await holidaysRes.json() : { data: [] };
   const weeklyOffJson = weeklyOffRes.ok ? await weeklyOffRes.json() : { data: {} };
   const shiftsJson = shiftsRes.ok ? await shiftsRes.json() : { data: [] };
+  const dayOverrideJson = dayOverrideRes.ok ? await dayOverrideRes.json() : { data: [] };
+  const workingOverrideDates = new Set();
+  const holidayOverrideDates = new Set();
+  (dayOverrideJson.data || []).forEach((row) => {
+    const date = String(row?.override_date || '').slice(0, 10);
+    if (!date) return;
+    if (row.effect === 'working') workingOverrideDates.add(date);
+    if (row.effect === 'holiday') holidayOverrideDates.add(date);
+  });
 
   const company = companyJson.data || {};
   const companyTz = resolveCompanyTimezone(company);
@@ -124,7 +159,10 @@ export async function generateDetailedAttendancePdf({
     if (selectedIdSet.size > 0 && !selectedIdSet.has(empId)) return false;
     if (department) {
       const fullEmp = employeeById.get(empId);
-      return (fullEmp?.department || '') === department;
+      if ((fullEmp?.department || '') !== department) return false;
+    }
+    if (isDeactivatedEmployee(emp, employeeById) && !hasPunchesInRange(emp, fromDate, toDate)) {
+      return false;
     }
     return true;
   });
@@ -194,9 +232,10 @@ export async function generateDetailedAttendancePdf({
       0
     );
     const attendancePercent = totalDays > 0 ? ((present / totalDays) * 100).toFixed(1) : '0.0';
+    const deactivated = isDeactivatedEmployee(emp, employeeById);
     return [
       emp.employee_code || '',
-      emp.name || '',
+      deactivated ? `${emp.name || ''} (Deactivated)` : (emp.name || ''),
       String(totalDays),
       String(present),
       String(absent),
@@ -216,6 +255,12 @@ export async function generateDetailedAttendancePdf({
       startY,
       margin: { left: 32, right: 32 },
       styles: { fontSize: 8 },
+      didParseCell: (data) => {
+        if (data.section !== 'body' || data.column.index !== 1) return;
+        const emp = filteredMonthlyEmployees[data.row.index];
+        if (!emp || !isDeactivatedEmployee(emp, employeeById)) return;
+        data.cell.styles.textColor = DEACTIVATED_TEXT;
+      },
     }
   );
 
@@ -228,9 +273,15 @@ export async function generateDetailedAttendancePdf({
       doc.addPage();
       titleY = 32;
     }
+    const deactivated = isDeactivatedEmployee(emp, employeeById);
     doc.setFontSize(11);
     doc.setFont(undefined, 'bold');
-    doc.text(`Employee: ${emp.employee_code || ''} ${emp.name || ''}`, 32, titleY);
+    if (deactivated) doc.setTextColor(...DEACTIVATED_TEXT);
+    const headingName = deactivated
+      ? `${emp.name || ''} (Deactivated)`
+      : (emp.name || '');
+    doc.text(`Employee: ${emp.employee_code || ''} ${headingName}`.trim(), 32, titleY);
+    doc.setTextColor(0, 0, 0);
     doc.setFontSize(9);
     doc.setFont(undefined, 'normal');
     const shiftLabel = emp.shift_name ? `Shift: ${emp.shift_name}` : '';
@@ -254,12 +305,16 @@ export async function generateDetailedAttendancePdf({
       const dow = dayOfWeekFromYmd(date);
 
       const holidayName = namedHolidayByDate.get(date);
+      const openedForWork = workingOverrideDates.has(date);
+      const closedAsHoliday = holidayOverrideDates.has(date);
       let status = 'Absent';
-      if (holidayName) {
+      if (!openedForWork && holidayName) {
         status = 'Holiday';
-      } else if (explicitWeeklyOffDates.has(date)) {
+      } else if (!openedForWork && closedAsHoliday) {
+        status = 'Holiday';
+      } else if (!openedForWork && explicitWeeklyOffDates.has(date)) {
         status = 'Weekly Off';
-      } else if (weeklyOffDays.length > 0 && weeklyOffDays.includes(dow)) {
+      } else if (!openedForWork && weeklyOffDays.length > 0 && weeklyOffDays.includes(dow)) {
         status = 'Weekly Off';
       } else if (day.present) {
         if (day.half_day) status = 'Half Day';
@@ -267,8 +322,12 @@ export async function generateDetailedAttendancePdf({
       }
 
       const notes = [];
-      if (holidayName) {
+      if (!openedForWork && holidayName) {
         notes.push(`Holiday: ${holidayName}`);
+      } else if (!openedForWork && closedAsHoliday) {
+        notes.push('Holiday');
+      } else if (openedForWork) {
+        notes.push('Shop open');
       }
       if (day.half_day) {
         notes.push('Half Day');

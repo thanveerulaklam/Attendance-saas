@@ -10,6 +10,12 @@ import { formatMoneyAmount, formatMoneyWithSymbol, currencySymbol } from '../uti
 import { formatWorkedHours } from '../utils/durationFormat';
 import { regionFeaturesForCountry } from '../utils/regionFeatures';
 import { lateDeductionLabel, overtimePayLabel } from '../utils/payrollPayLabels';
+import ShopDayOverrides, {
+  fetchShopDayOverrides,
+  periodBoundsForPayroll,
+  saveShopDayOverride,
+  shopDayResultMessage,
+} from '../components/payroll/ShopDayOverrides';
 
 const PAGE_SIZE = 50;
 const PAYROLL_COLUMN_STORAGE_KEY = 'payroll.visibleColumns.v1';
@@ -625,7 +631,10 @@ export default function PayrollPage() {
     days: [],
     summary: null,
     savingDate: null,
+    shopOverrides: {},
+    savingShopDate: null,
   });
+  const [shopDaysReloadKey, setShopDaysReloadKey] = useState(0);
   const [recordPaymentModal, setRecordPaymentModal] = useState({ open: false, row: null });
   const [reloadKey, setReloadKey] = useState(0);
   const selectAllHeaderRef = useRef(null);
@@ -1145,6 +1154,15 @@ export default function PayrollPage() {
           : formatWeekLabel(row.week_start_date, row.week_end_date);
       const data = await getPayrollBreakdownForRow(row);
       const details = Array.isArray(data?.attendance?.dayDetails) ? data.attendance.dayDetails : [];
+      const bounds = payrollMode === 'monthly'
+        ? periodBoundsForPayroll('monthly', { year: row.year, month: row.month })
+        : {
+            from: String(row.week_start_date || '').slice(0, 10),
+            to: String(row.week_end_date || '').slice(0, 10),
+          };
+      const shopOverrides = bounds?.from && bounds?.to
+        ? await fetchShopDayOverrides(bounds.from, bounds.to).catch(() => ({}))
+        : {};
       setAttendanceAlterModal({
         open: true,
         row,
@@ -1152,6 +1170,8 @@ export default function PayrollPage() {
         days: sortDayDetails(details),
         summary: data?.attendance || null,
         savingDate: null,
+        shopOverrides,
+        savingShopDate: null,
       });
     } catch (err) {
       setToast({
@@ -1169,7 +1189,50 @@ export default function PayrollPage() {
       days: [],
       summary: null,
       savingDate: null,
+      shopOverrides: {},
+      savingShopDate: null,
     });
+  };
+
+  const applyShopDay = async (date, effect) => {
+    const row = attendanceAlterModal.row;
+    if (!row || !subscriptionAllowed || attendanceAlterModal.savingShopDate) return;
+    setAttendanceAlterModal((m) => ({ ...m, savingShopDate: date }));
+    setToast(null);
+    try {
+      const data = await saveShopDayOverride(date, effect);
+      setBreakdownCache({});
+      const fresh = await getPayrollBreakdownForRow(row);
+      const details = Array.isArray(fresh?.attendance?.dayDetails) ? fresh.attendance.dayDetails : [];
+      const bounds = payrollMode === 'monthly'
+        ? periodBoundsForPayroll('monthly', { year: row.year, month: row.month })
+        : {
+            from: String(row.week_start_date || '').slice(0, 10),
+            to: String(row.week_end_date || '').slice(0, 10),
+          };
+      const shopOverrides = bounds?.from && bounds?.to
+        ? await fetchShopDayOverrides(bounds.from, bounds.to).catch(() => ({}))
+        : {};
+      setAttendanceAlterModal((m) => ({
+        ...m,
+        days: sortDayDetails(details),
+        summary: fresh?.attendance || null,
+        shopOverrides,
+        savingShopDate: null,
+      }));
+      setShopDaysReloadKey((k) => k + 1);
+      setReloadKey((k) => k + 1);
+      setToast({
+        type: 'success',
+        message: shopDayResultMessage(date, effect, data),
+      });
+    } catch (err) {
+      setAttendanceAlterModal((m) => ({ ...m, savingShopDate: null }));
+      setToast({
+        type: 'error',
+        message: err.message || 'Failed to update this day',
+      });
+    }
   };
 
   const applyAttendanceOverride = async (date, action) => {
@@ -1716,7 +1779,11 @@ export default function PayrollPage() {
               year: String(detailRow.year),
               month: String(detailRow.month),
             });
-            const [holidaysRes, weeklyOffRes, empRes, shiftsRes] = await Promise.all([
+            const payslipBounds = periodBoundsForPayroll('monthly', {
+              year: detailRow.year,
+              month: detailRow.month,
+            });
+            const [holidaysRes, weeklyOffRes, empRes, shiftsRes, shopOverrideMap] = await Promise.all([
               authFetch(`/api/holidays?${holidayParams}`, {
                 headers: { 'Content-Type': 'application/json' },
               }),
@@ -1729,6 +1796,9 @@ export default function PayrollPage() {
               authFetch('/api/shifts?limit=200', {
                 headers: { 'Content-Type': 'application/json' },
               }),
+              payslipBounds
+                ? fetchShopDayOverrides(payslipBounds.from, payslipBounds.to).catch(() => ({}))
+                : Promise.resolve({}),
             ]);
             const empMeta = {
               basic_salary: null,
@@ -1773,6 +1843,10 @@ export default function PayrollPage() {
                 effectiveWeeklyOffDays
               );
               const holidayDateSet = new Set([...explicitHolidaySet, ...weeklyOffDateSet]);
+              Object.entries(shopOverrideMap || {}).forEach(([date, effect]) => {
+                if (effect === 'holiday') holidayDateSet.add(date);
+                if (effect === 'working') holidayDateSet.delete(date);
+              });
               const payrollAsOfYmd = (json?.data?.attendance?.workingDaysUpToDate || '').slice(
                 0,
                 10
@@ -2315,6 +2389,8 @@ export default function PayrollPage() {
     }
   };
 
+  const shopPeriod = periodBoundsForPayroll(payrollMode, { year, month, weekStartDate });
+
   return (
     <div className="space-y-6">
       {toast && (
@@ -2588,6 +2664,19 @@ export default function PayrollPage() {
             {error}
           </div>
         )}
+
+        <ShopDayOverrides
+          from={shopPeriod?.from}
+          to={shopPeriod?.to}
+          disabled={!subscriptionAllowed}
+          reloadKey={shopDaysReloadKey}
+          onSaved={(message) => {
+            setToast({ type: 'success', message });
+            setBreakdownCache({});
+            setReloadKey((k) => k + 1);
+          }}
+          onError={(message) => setToast({ type: 'error', message })}
+        />
 
         {!loading && total > 0 && (
           <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-slate-100 pb-3">
@@ -3647,7 +3736,8 @@ export default function PayrollPage() {
             )}
             <p className="mt-1 text-[11px] text-slate-500">
               Full {payrollMode === 'monthly' ? 'month' : 'week'} attendance below. Mark an absent or
-              leave day as <strong>On duty (OD)</strong> when the employee worked off-site. Payroll
+              leave day as <strong>On duty (OD)</strong> when the employee worked off-site. Open a
+              holiday or mark a working day as a paid holiday for the whole shop. Payroll
               recalculates automatically.
             </p>
             <div className="mt-3 max-h-[min(480px,60vh)] overflow-y-auto rounded-lg border border-slate-200">
@@ -3709,27 +3799,46 @@ export default function PayrollPage() {
                           )}
                         </td>
                         <td className="px-3 py-2 text-right align-top">
-                          {day.status === 'on_duty' ? (
-                            <button
-                              type="button"
-                              disabled={attendanceAlterModal.savingDate === day.date}
-                              onClick={() => void applyAttendanceOverride(day.date, 'clear')}
-                              className="rounded border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                            >
-                              {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Undo OD'}
-                            </button>
-                          ) : day.status === 'absent' || day.status === 'half_day' ? (
-                            <button
-                              type="button"
-                              disabled={attendanceAlterModal.savingDate === day.date}
-                              onClick={() => void applyAttendanceOverride(day.date, 'set_on_duty')}
-                              className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-                            >
-                              {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Mark OD'}
-                            </button>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
+                          <div className="flex flex-col items-end gap-1">
+                            {day.status === 'on_duty' ? (
+                              <button
+                                type="button"
+                                disabled={attendanceAlterModal.savingDate === day.date}
+                                onClick={() => void applyAttendanceOverride(day.date, 'clear')}
+                                className="rounded border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                              >
+                                {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Undo OD'}
+                              </button>
+                            ) : day.status === 'absent' || day.status === 'half_day' ? (
+                              <button
+                                type="button"
+                                disabled={attendanceAlterModal.savingDate === day.date}
+                                onClick={() => void applyAttendanceOverride(day.date, 'set_on_duty')}
+                                className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                              >
+                                {attendanceAlterModal.savingDate === day.date ? 'Saving…' : 'Mark OD'}
+                              </button>
+                            ) : null}
+                            {(() => {
+                              const effect = attendanceAlterModal.shopOverrides?.[String(day.date).slice(0, 10)];
+                              const shopAction = effect === 'working' || effect === 'holiday'
+                                ? { effect: null, label: 'Undo shop day' }
+                                : day.status === 'weekly_off'
+                                  ? { effect: 'working', label: 'Open this day' }
+                                  : { effect: 'holiday', label: 'Mark as holiday' };
+                              return (
+                                <button
+                                  type="button"
+                                  title="Applies to every employee for this date"
+                                  disabled={!subscriptionAllowed || attendanceAlterModal.savingShopDate === day.date}
+                                  onClick={() => void applyShopDay(day.date, shopAction.effect)}
+                                  className="rounded border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                >
+                                  {attendanceAlterModal.savingShopDate === day.date ? 'Saving…' : shopAction.label}
+                                </button>
+                              );
+                            })()}
+                          </div>
                         </td>
                       </tr>
                     );

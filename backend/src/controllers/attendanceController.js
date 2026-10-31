@@ -81,6 +81,7 @@ async function getMonthly(req, res, next) {
       department,
       branch_id: branchIdRaw,
       device_id: deviceIdRaw,
+      include_inactive: includeInactiveRaw,
     } = req.query || {};
 
     if (!companyId) {
@@ -112,6 +113,11 @@ async function getMonthly(req, res, next) {
         ? String(deviceIdRaw).trim()
         : null;
 
+    const includeInactive =
+      includeInactiveRaw === '1' ||
+      includeInactiveRaw === 'true' ||
+      includeInactiveRaw === true;
+
     const data = await getMonthlyAttendance(
       companyId,
       y,
@@ -119,7 +125,8 @@ async function getMonthly(req, res, next) {
       eid,
       dept,
       allowedBranchIds,
-      deviceFilter
+      deviceFilter,
+      { includeInactive }
     );
 
     return res.json({

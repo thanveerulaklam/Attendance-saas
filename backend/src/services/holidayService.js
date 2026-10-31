@@ -1,5 +1,8 @@
 const { pool } = require('../config/database');
 const { AppError } = require('../utils/AppError');
+const { ymdFromDb, applyHolidayOverrides } = require('../utils/holidayDayOverrides');
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 async function listHolidays(companyId, { year, month } = {}) {
   const conditions = ['company_id = $1'];
@@ -120,9 +123,10 @@ async function getHolidayDatesForMonth(companyId, year, month) {
   const startStr = start.toISOString().slice(0, 10);
   const endStr = end.toISOString().slice(0, 10);
 
-  const [holidaysResult, shiftResult, companyWeeklyResult] = await Promise.all([
+  const [holidaysResult, shiftResult, companyWeeklyResult, overrideResult] = await Promise.all([
     pool.query(
-      `SELECT holiday_date FROM company_holidays
+      `SELECT to_char(holiday_date, 'YYYY-MM-DD') AS holiday_date
+       FROM company_holidays
        WHERE company_id = $1
          AND holiday_date >= $2::date
          AND holiday_date < $3::date`,
@@ -136,10 +140,18 @@ async function getHolidayDatesForMonth(companyId, year, month) {
       'SELECT day_of_week FROM company_weekly_offs WHERE company_id = $1',
       [companyId]
     ),
+    pool.query(
+      `SELECT to_char(override_date, 'YYYY-MM-DD') AS override_date, effect
+       FROM company_day_overrides
+       WHERE company_id = $1
+         AND override_date >= $2::date
+         AND override_date < $3::date`,
+      [companyId, startStr, endStr]
+    ),
   ]);
 
   const set = new Set(
-    holidaysResult.rows.map((r) => r.holiday_date.toISOString().slice(0, 10))
+    holidaysResult.rows.map((r) => ymdFromDb(r.holiday_date)).filter(Boolean)
   );
 
   let weeklyOffDays = [];
@@ -160,7 +172,106 @@ async function getHolidayDatesForMonth(companyId, year, month) {
     }
   }
 
+  applyHolidayOverrides(set, overrideResult.rows);
   return set;
+}
+
+function assertOverrideDate(date) {
+  const ymd = String(date || '').slice(0, 10);
+  if (!DATE_RE.test(ymd)) {
+    throw new AppError('A valid date (YYYY-MM-DD) is required', 400);
+  }
+  return ymd;
+}
+
+function assertOverrideEffect(effect) {
+  const value = String(effect || '').trim().toLowerCase();
+  if (value !== 'working' && value !== 'holiday') {
+    throw new AppError('effect must be "working" or "holiday"', 400);
+  }
+  return value;
+}
+
+function monthBounds(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!y || !m || m < 1 || m > 12) return null;
+  const last = new Date(y, m, 0).getDate();
+  return {
+    from: `${y}-${String(m).padStart(2, '0')}-01`,
+    to: `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`,
+  };
+}
+
+function resolveOverrideRange({ from, to, year, month } = {}) {
+  if (from || to) {
+    return { from: assertOverrideDate(from), to: assertOverrideDate(to) };
+  }
+  const bounds = monthBounds(year, month);
+  if (!bounds) {
+    throw new AppError('from and to, or year and month, are required', 400);
+  }
+  return bounds;
+}
+
+async function listDayOverrides(companyId, range) {
+  const { from, to } = resolveOverrideRange(range);
+  const result = await pool.query(
+    `SELECT id, to_char(override_date, 'YYYY-MM-DD') AS override_date, effect, note
+     FROM company_day_overrides
+     WHERE company_id = $1
+       AND override_date >= $2::date
+       AND override_date <= $3::date
+     ORDER BY override_date ASC`,
+    [companyId, from, to]
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    override_date: ymdFromDb(row.override_date),
+    effect: row.effect,
+    note: row.note || null,
+  }));
+}
+
+async function upsertDayOverride(companyId, data, userId = null) {
+  const date = assertOverrideDate(data.date || data.override_date);
+  const effect = assertOverrideEffect(data.effect);
+  const note = data.note != null && String(data.note).trim() !== ''
+    ? String(data.note).trim().slice(0, 255)
+    : null;
+  const result = await pool.query(
+    `INSERT INTO company_day_overrides (
+       company_id, override_date, effect, note, created_by, updated_at
+     )
+     VALUES ($1, $2::date, $3, $4, $5, NOW())
+     ON CONFLICT (company_id, override_date)
+     DO UPDATE SET effect = EXCLUDED.effect,
+                   note = EXCLUDED.note,
+                   updated_at = NOW()
+     RETURNING id, to_char(override_date, 'YYYY-MM-DD') AS override_date, effect, note`,
+    [companyId, date, effect, note, userId || null]
+  );
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    override_date: ymdFromDb(row.override_date),
+    effect: row.effect,
+    note: row.note || null,
+  };
+}
+
+async function deleteDayOverride(companyId, date) {
+  const ymd = assertOverrideDate(date);
+  const result = await pool.query(
+    `DELETE FROM company_day_overrides
+     WHERE company_id = $1 AND override_date = $2::date
+     RETURNING id`,
+    [companyId, ymd]
+  );
+  if (result.rowCount === 0) {
+    throw new AppError('Day override not found', 404);
+  }
+  return { override_date: ymd };
 }
 
 module.exports = {
@@ -170,5 +281,8 @@ module.exports = {
   getWeeklyOffs,
   setWeeklyOffs,
   getHolidayDatesForMonth,
+  listDayOverrides,
+  upsertDayOverride,
+  deleteDayOverride,
 };
 

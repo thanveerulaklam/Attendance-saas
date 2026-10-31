@@ -5,6 +5,9 @@ const {
   deleteHolidayHandler,
   getWeeklyOffHandler,
   putWeeklyOffHandler,
+  getDayOverridesHandler,
+  putDayOverrideHandler,
+  deleteDayOverrideHandler,
 } = require('../controllers/holidayController');
 const { authenticate, requireRole, enforceCompanyFromToken } = require('../middleware/auth');
 
@@ -18,6 +21,10 @@ router.delete('/:id', withHolidayAuth, deleteHolidayHandler);
 
 router.get('/weekly-off', withHolidayAuth, getWeeklyOffHandler);
 router.put('/weekly-off', withHolidayAuth, putWeeklyOffHandler);
+
+router.get('/day-overrides', withHolidayAuth, getDayOverridesHandler);
+router.put('/day-overrides', withHolidayAuth, putDayOverrideHandler);
+router.delete('/day-overrides/:date', withHolidayAuth, deleteDayOverrideHandler);
 
 module.exports = router;
 

@@ -19,6 +19,7 @@ const {
   computeMonthlyRawWorkedHoursFromLogs,
 } = require('./attendanceService');
 const { getWeeklyOffs } = require('./holidayService');
+const { applyHolidayOverrides, ymdFromDb } = require('../utils/holidayDayOverrides');
 const { getAdvanceForEmployeeMonth } = require('./advanceService');
 const { markRepaymentDeducted, revertRepaymentDeducted, ensureDueRepaymentsForPayrollMonth } = require('./advanceLoanService');
 const { loadOverridesMap, normalizeAttendanceDateKey } = require('./attendanceOverrideService');
@@ -1277,9 +1278,9 @@ async function getHolidayDatesForRange(companyId, startDateStr, endDateStr, shif
   const start = String(startDateStr).slice(0, 10);
   const end = String(endDateStr).slice(0, 10);
 
-  const [holidaysResult, companyWeeklyOffs] = await Promise.all([
+  const [holidaysResult, companyWeeklyOffs, overrideResult] = await Promise.all([
     pool.query(
-      `SELECT holiday_date
+      `SELECT to_char(holiday_date, 'YYYY-MM-DD') AS holiday_date
        FROM company_holidays
        WHERE company_id = $1
          AND holiday_date >= $2::date
@@ -1289,6 +1290,14 @@ async function getHolidayDatesForRange(companyId, startDateStr, endDateStr, shif
     shiftWeeklyOffDays && Array.isArray(shiftWeeklyOffDays) && shiftWeeklyOffDays.length > 0
       ? Promise.resolve([])
       : getWeeklyOffs(companyId),
+    pool.query(
+      `SELECT to_char(override_date, 'YYYY-MM-DD') AS override_date, effect
+       FROM company_day_overrides
+       WHERE company_id = $1
+         AND override_date >= $2::date
+         AND override_date <= $3::date`,
+      [companyId, start, end]
+    ),
   ]);
 
   const shiftWeeklyOffs = Array.isArray(shiftWeeklyOffDays) ? shiftWeeklyOffDays : [];
@@ -1298,7 +1307,7 @@ async function getHolidayDatesForRange(companyId, startDateStr, endDateStr, shif
       : companyWeeklyOffs;
 
   const set = new Set(
-    holidaysResult.rows.map((r) => r.holiday_date.toISOString().slice(0, 10))
+    holidaysResult.rows.map((r) => ymdFromDb(r.holiday_date)).filter(Boolean)
   );
 
   // Add recurring weekly-off days
@@ -1311,6 +1320,7 @@ async function getHolidayDatesForRange(companyId, startDateStr, endDateStr, shif
     cur.setUTCDate(cur.getUTCDate() + 1);
   }
 
+  applyHolidayOverrides(set, overrideResult.rows);
   return set;
 }
 
@@ -4207,6 +4217,56 @@ async function setWeeklyPayrollManualAdvance(companyId, payrollId, amount, note,
   }
 }
 
+/** Recalculate existing payroll rows whose period includes this shop-day change. */
+async function recalculatePayrollTouchingDate(companyId, dateStr, options = {}) {
+  const { allowedBranchIds = null } = options;
+  const ymd = String(dateStr || '').slice(0, 10);
+  const [y, m] = ymd.split('-').map(Number);
+  if (!y || !m) return { updated: 0, failed: 0 };
+
+  const monthlyBranch = employeeBranchFilterSql(allowedBranchIds, 4, 'e.branch_id');
+  const monthly = await pool.query(
+    `SELECT p.id
+     FROM payroll_records p
+     JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+     WHERE p.company_id = $1 AND p.year = $2 AND p.month = $3${monthlyBranch.clause}`,
+    [companyId, y, m, ...monthlyBranch.params]
+  );
+
+  const weeklyBranch = employeeBranchFilterSql(allowedBranchIds, 3, 'e.branch_id');
+  const weekly = await pool.query(
+    `SELECT p.id
+     FROM weekly_payroll_records p
+     JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+     WHERE p.company_id = $1
+       AND p.week_start_date <= $2::date
+       AND p.week_end_date >= $2::date${weeklyBranch.clause}`,
+    [companyId, ymd, ...weeklyBranch.params]
+  );
+
+  let updated = 0;
+  let failed = 0;
+  for (const row of monthly.rows) {
+    try {
+      await recalculateMonthlyPayrollFromAttendance(companyId, row.id, options);
+      updated += 1;
+    } catch (err) {
+      failed += 1;
+      console.error('Payroll recalc after shop day failed', row.id, err.message);
+    }
+  }
+  for (const row of weekly.rows) {
+    try {
+      await recalculateWeeklyPayrollFromAttendance(companyId, row.id, options);
+      updated += 1;
+    } catch (err) {
+      failed += 1;
+      console.error('Weekly payroll recalc after shop day failed', row.id, err.message);
+    }
+  }
+  return { updated, failed };
+}
+
 /**
  * Re-run payroll math from attendance (including day overrides) while preserving advance + incentive.
  */
@@ -4350,5 +4410,6 @@ module.exports = {
   setWeeklyPayrollManualAdvance,
   recalculateMonthlyPayrollFromAttendance,
   recalculateWeeklyPayrollFromAttendance,
+  recalculatePayrollTouchingDate,
 };
 

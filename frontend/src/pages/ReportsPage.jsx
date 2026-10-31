@@ -1510,23 +1510,42 @@ export default function ReportsPage() {
                 Employees
               </label>
               <p className="text-[11px] text-slate-500 mb-1">
-                Keep empty for all employees, or choose one or more from the list.
+                Keep empty for all employees, or choose one or more from the list. Deactivated employees are shown in red and are included when they have attendance in the period.
               </p>
-              <select
-                multiple
-                value={selectedEmployeeIds.map(String)}
-                onChange={(e) => {
-                  const values = Array.from(e.target.selectedOptions, (opt) => Number(opt.value));
-                  setSelectedEmployeeIds(values);
-                }}
-                className="h-32 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-800"
-              >
-                {filteredEmployees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.employee_code || `ID ${emp.id}`})
-                  </option>
-                ))}
-              </select>
+              <div className="h-32 w-full overflow-auto rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px]">
+                {filteredEmployees.length === 0 ? (
+                  <p className="px-1 py-1 text-slate-400">No employees</p>
+                ) : (
+                  filteredEmployees.map((emp) => {
+                    const id = Number(emp.id);
+                    const checked = selectedEmployeeIds.includes(id);
+                    const deactivated = String(emp.status || '').toLowerCase() === 'inactive';
+                    return (
+                      <label
+                        key={emp.id}
+                        className={`flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-slate-50 ${
+                          checked ? 'bg-slate-100' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            setSelectedEmployeeIds((prev) =>
+                              prev.includes(id) ? prev.filter((value) => value !== id) : [...prev, id]
+                            );
+                          }}
+                          className="h-3 w-3 shrink-0 rounded border-slate-300"
+                        />
+                        <span className={deactivated ? 'font-medium text-red-600' : 'text-slate-800'}>
+                          {emp.name} ({emp.employee_code || `ID ${emp.id}`})
+                          {deactivated ? ' · deactivated' : ''}
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"

@@ -1164,8 +1164,10 @@ async function getMonthlyAttendance(
   employeeId = null,
   department = null,
   allowedBranchIds = null,
-  deviceFilter = null
+  deviceFilter = null,
+  options = {}
 ) {
+  const includeInactive = options?.includeInactive === true;
   const y = Number(year);
   const m = Number(month);
   if (!y || !m || m < 1 || m > 12) {
@@ -1181,15 +1183,44 @@ async function getMonthlyAttendance(
   try {
     let employeesResult;
     const dept = department ? String(department).trim() : null;
-    let employeesQuery = `SELECT id, name, employee_code, shift_id
+    let employeesQuery = `SELECT id, name, employee_code, shift_id, status
       FROM employees
-      WHERE company_id = $1 AND status = 'active'`;
+      WHERE company_id = $1`;
     const params = [companyId];
 
     const bfEmpM = employeesBranchFilterSql(allowedBranchIds, 2);
     employeesQuery += bfEmpM.clause;
     params.push(...bfEmpM.params);
     let nextIdxM = bfEmpM.nextIndex;
+
+    if (includeInactive) {
+      // Widen by one day so overnight shifts that attribute into this month are not missed.
+      // Employees with no punches inside the month are dropped after day attribution.
+      const punchDateSql = sqlPunchLocalDate(getActiveCompanyTimezone()).replace(
+        /\bpunch_time\b/g,
+        'al.punch_time'
+      );
+      const existsFrom = addDaysYmd(monthFirstStr, -1);
+      const existsTo = addDaysYmd(monthLastStr, 1);
+      employeesQuery += ` AND (
+        status = 'active'
+        OR (
+          status = 'inactive'
+          AND EXISTS (
+            SELECT 1
+            FROM attendance_logs al
+            WHERE al.company_id = employees.company_id
+              AND al.employee_id = employees.id
+              AND ${punchDateSql} >= $${nextIdxM}::date
+              AND ${punchDateSql} <= $${nextIdxM + 1}::date
+          )
+        )
+      )`;
+      params.push(existsFrom, existsTo);
+      nextIdxM += 2;
+    } else {
+      employeesQuery += ` AND status = 'active'`;
+    }
 
     if (employeeId) {
       employeesQuery += ` AND id = $${nextIdxM}`;
@@ -1405,18 +1436,28 @@ async function getMonthlyAttendance(
         employee_id: emp.id,
         name: emp.name,
         employee_code: emp.employee_code,
+        status: emp.status || 'active',
         summary: { presentDays, absenceDays, overtimeHours },
         monthly_summary: monthlySummary,
         days,
       });
     }
 
+    const visibleEmployees = includeInactive
+      ? employeesWithDays.filter((emp) => {
+          if (String(emp.status || '').toLowerCase() !== 'inactive') return true;
+          return (emp.days || []).some(
+            (day) => Array.isArray(day.punches) && day.punches.length > 0
+          );
+        })
+      : employeesWithDays;
+
     return {
       year: y,
       month: m,
       daysInMonth,
       flexible_hours_mode: flexibleHoursMode,
-      employees: employeesWithDays,
+      employees: visibleEmployees,
     };
   } finally {
     client.release();
