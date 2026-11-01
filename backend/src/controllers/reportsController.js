@@ -8,6 +8,7 @@ const {
   getWpsReportCsv,
   getSalaryPaymentsReportCsv,
 } = require('../services/reportsService');
+const { getPayrollOverview } = require('../services/payrollOverviewService');
 
 function setCsvHeaders(res, filename) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -214,9 +215,34 @@ async function salaryPaymentsCsv(req, res, next) {
   }
 }
 
+/**
+ * GET /api/reports/payroll-overview?preset=last_month|last_6|last_12|custom&year=&month=&branch_id=
+ */
+async function payrollOverview(req, res, next) {
+  try {
+    if (!req.companyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'companyId (from token) is required',
+      });
+    }
+    const data = await getPayrollOverview(req.companyId, {
+      preset: req.query.preset,
+      year: req.query.year,
+      month: req.query.month,
+      branchId: req.query.branch_id,
+      allowedBranchIds: req.allowedBranchIds,
+    });
+    return res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   attendanceCsv,
   payrollCsv,
+  payrollOverview,
   overtimeCsv,
   dailyCsv,
   esiCsv,

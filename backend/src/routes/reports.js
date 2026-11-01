@@ -8,6 +8,7 @@ const {
   pfCsv,
   wpsCsv,
   salaryPaymentsCsv,
+  payrollOverview,
 } = require('../controllers/reportsController');
 const { authenticate, requireRole, enforceCompanyFromToken, attachBranchScopes } = require('../middleware/auth');
 
@@ -20,6 +21,7 @@ const withAuth = [
   attachBranchScopes,
 ];
 
+router.get('/payroll-overview', withAuth, payrollOverview);
 router.get('/attendance.csv', withAuth, attendanceCsv);
 router.get('/payroll.csv', withAuth, payrollCsv);
 router.get('/overtime.csv', withAuth, overtimeCsv);

@@ -30,6 +30,7 @@ import {
   ReportsPageHero,
   SectionShell,
 } from '../components/reports/ReportsInsights';
+import PayrollGivenOverview from '../components/reports/PayrollGivenOverview';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -864,6 +865,8 @@ export default function ReportsPage() {
           </div>
         </div>
       )}
+
+      <PayrollGivenOverview branchId={reportBranchFilter} currency={companyCurrency} />
 
       <SectionShell
         badge="Daily operations"
