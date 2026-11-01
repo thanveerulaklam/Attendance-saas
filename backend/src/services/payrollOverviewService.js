@@ -379,8 +379,85 @@ async function getPayrollOverview(companyId, options = {}) {
   };
 }
 
+/**
+ * Employees on one generated payroll month. Read-only: does not move loans.
+ */
+async function getPayrollMonthDetail(companyId, options = {}) {
+  const year = Number(options.year);
+  const month = Number(options.month);
+  if (!year || month < 1 || month > 12) {
+    throw new AppError('A valid year and month are required', 400);
+  }
+  const branchIds = resolveBranchIds(options.allowedBranchIds, options.branchId);
+  if (Array.isArray(branchIds) && branchIds.length === 0) {
+    return { year, month, employees: [] };
+  }
+
+  const params = [companyId, year, month];
+  let branchSql = '';
+  if (branchIds) {
+    params.push(branchIds);
+    branchSql = ` AND e.branch_id = ANY($${params.length}::bigint[])`;
+  }
+
+  const result = await pool.query(
+    `SELECT
+        e.id AS employee_id,
+        e.name AS employee_name,
+        e.employee_code,
+        COALESCE(p.net_salary, 0) AS net_salary,
+        COALESCE(p.deductions, 0) AS deductions,
+        COALESCE(p.salary_advance, 0) AS advance,
+        COALESCE(p.no_leave_incentive, 0) AS incentive,
+        COALESCE(p.overtime_hours, 0) AS overtime_hours,
+        COALESCE(p.present_days, 0) AS present_days,
+        COALESCE(p.absence_days, 0) AS absence_days,
+        COALESCE(paid.amount, 0) AS paid
+     FROM payroll_records p
+     INNER JOIN employees e ON e.id = p.employee_id AND e.company_id = p.company_id
+     LEFT JOIN LATERAL (
+       SELECT COALESCE(SUM(sp.amount), 0) AS amount
+       FROM employee_salary_payments sp
+       WHERE sp.payroll_record_id = p.id
+     ) paid ON true
+     WHERE p.company_id = $1
+       AND p.year = $2
+       AND p.month = $3
+       ${branchSql}
+     ORDER BY p.net_salary DESC, e.name ASC`,
+    params
+  );
+
+  return {
+    year,
+    month,
+    employees: result.rows.map((row) => {
+      const net = round2(row.net_salary);
+      const paid = round2(row.paid);
+      const presentDays = round2(row.present_days);
+      const absenceDays = round2(row.absence_days);
+      return {
+        employee_id: row.employee_id,
+        employee_name: row.employee_name,
+        employee_code: row.employee_code,
+        net_salary: net,
+        deductions: round2(row.deductions),
+        advance: round2(row.advance),
+        incentive: round2(row.incentive),
+        overtime_hours: round2(row.overtime_hours),
+        present_days: presentDays,
+        absence_days: absenceDays,
+        leave_percentage: percent(absenceDays, presentDays + absenceDays),
+        paid,
+        outstanding: round2(net - paid),
+      };
+    }),
+  };
+}
+
 module.exports = {
   addMonths,
   buildPayrollOverviewRange,
   getPayrollOverview,
+  getPayrollMonthDetail,
 };

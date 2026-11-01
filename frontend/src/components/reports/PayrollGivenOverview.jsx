@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bar,
   BarChart,
@@ -55,6 +55,27 @@ function compactNumber(value) {
   }).format(Number(value) || 0);
 }
 
+function fullMonthLabel(row) {
+  if (!row?.year || !row?.month) return '';
+  return new Date(row.year, row.month - 1, 1).toLocaleString('default', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+function sameMonth(a, b) {
+  return Boolean(a && b && a.year === b.year && a.month === b.month);
+}
+
+function salarySlices(source) {
+  if (!source) return [];
+  return [
+    { name: 'Take-home', value: Number(source.net_salary) || 0, color: COLORS.net },
+    { name: 'Advance', value: Number(source.advance) || 0, color: COLORS.advance },
+    { name: 'Deductions', value: Number(source.deductions) || 0, color: COLORS.deductions },
+  ].filter((slice) => slice.value > 0);
+}
+
 function truncate(value, max = 16) {
   const text = String(value || '').trim();
   if (text.length <= max) return text;
@@ -105,6 +126,11 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [monthEmployees, setMonthEmployees] = useState([]);
+  const [monthEmployeesLoading, setMonthEmployeesLoading] = useState(false);
+  const [monthEmployeesError, setMonthEmployeesError] = useState('');
+  const detailRef = useRef(null);
 
   const years = useMemo(() => {
     const current = new Date().getFullYear();
@@ -144,19 +170,87 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
     };
   }, [preset, customYear, customMonth, branchId]);
 
+  useEffect(() => {
+    setSelectedMonth(null);
+  }, [preset, customYear, customMonth, branchId]);
+
+  useEffect(() => {
+    if (!selectedMonth || !Number(selectedMonth.records)) {
+      setMonthEmployees([]);
+      setMonthEmployeesError('');
+      setMonthEmployeesLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    async function loadMonth() {
+      setMonthEmployeesLoading(true);
+      setMonthEmployeesError('');
+      const params = new URLSearchParams({
+        year: String(selectedMonth.year),
+        month: String(selectedMonth.month),
+      });
+      if (branchId) params.set('branch_id', String(branchId));
+      try {
+        const res = await authFetch(`/api/reports/payroll-month?${params}`, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.message || 'Failed to load this month');
+        if (!cancelled) setMonthEmployees(json.data?.employees || []);
+      } catch (err) {
+        if (!cancelled) {
+          setMonthEmployees([]);
+          setMonthEmployeesError(err.message || 'Failed to load this month');
+        }
+      } finally {
+        if (!cancelled) setMonthEmployeesLoading(false);
+      }
+    }
+    loadMonth();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMonth, branchId]);
+
+  useEffect(() => {
+    if (!selectedMonth || !detailRef.current) return;
+    detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedMonth]);
+
   const totals = data?.totals;
   const months = data?.months || [];
   const multiMonth = months.length > 1;
   const fmt = (n) => formatMoneyWithSymbol(n, currency);
 
-  const composition = useMemo(() => {
-    if (!totals) return [];
-    return [
-      { name: 'Take-home', value: Number(totals.net_salary) || 0, color: COLORS.net },
-      { name: 'Advance', value: Number(totals.advance) || 0, color: COLORS.advance },
-      { name: 'Deductions', value: Number(totals.deductions) || 0, color: COLORS.deductions },
-    ].filter((slice) => slice.value > 0);
-  }, [totals]);
+  const composition = useMemo(
+    () => salarySlices(selectedMonth || totals),
+    [selectedMonth, totals]
+  );
+
+  function openMonth(row) {
+    if (!row?.year || !row?.month) return;
+    setSelectedMonth(row);
+  }
+
+  function openChartMonth(state) {
+    const fromPayload = state?.activePayload?.[0]?.payload;
+    if (fromPayload?.year) {
+      openMonth(fromPayload);
+      return;
+    }
+    const index = state?.activeTooltipIndex ?? state?.activeIndex;
+    if (index != null && index !== '' && months[Number(index)]?.year) {
+      openMonth(months[Number(index)]);
+      return;
+    }
+    if (state?.activeLabel) {
+      openMonth(months.find((item) => item.label === state.activeLabel));
+    }
+  }
+
+  function openBar(entry) {
+    openMonth(entry?.payload?.year ? entry.payload : entry);
+  }
 
   const topEmployees = useMemo(
     () =>
@@ -264,17 +358,33 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
           <div className={`mt-5 grid grid-cols-1 gap-4 ${multiMonth ? 'xl:grid-cols-2' : ''}`}>
             <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
               <h3 className="text-xs font-semibold text-slate-900">Payroll and advance</h3>
-              <p className="mt-0.5 text-[10px] text-slate-500">Net salary generated, and advance deducted, by month</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Click a month to see its payroll, advances, and who was paid</p>
               <div className="mt-2 h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={months} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                  <BarChart data={months} margin={{ left: 0, right: 8, top: 8, bottom: 0 }} onClick={openChartMonth}>
                     <CartesianGrid stroke={COLORS.grid} vertical={false} />
                     <XAxis dataKey="label" tick={{ fill: COLORS.tick, fontSize: 11 }} />
                     <YAxis tickFormatter={compactNumber} tick={{ fill: COLORS.tick, fontSize: 11 }} width={48} />
                     <Tooltip content={<MoneyTooltip currency={currency} />} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="net_salary" name="Payroll" fill={COLORS.net} radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="advance" name="Advance" fill={COLORS.advance} radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="net_salary" name="Payroll" fill={COLORS.net} radius={[4, 4, 0, 0]} cursor="pointer" onClick={openBar}>
+                      {months.map((row) => (
+                        <Cell
+                          key={`net-${row.year}-${row.month}`}
+                          fill={COLORS.net}
+                          fillOpacity={!selectedMonth || sameMonth(selectedMonth, row) ? 1 : 0.35}
+                        />
+                      ))}
+                    </Bar>
+                    <Bar dataKey="advance" name="Advance" fill={COLORS.advance} radius={[4, 4, 0, 0]} cursor="pointer" onClick={openBar}>
+                      {months.map((row) => (
+                        <Cell
+                          key={`adv-${row.year}-${row.month}`}
+                          fill={COLORS.advance}
+                          fillOpacity={!selectedMonth || sameMonth(selectedMonth, row) ? 1 : 0.35}
+                        />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -286,14 +396,14 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
                 <p className="mt-0.5 text-[10px] text-slate-500">Share of absence days, and attended days that started late</p>
                 <div className="mt-2 h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={months} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+                    <LineChart data={months} margin={{ left: 0, right: 8, top: 8, bottom: 0 }} onClick={openChartMonth}>
                       <CartesianGrid stroke={COLORS.grid} vertical={false} />
                       <XAxis dataKey="label" tick={{ fill: COLORS.tick, fontSize: 11 }} />
                       <YAxis unit="%" tick={{ fill: COLORS.tick, fontSize: 11 }} width={40} />
                       <Tooltip content={<MoneyTooltip currency={currency} />} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="leave_percentage" name="Leave %" stroke={COLORS.leave} strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="late_percentage" name="Late %" stroke={COLORS.late} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="leave_percentage" name="Leave %" stroke={COLORS.leave} strokeWidth={2} dot={{ r: 3, cursor: 'pointer' }} activeDot={{ r: 5, cursor: 'pointer' }} />
+                      <Line type="monotone" dataKey="late_percentage" name="Late %" stroke={COLORS.late} strokeWidth={2} dot={{ r: 3, cursor: 'pointer' }} activeDot={{ r: 5, cursor: 'pointer' }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -323,10 +433,110 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
             )}
           </div>
 
-          {multiMonth && composition.length > 0 ? (
+          {selectedMonth ? (
+            <article ref={detailRef} className="mt-4 rounded-xl border border-blue-200 bg-blue-50/40 p-3 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">{fullMonthLabel(selectedMonth)}</h3>
+                  <p className="mt-0.5 text-[10px] text-slate-500">
+                    {Number(selectedMonth.records)
+                      ? `${selectedMonth.employees} employee${Number(selectedMonth.employees) === 1 ? '' : 's'} on this payroll`
+                      : 'No payroll was generated for this month'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMonth(null)}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:border-slate-300"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+                <Stat label="Payroll" value={fmt(selectedMonth.net_salary)} hint="Net salary generated" tone="blue" />
+                <Stat label="Advance" value={fmt(selectedMonth.advance)} hint="Diary and loan deducted" tone="amber" />
+                <Stat label="Deductions" value={fmt(selectedMonth.deductions)} hint="Other salary deductions" tone="rose" />
+                <Stat label="Salary paid" value={fmt(selectedMonth.paid)} hint={`Outstanding ${fmt(selectedMonth.outstanding)}`} tone="emerald" />
+                <Stat label="Leave" value={`${selectedMonth.leave_percentage ?? 0}%`} hint={`${selectedMonth.absence_days ?? 0} absence days`} />
+                <Stat label="Late" value={`${selectedMonth.late_percentage ?? 0}%`} hint={`${selectedMonth.late_days ?? 0} late days`} />
+                <Stat label="Overtime" value={`${selectedMonth.overtime_hours ?? 0} h`} hint="Hours on payroll" />
+                <Stat
+                  label="Incentive"
+                  value={fmt(selectedMonth.incentive)}
+                  hint={`${selectedMonth.employees ?? 0} employee${Number(selectedMonth.employees) === 1 ? '' : 's'}`}
+                />
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-5">
+                <div className="rounded-xl border border-slate-200 bg-white p-3 xl:col-span-2">
+                  <h4 className="text-xs font-semibold text-slate-900">Where the salary went</h4>
+                  <p className="mt-0.5 text-[10px] text-slate-500">Take-home, advance, and other deductions this month</p>
+                  <div className="mt-2 h-52">
+                    {salarySlices(selectedMonth).length === 0 ? (
+                      <p className="px-2 py-8 text-center text-xs text-slate-500">Nothing to chart for this month.</p>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={salarySlices(selectedMonth)} dataKey="value" nameKey="name" innerRadius={46} outerRadius={70} paddingAngle={2}>
+                            {salarySlices(selectedMonth).map((slice) => (
+                              <Cell key={slice.name} fill={slice.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip content={<MoneyTooltip currency={currency} />} />
+                          <Legend wrapperStyle={{ fontSize: 11 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </div>
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white xl:col-span-3">
+                  <div className="border-b border-slate-100 px-3 py-2">
+                    <h4 className="text-xs font-semibold text-slate-900">Employees</h4>
+                    <p className="mt-0.5 text-[10px] text-slate-500">Each person’s generated payroll for {fullMonthLabel(selectedMonth)}</p>
+                  </div>
+                  {monthEmployeesError ? (
+                    <p className="px-3 py-4 text-xs text-rose-700">{monthEmployeesError}</p>
+                  ) : monthEmployeesLoading ? (
+                    <p className="px-3 py-4 text-xs text-slate-500">Loading employees…</p>
+                  ) : monthEmployees.length === 0 ? (
+                    <p className="px-3 py-4 text-xs text-slate-500">No employees on this payroll.</p>
+                  ) : (
+                    <div className="max-h-80 overflow-auto">
+                      <table className="min-w-full text-left text-[11px]">
+                        <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                          <tr>
+                            {['Employee', 'Payroll', 'Advance', 'Deductions', 'Paid', 'Leave', 'Overtime'].map((heading) => (
+                              <th key={heading} className="whitespace-nowrap px-3 py-2 font-semibold">{heading}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {monthEmployees.map((row) => (
+                            <tr key={row.employee_id} className="border-t border-slate-100">
+                              <td className="whitespace-nowrap px-3 py-2">
+                                <p className="font-medium text-slate-800">{row.employee_name || 'Employee'}</p>
+                                {row.employee_code ? <p className="text-[10px] text-slate-500">{row.employee_code}</p> : null}
+                              </td>
+                              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmt(row.net_salary)}</td>
+                              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmt(row.advance)}</td>
+                              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmt(row.deductions)}</td>
+                              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{fmt(row.paid)}</td>
+                              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{row.leave_percentage}%</td>
+                              <td className="whitespace-nowrap px-3 py-2 tabular-nums">{row.overtime_hours} h</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </article>
+          ) : null}
+
+          {!selectedMonth && multiMonth && composition.length > 0 ? (
             <article className="mt-4 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
               <h3 className="text-xs font-semibold text-slate-900">Where the salary went</h3>
-              <p className="mt-0.5 text-[10px] text-slate-500">Combined take-home, advance, and other deductions</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Combined take-home, advance, and other deductions. Click a month above to see that month alone.</p>
               <div className="mt-2 h-56">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -372,7 +582,13 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
               </thead>
               <tbody>
                 {months.map((row) => (
-                  <tr key={`${row.year}-${row.month}`} className="border-t border-slate-100">
+                  <tr
+                    key={`${row.year}-${row.month}`}
+                    onClick={() => openMonth(row)}
+                    className={`cursor-pointer border-t border-slate-100 ${
+                      sameMonth(selectedMonth, row) ? 'bg-blue-50' : 'hover:bg-slate-50'
+                    }`}
+                  >
                     <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-800">{row.label}</td>
                     <td className="px-3 py-2 tabular-nums">{row.employees}</td>
                     <td className="px-3 py-2 tabular-nums">{fmt(row.net_salary)}</td>
