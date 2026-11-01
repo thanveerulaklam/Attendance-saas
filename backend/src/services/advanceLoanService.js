@@ -109,6 +109,71 @@ function isFlexibleLoan(loan) {
   return Number(loan.total_installments || 1) === 1;
 }
 
+function repaymentWasAutoRolled(row) {
+  const notes = String(row?.notes || '');
+  return /Rolled forward to \d+\/\d+ for payroll/.test(notes)
+    || /Moved to \d+\/\d+ for payroll/.test(notes);
+}
+
+/** Payroll for this month still has an unpaid balance, so its loan installment should stay here. */
+async function payrollMonthIsStillOpen(client, companyId, employeeId, year, month) {
+  const result = await client.query(
+    `SELECT p.net_salary,
+            COALESCE((
+              SELECT SUM(sp.amount)
+              FROM employee_salary_payments sp
+              WHERE sp.payroll_record_id = p.id
+            ), 0) AS paid
+     FROM payroll_records p
+     WHERE p.company_id = $1
+       AND p.employee_id = $2
+       AND p.year = $3
+       AND p.month = $4
+     LIMIT 1`,
+    [companyId, Number(employeeId), Number(year), Number(month)]
+  );
+  if (result.rowCount === 0) return false;
+  return Number(result.rows[0].paid || 0) < Number(result.rows[0].net_salary || 0);
+}
+
+/**
+ * Put an installment back on an unpaid payroll month after it was auto-moved to a later month.
+ */
+async function restoreRolledInstallmentToOpenPayroll(client, loan, companyId, year, month, pending) {
+  if (!(await payrollMonthIsStillOpen(client, companyId, loan.employee_id, year, month))) {
+    return;
+  }
+
+  const occupied = await client.query(
+    `SELECT id
+     FROM employee_advance_repayments
+     WHERE company_id = $1 AND loan_id = $2 AND year = $3 AND month = $4
+     LIMIT 1`,
+    [companyId, loan.id, Number(year), Number(month)]
+  );
+  if (occupied.rowCount > 0) return;
+
+  const laterRolled = (pending || [])
+    .filter((row) => isAfterMonth(row.year, row.month, year, month) && repaymentWasAutoRolled(row))
+    .sort((a, b) => (Number(a.year) - Number(b.year)) || (Number(a.month) - Number(b.month)));
+  if (laterRolled.length === 0) return;
+
+  const row = laterRolled[0];
+  const note = `Kept on ${month}/${year} because that payroll is still unpaid`;
+  await client.query(
+    `UPDATE employee_advance_repayments
+     SET year = $3,
+         month = $4,
+         notes = CASE
+           WHEN notes IS NULL OR notes = '' THEN $5
+           ELSE notes || E'\n' || $5
+         END,
+         updated_at = NOW()
+     WHERE company_id = $1 AND id = $2 AND status = 'pending'`,
+    [companyId, row.id, Number(year), Number(month), note]
+  );
+}
+
 async function getCompanyCalendarMonth(companyId, queryable = pool) {
   const result = await queryable.query(
     `SELECT timezone FROM companies WHERE id = $1`,
@@ -238,6 +303,15 @@ async function syncFlexibleLoanDeduction(
     pending.length > 1 ||
     isBeforeMonth(primaryYear, primaryMonth, ty, tm) ||
     isAfterMonth(primaryYear, primaryMonth, ty, tm);
+
+  if (
+    needsMove
+    && pending.length === 1
+    && isBeforeMonth(primaryYear, primaryMonth, ty, tm)
+    && await payrollMonthIsStillOpen(client, companyId, loan.employee_id, primaryYear, primaryMonth)
+  ) {
+    return;
+  }
 
   if (!needsMove) {
     if (consolidatedAmount !== Number(primary.repayment_amount || 0)) {
@@ -380,7 +454,7 @@ async function ensureDueRepaymentsForPayrollMonth(companyId, payrollYear, payrol
       }
 
       const pendingResult = await client.query(
-        `SELECT id, year, month, repayment_amount
+        `SELECT id, year, month, repayment_amount, notes
          FROM employee_advance_repayments
          WHERE company_id = $1 AND loan_id = $2 AND status = 'pending'
          ORDER BY year ASC, month ASC`,
@@ -407,15 +481,25 @@ async function ensureDueRepaymentsForPayrollMonth(companyId, payrollYear, payrol
       }
 
       if (duePending.length === 0) {
+        await restoreRolledInstallmentToOpenPayroll(client, loan, companyId, py, pm, pending);
         continue;
       }
 
       const exactPayrollRow = duePending.find(
         (row) => Number(row.year) === py && Number(row.month) === pm
       );
-      const overdueRows = duePending.filter(
-        (row) => !(Number(row.year) === py && Number(row.month) === pm)
-      );
+      const overdueRows = [];
+      for (const row of duePending) {
+        if (Number(row.year) === py && Number(row.month) === pm) continue;
+        const stillOpen = await payrollMonthIsStillOpen(
+          client,
+          companyId,
+          loan.employee_id,
+          row.year,
+          row.month
+        );
+        if (!stillOpen) overdueRows.push(row);
+      }
 
       if (overdueRows.length === 0) {
         continue;

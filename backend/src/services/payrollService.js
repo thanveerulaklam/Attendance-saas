@@ -3502,6 +3502,10 @@ async function listPayrollRecords(
     };
   }
 
+  if (year != null && year !== '' && month != null && month !== '') {
+    await ensureDueRepaymentsForPayrollMonth(companyId, Number(year), Number(month));
+  }
+
   const conditions = ['p.company_id = $1'];
   const params = [companyId];
   let paramIndex = 2;
