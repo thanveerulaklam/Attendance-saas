@@ -187,7 +187,7 @@ export default function PayrollGivenOverview({ branchId = '', currency = 'INR' }
               onClick={() => setPreset(item.id)}
               className={`rounded-full border px-3 py-1.5 text-[11px] font-medium ${
                 preset === item.id
-                  ? 'border-primary-600 bg-primary-600 text-white'
+                  ? 'border-blue-700 bg-blue-600 text-white shadow-sm'
                   : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
               }`}
             >
