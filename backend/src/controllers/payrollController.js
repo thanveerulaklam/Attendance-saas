@@ -101,7 +101,7 @@ async function generate(req, res, next) {
     const noLeaveIncentive = hasNoLeaveIncentiveInput
       ? Math.max(0, Number(noLeaveIncentiveRaw) || 0)
       : undefined;
-    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw !== false && encashUnusedPaidLeaveRaw !== 'false';
+    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw === true;
 
     if (!companyId || !employeeId || !year || !month) {
       return res.status(400).json({
@@ -162,7 +162,7 @@ async function generateAll(req, res, next) {
     const noLeaveIncentive = hasNoLeaveIncentiveInput
       ? Math.max(0, Number(noLeaveIncentiveRaw) || 0)
       : undefined;
-    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw !== false && encashUnusedPaidLeaveRaw !== 'false';
+    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw === true;
 
     if (!companyId || !year || !month || month < 1 || month > 12) {
       return res.status(400).json({

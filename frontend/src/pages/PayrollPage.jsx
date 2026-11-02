@@ -584,7 +584,7 @@ export default function PayrollPage() {
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
-    encashUnusedPaidLeave: true,
+    encashUnusedPaidLeave: false,
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
@@ -3372,7 +3372,7 @@ export default function PayrollPage() {
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    Adds each employee’s unused paid leave for this month. Full absent days and half days both count as leave taken, so 4 days allowed and 2.5 taken adds the remaining 1.5 days. Generate for all applies it to everyone. Only a completed month is included.
+                    Adds unused shift paid leave to salary only when this is ticked. Full absent days and half days both count as leave taken. Applies only when the month is complete.
                   </p>
                   <label className="text-[11px] font-medium text-slate-700">
                     Incentive for no leave ({moneySym})
