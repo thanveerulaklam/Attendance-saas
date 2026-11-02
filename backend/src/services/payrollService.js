@@ -2657,6 +2657,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     treatHolidayAdjacentAbsenceAsWorking = false,
     apply_advance_repayments: applyAdvanceRepaymentsRaw = true,
     noLeaveIncentive = undefined,
+    encashUnusedPaidLeave = true,
     allowedBranchIds = null,
     deferKeys = null,
     defer_keys: deferKeysSnake = null,
@@ -2755,7 +2756,7 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
       : Number(summary.rawAbsenceDays || summary.absenceDays || 0);
     const { unusedPaidLeaveDays, paidLeaveEncashmentAmount } =
       computePaidLeaveEncashment({
-        enabled: true,
+        enabled: encashUnusedPaidLeave,
         isMonthComplete,
         paidLeaveDaysAllowed,
         paidLeaveUsed,
@@ -3011,6 +3012,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const {
     includeOvertime = true,
     treatHolidayAdjacentAbsenceAsWorking = false,
+    encashUnusedPaidLeave = true,
     allowedBranchIds = null,
   } = options;
 
@@ -3142,7 +3144,7 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     : Number(summary.rawAbsenceDays || summary.absenceDays || 0);
   const { unusedPaidLeaveDays: unusedPaidLeaveDaysComputed, paidLeaveEncashmentAmount: paidLeaveEncashmentComputed } =
     computePaidLeaveEncashment({
-      enabled: true,
+      enabled: encashUnusedPaidLeave,
       isMonthComplete,
       paidLeaveDaysAllowed,
       paidLeaveUsed,
@@ -4293,6 +4295,7 @@ async function recalculateMonthlyPayrollFromAttendance(companyId, payrollId, opt
       treatHolidayAdjacentAbsenceAsWorking: existing.treat_holiday_adjacent_absence_as_working === true,
       apply_advance_repayments: false,
       noLeaveIncentive: preservedIncentive,
+      encashUnusedPaidLeave: options.encashUnusedPaidLeave !== false,
       allowedBranchIds,
     }
   );

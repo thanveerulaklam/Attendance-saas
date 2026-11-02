@@ -84,6 +84,7 @@ async function generate(req, res, next) {
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       apply_advance_repayments: applyAdvanceRepaymentsRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
+      encash_unused_paid_leave: encashUnusedPaidLeaveRaw,
       defer_keys: deferKeysRaw,
     } = req.body || {};
 
@@ -100,6 +101,8 @@ async function generate(req, res, next) {
     const noLeaveIncentive = hasNoLeaveIncentiveInput
       ? Math.max(0, Number(noLeaveIncentiveRaw) || 0)
       : undefined;
+    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw !== false && encashUnusedPaidLeaveRaw !== 'false';
+
     if (!companyId || !employeeId || !year || !month) {
       return res.status(400).json({
         success: false,
@@ -112,6 +115,7 @@ async function generate(req, res, next) {
       treatHolidayAdjacentAbsenceAsWorking,
       apply_advance_repayments: applyAdvanceRepayments,
       noLeaveIncentive,
+      encashUnusedPaidLeave,
       allowedBranchIds: req.allowedBranchIds,
       defer_keys: Array.isArray(deferKeysRaw) ? deferKeysRaw : [],
     });
@@ -143,6 +147,7 @@ async function generateAll(req, res, next) {
       treat_holiday_adjacent_absence_as_working: treatHolidayRaw,
       apply_advance_repayments: applyAdvanceRepaymentsRaw,
       no_leave_incentive: noLeaveIncentiveRaw,
+      encash_unused_paid_leave: encashUnusedPaidLeaveRaw,
     } = req.body || {};
 
     const year = Number(yearRaw);
@@ -157,6 +162,8 @@ async function generateAll(req, res, next) {
     const noLeaveIncentive = hasNoLeaveIncentiveInput
       ? Math.max(0, Number(noLeaveIncentiveRaw) || 0)
       : undefined;
+    const encashUnusedPaidLeave = encashUnusedPaidLeaveRaw !== false && encashUnusedPaidLeaveRaw !== 'false';
+
     if (!companyId || !year || !month || month < 1 || month > 12) {
       return res.status(400).json({
         success: false,
@@ -175,6 +182,7 @@ async function generateAll(req, res, next) {
       treatHolidayAdjacentAbsenceAsWorking,
       apply_advance_repayments: applyAdvanceRepayments,
       noLeaveIncentive,
+      encashUnusedPaidLeave,
       allowedBranchIds,
     });
 

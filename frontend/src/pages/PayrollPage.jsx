@@ -584,6 +584,7 @@ export default function PayrollPage() {
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
+    encashUnusedPaidLeave: true,
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
@@ -2241,6 +2242,7 @@ export default function PayrollPage() {
           include_overtime: generateForm.includeOvertime !== false,
           treat_holiday_adjacent_absence_as_working:
             generateForm.treatHolidayAdjacentAbsenceAsWorking === true,
+          encash_unused_paid_leave: generateForm.encashUnusedPaidLeave === true,
           apply_advance_repayments: generateForm.applyAdvanceRepayments === true,
         };
         if (noLeaveIncentiveRaw !== '') {
@@ -3353,8 +3355,24 @@ export default function PayrollPage() {
                   <p className="text-[10px] text-slate-500">
                     Deducts each employee’s pending advance for this month, across all their loans. Money already recorded on the Advance page is not deducted again. If unchecked, the pending amount stays due and can be deducted per employee from the payroll table.
                   </p>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={generateForm.encashUnusedPaidLeave === true}
+                      onChange={(e) =>
+                        setGenerateForm((f) => ({
+                          ...f,
+                          encashUnusedPaidLeave: e.target.checked,
+                        }))
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-[11px] text-slate-700">
+                      Encash unused paid leave (full month only)
+                    </span>
+                  </label>
                   <p className="text-[10px] text-slate-500">
-                    Unused paid leave is added to salary automatically once the month is complete. Taken leave is full absent days plus half days. For example, 4 days allowed and 2.5 taken adds the remaining 1.5 days.
+                    Adds unused shift paid leave value to gross salary. Applies only when month is complete.
                   </p>
                   <label className="text-[11px] font-medium text-slate-700">
                     Incentive for no leave ({moneySym})
