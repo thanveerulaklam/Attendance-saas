@@ -3372,7 +3372,7 @@ export default function PayrollPage() {
                     </span>
                   </label>
                   <p className="text-[10px] text-slate-500">
-                    Adds unused shift paid leave value to gross salary. Applies only when month is complete.
+                    Adds each employee’s unused paid leave for this month. Full absent days and half days both count as leave taken, so 4 days allowed and 2.5 taken adds the remaining 1.5 days. Generate for all applies it to everyone. Only a completed month is included.
                   </p>
                   <label className="text-[11px] font-medium text-slate-700">
                     Incentive for no leave ({moneySym})
