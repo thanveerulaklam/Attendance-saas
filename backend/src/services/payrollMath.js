@@ -95,6 +95,13 @@ function computeFlexibleMonthlySettlement({
   };
 }
 
+/** Full-day absences only. A half day is not a paid-leave day. */
+function fullDayAbsencesForPaidLeave(rawAbsenceDays, halfDayDays) {
+  const raw = Math.max(0, Number(rawAbsenceDays || 0));
+  const half = Math.max(0, Number(halfDayDays || 0)) * 0.5;
+  return Math.max(0, Math.round((raw - half) * 100) / 100);
+}
+
 function computePaidLeaveEncashment({
   enabled,
   isMonthComplete,
@@ -122,5 +129,6 @@ module.exports = {
   computePermissionOffset,
   computeFlexibleMonthlySettlement,
   computePaidLeaveEncashment,
+  fullDayAbsencesForPaidLeave,
 };
 

@@ -36,6 +36,7 @@ const {
   computePermissionOffset,
   computeFlexibleMonthlySettlement,
   computePaidLeaveEncashment,
+  fullDayAbsencesForPaidLeave,
 } = require('./payrollMath');
 const { normalizeMode } = require('../utils/statutoryDeductions');
 const { getCompanyTimezone } = require('./companyService');
@@ -2754,12 +2755,16 @@ async function generateMonthlyPayroll(companyId, employeeId, year, month, payrol
     const absenceDaysForPayroll = isMonthComplete
       ? Number(summary.absenceDays || 0)
       : Number(summary.rawAbsenceDays || summary.absenceDays || 0);
+    const paidLeaveTaken = Math.min(
+      paidLeaveDaysAllowed,
+      fullDayAbsencesForPaidLeave(summary.rawAbsenceDays, summary.halfDayDays)
+    );
     const { unusedPaidLeaveDays, paidLeaveEncashmentAmount } =
       computePaidLeaveEncashment({
         enabled: encashUnusedPaidLeave,
         isMonthComplete,
         paidLeaveDaysAllowed,
-        paidLeaveUsed,
+        paidLeaveUsed: paidLeaveTaken,
         dailyRate,
       });
 
@@ -3142,12 +3147,16 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
   const absenceDaysForPayroll = isMonthComplete
     ? Number(summary.absenceDays || 0)
     : Number(summary.rawAbsenceDays || summary.absenceDays || 0);
+  const paidLeaveTaken = Math.min(
+    paidLeaveDaysAllowed,
+    fullDayAbsencesForPaidLeave(summary.rawAbsenceDays, summary.halfDayDays)
+  );
   const { unusedPaidLeaveDays: unusedPaidLeaveDaysComputed, paidLeaveEncashmentAmount: paidLeaveEncashmentComputed } =
     computePaidLeaveEncashment({
       enabled: encashUnusedPaidLeave,
       isMonthComplete,
       paidLeaveDaysAllowed,
-      paidLeaveUsed,
+      paidLeaveUsed: paidLeaveTaken,
       dailyRate,
     });
 
