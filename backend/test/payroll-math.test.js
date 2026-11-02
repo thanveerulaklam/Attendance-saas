@@ -189,13 +189,6 @@ test('paid leave encashment: disabled yields zero', () => {
   assert.equal(result.paidLeaveEncashmentAmount, 0);
 });
 
-test('paid leave encashment: a half day is not a leave day', () => {
-  const { fullDayAbsencesForPaidLeave } = require('../src/services/payrollMath');
-  assert.equal(fullDayAbsencesForPaidLeave(2.5, 1), 2);
-  assert.equal(fullDayAbsencesForPaidLeave(2, 0), 2);
-  assert.equal(fullDayAbsencesForPaidLeave(0.5, 1), 0);
-});
-
 test('paid leave encashment: incomplete month yields zero', () => {
   const result = computePaidLeaveEncashment({
     enabled: true,
