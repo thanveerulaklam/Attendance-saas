@@ -584,7 +584,7 @@ export default function PayrollPage() {
     includeOvertime: false,
     treatHolidayAdjacentAbsenceAsWorking: false,
     applyAdvanceRepayments: false,
-    encashUnusedPaidLeave: false,
+    encashUnusedPaidLeave: true,
     noLeaveIncentive: '',
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
