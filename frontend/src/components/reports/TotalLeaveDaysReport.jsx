@@ -132,6 +132,12 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
   const [periodLabel, setPeriodLabel] = useState('');
   const [selectedId, setSelectedId] = useState(null);
   const requestRef = useRef(0);
+  const detailRef = useRef(null);
+
+  useEffect(() => {
+    if (!selectedId || !detailRef.current) return;
+    detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selectedId]);
 
   useEffect(() => {
     requestRef.current += 1;
@@ -391,16 +397,33 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
       periodLabel: `${`${selected.employee_code || ''} ${name}`.trim()} · ${periodLabel || ''}`.trim(),
       generatedAt: new Date().toLocaleString(),
     });
+    const totalLabel = `${formatLeaveDays(selected.totalLeaveDays)} leave days (${selected.fullAbsent} full absent, ${selected.halfDays} half days)`;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Total: ${totalLabel}`, 40, startY);
     const body = (selected.leaveDates || []).map((entry) => [
       entry.date,
       formatLeaveDate(entry.date),
       entry.kind === 'half' ? 'Half day' : 'Absent',
     ]);
+    if (body.length === 0) body.push(['—', 'No absent days in this period', '']);
+    body.push(['', 'Total', totalLabel]);
+    const totalRowIndex = body.length - 1;
     addAutoTable(
       doc,
       [['Date', 'Day', 'Status']],
-      body.length > 0 ? body : [['—', 'No absent days in this period', '']],
-      { startY, margin: { left: 32, right: 32 }, styles: { fontSize: 10 } }
+      body,
+      {
+        startY: startY + 16,
+        margin: { left: 32, right: 32 },
+        styles: { fontSize: 10 },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.row.index === totalRowIndex) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [241, 245, 249];
+          }
+        },
+      }
     );
     const safeName = String(selected.name || 'employee').replace(/\s+/g, '');
     savePdf(doc, `LeaveDates_${selected.employee_code || safeName}.pdf`);
@@ -519,7 +542,7 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
       ) : null}
 
       {selected ? (
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+        <div ref={detailRef} className="mt-4 scroll-mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className={`text-sm font-semibold ${selected.deactivated ? 'text-red-600' : 'text-slate-900'}`}>
