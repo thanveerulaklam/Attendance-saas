@@ -50,6 +50,17 @@ function formatLeaveDays(value) {
   return Number.isInteger(n) ? String(n) : n.toFixed(1);
 }
 
+function formatLeaveDate(ymd) {
+  const [y, m, d] = String(ymd || '').slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return String(ymd || '');
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 function getWeeklyOffDays(employeeRow, shiftById, companyWeeklyOffDays) {
   const sid = employeeRow?.shift_id != null ? Number(employeeRow.shift_id) : null;
   if (sid && shiftById.has(sid)) {
@@ -119,12 +130,14 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
   const [error, setError] = useState('');
   const [rows, setRows] = useState([]);
   const [periodLabel, setPeriodLabel] = useState('');
+  const [selectedId, setSelectedId] = useState(null);
   const requestRef = useRef(0);
 
   useEffect(() => {
     requestRef.current += 1;
     setRows([]);
     setPeriodLabel('');
+    setSelectedId(null);
     setError('');
     setLoading(false);
   }, [year, month, branchId, fromDate, toDate]);
@@ -248,6 +261,7 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
         const weeklyOffDays = getWeeklyOffDays(meta, shiftById, companyWeeklyOffDays);
         let fullAbsent = 0;
         let halfDays = 0;
+        const leaveDates = [];
         const seen = new Set();
         emp.days.forEach((day) => {
           const date = String(day?.date || '').slice(0, 10);
@@ -263,9 +277,16 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
             holidayOverrideDates,
             weeklyOffDays,
           });
-          if (kind === 'absent') fullAbsent += 1;
-          if (kind === 'half') halfDays += 1;
+          if (kind === 'absent') {
+            fullAbsent += 1;
+            leaveDates.push({ date, kind: 'absent' });
+          }
+          if (kind === 'half') {
+            halfDays += 1;
+            leaveDates.push({ date, kind: 'half' });
+          }
         });
+        leaveDates.sort((a, b) => a.date.localeCompare(b.date));
 
         nextRows.push({
           employee_id: emp.employee_id,
@@ -275,6 +296,7 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
           fullAbsent,
           halfDays,
           totalLeaveDays: fullAbsent + halfDays * 0.5,
+          leaveDates,
         });
       });
 
@@ -355,11 +377,40 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
     savePdf(doc, `TotalLeaveDays_${slug}.pdf`);
   };
 
+  const selected = rows.find((row) => row.employee_id === selectedId) || null;
+
+  const exportSelectedPdf = () => {
+    if (!selected) return;
+    const doc = createPdf();
+    const name = selected.deactivated ? `${selected.name} (Deactivated)` : selected.name;
+    const startY = addReportHeader(doc, {
+      companyName: company?.name,
+      companyPhone: company?.phone,
+      companyAddress: company?.address,
+      title: 'Leave dates',
+      periodLabel: `${`${selected.employee_code || ''} ${name}`.trim()} · ${periodLabel || ''}`.trim(),
+      generatedAt: new Date().toLocaleString(),
+    });
+    const body = (selected.leaveDates || []).map((entry) => [
+      entry.date,
+      formatLeaveDate(entry.date),
+      entry.kind === 'half' ? 'Half day' : 'Absent',
+    ]);
+    addAutoTable(
+      doc,
+      [['Date', 'Day', 'Status']],
+      body.length > 0 ? body : [['—', 'No absent days in this period', '']],
+      { startY, margin: { left: 32, right: 32 }, styles: { fontSize: 10 } }
+    );
+    const safeName = String(selected.name || 'employee').replace(/\s+/g, '');
+    savePdf(doc, `LeaveDates_${selected.employee_code || safeName}.pdf`);
+  };
+
   return (
     <SectionShell
       badge="Leave"
       title="Total leave days"
-      description="Total absent days for each employee. A half day counts as 0.5. Weekly offs and holidays are not counted."
+      description="Total absent days for each employee. Click a name to see the dates. A half day counts as 0.5. Weekly offs and holidays are not counted."
       accent="blue"
     >
       <div className="grid gap-4 sm:grid-cols-2">
@@ -434,18 +485,25 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
-                <tr key={row.employee_id} className="border-b border-slate-100">
-                  <td className="px-2 py-1.5">{row.employee_code}</td>
-                  <td className={`px-2 py-1.5 ${row.deactivated ? 'text-red-600' : ''}`}>
-                    {row.name}
-                    {row.deactivated ? ' — deactivated' : ''}
-                  </td>
-                  <td className="px-2 py-1.5 text-right">{row.fullAbsent}</td>
-                  <td className="px-2 py-1.5 text-right">{row.halfDays}</td>
-                  <td className="px-2 py-1.5 text-right font-medium">{formatLeaveDays(row.totalLeaveDays)}</td>
-                </tr>
-              ))}
+              {rows.map((row) => {
+                const open = selectedId === row.employee_id;
+                return (
+                  <tr
+                    key={row.employee_id}
+                    className={`cursor-pointer border-b border-slate-100 hover:bg-slate-50 ${open ? 'bg-blue-50' : ''}`}
+                    onClick={() => setSelectedId(open ? null : row.employee_id)}
+                  >
+                    <td className="px-2 py-1.5">{row.employee_code}</td>
+                    <td className={`px-2 py-1.5 ${row.deactivated ? 'text-red-600' : 'text-blue-700'}`}>
+                      {row.name}
+                      {row.deactivated ? ' — deactivated' : ''}
+                    </td>
+                    <td className="px-2 py-1.5 text-right">{row.fullAbsent}</td>
+                    <td className="px-2 py-1.5 text-right">{row.halfDays}</td>
+                    <td className="px-2 py-1.5 text-right font-medium">{formatLeaveDays(row.totalLeaveDays)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr className="border-t border-slate-200 font-semibold text-slate-900">
@@ -457,6 +515,65 @@ export default function TotalLeaveDaysReport({ year, month, branchId, company })
               </tr>
             </tfoot>
           </table>
+        </div>
+      ) : null}
+
+      {selected ? (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className={`text-sm font-semibold ${selected.deactivated ? 'text-red-600' : 'text-slate-900'}`}>
+                {selected.employee_code ? `${selected.employee_code} ` : ''}
+                {selected.name}
+                {selected.deactivated ? ' — deactivated' : ''}
+              </p>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                {periodLabel} · {formatLeaveDays(selected.totalLeaveDays)} leave days
+                {' · '}
+                {selected.fullAbsent} full absent
+                {' · '}
+                {selected.halfDays} half days
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={exportSelectedPdf}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-800 shadow-sm hover:bg-slate-50"
+              >
+                Download dates PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedId(null)}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600 shadow-sm hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          {selected.leaveDates.length === 0 ? (
+            <p className="mt-3 text-[11px] text-slate-500">No absent days in this period.</p>
+          ) : (
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-left text-[11px] text-slate-800">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500">
+                    <th className="px-2 py-2 font-medium">Date</th>
+                    <th className="px-2 py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selected.leaveDates.map((entry) => (
+                    <tr key={entry.date} className="border-b border-slate-100">
+                      <td className="px-2 py-1.5">{formatLeaveDate(entry.date)}</td>
+                      <td className="px-2 py-1.5">{entry.kind === 'half' ? 'Half day' : 'Absent'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
 
