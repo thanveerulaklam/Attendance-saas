@@ -31,6 +31,7 @@ import {
   SectionShell,
 } from '../components/reports/ReportsInsights';
 import PayrollGivenOverview from '../components/reports/PayrollGivenOverview';
+import TotalLeaveDaysReport from '../components/reports/TotalLeaveDaysReport';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -1445,6 +1446,13 @@ export default function ReportsPage() {
           </ul>
         </div>
       </SectionShell>
+
+      <TotalLeaveDaysReport
+        year={year}
+        month={month}
+        branchId={reportBranchFilter}
+        company={company}
+      />
 
       <SectionShell
         badge="Advanced"
