@@ -41,7 +41,10 @@ async function getSyncIssuesByDeviceIds(companyId, deviceIds) {
            SELECT 1 FROM employees e
            WHERE e.company_id = r.company_id
              AND e.status = 'active'
-             AND e.branch_id = d.branch_id
+             AND (
+               e.branch_id = d.branch_id
+               OR (r.reason = 'wrong_branch' AND e.multi_branch_punch IS TRUE)
+             )
              AND (
                e.employee_code = r.employee_code
                OR (

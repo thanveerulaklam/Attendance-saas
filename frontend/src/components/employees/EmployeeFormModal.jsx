@@ -45,6 +45,7 @@ export default function EmployeeFormModal({
   const [status, setStatus] = useState('active');
   const [shiftId, setShiftId] = useState('');
   const [branchId, setBranchId] = useState('');
+  const [multiBranchPunch, setMultiBranchPunch] = useState(false);
   const [payrollFrequency, setPayrollFrequency] = useState('monthly');
   const [salaryType, setSalaryType] = useState('monthly');
 
@@ -194,6 +195,7 @@ export default function EmployeeFormModal({
         setBranchId(
           employee.branch_id != null ? String(employee.branch_id) : ''
         );
+        setMultiBranchPunch(employee.multi_branch_punch === true);
         setPayrollFrequency(employee.payroll_frequency || 'monthly');
         setSalaryType(employee.salary_type || 'monthly');
         setAttendanceChannel(employee.attendance_channel || 'device');
@@ -229,6 +231,7 @@ export default function EmployeeFormModal({
         setStatus('active');
         setShiftId('');
         setBranchId('');
+        setMultiBranchPunch(false);
         setPayrollFrequency('monthly');
         setSalaryType('monthly');
         setAttendanceChannel('device');
@@ -487,6 +490,7 @@ export default function EmployeeFormModal({
         payroll_frequency: payrollFrequency,
         salary_type: salaryType,
         attendance_channel: attendanceChannel,
+        multi_branch_punch: multiBranchPunch,
       };
 
       const resolvedBranch =
@@ -1277,6 +1281,20 @@ export default function EmployeeFormModal({
               <p className="mt-0.5 text-[11px] text-slate-500">
                 Employees are tied to one location. HR users only see branches assigned to them; leave as default if you have one branch.
               </p>
+              <label className="mt-3 flex items-start gap-2 text-xs text-slate-800">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 rounded border-slate-300"
+                  checked={multiBranchPunch}
+                  onChange={(e) => setMultiBranchPunch(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-slate-700">Allow punch on any branch device</span>
+                  <span className="mt-0.5 block text-[11px] font-normal text-slate-500">
+                    Attendance still counts on the selected home branch. Use this when the person punches one branch in the morning and another in the evening.
+                  </span>
+                </span>
+              </label>
               {errors.branch_id && (
                 <p className="mt-1 text-[11px] text-rose-600">{errors.branch_id}</p>
               )}

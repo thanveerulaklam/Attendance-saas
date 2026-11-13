@@ -19,6 +19,13 @@ const ensureNoErrors = (errors) => {
   }
 };
 
+function readBooleanFlag(value) {
+  if (typeof value === 'boolean') return value;
+  if (value === 1 || value === '1' || value === 'true') return true;
+  if (value === 0 || value === '0' || value === 'false') return false;
+  return null;
+}
+
 const validateCreateEmployee = (payload = {}) => {
   const errors = {};
 
@@ -229,6 +236,16 @@ const validateCreateEmployee = (payload = {}) => {
     }
   }
 
+  let multiBranchPunch = false;
+  if (Object.prototype.hasOwnProperty.call(payload, 'multi_branch_punch')) {
+    const flag = readBooleanFlag(payload.multi_branch_punch);
+    if (flag == null) {
+      errors.multi_branch_punch = 'multi_branch_punch must be true or false.';
+    } else {
+      multiBranchPunch = flag;
+    }
+  }
+
   ensureNoErrors(errors);
 
   const result = {
@@ -369,6 +386,8 @@ const validateCreateEmployee = (payload = {}) => {
     const ch = String(payload.attendance_channel || 'device').toLowerCase();
     result.attendance_channel = ATTENDANCE_CHANNEL_VALUES.includes(ch) ? ch : 'device';
   }
+
+  result.multi_branch_punch = multiBranchPunch;
 
   return result;
 };
@@ -678,6 +697,15 @@ const validateUpdateEmployee = (payload = {}) => {
       errors.attendance_channel = `attendance_channel must be one of: ${ATTENDANCE_CHANNEL_VALUES.join(', ')}`;
     } else {
       clean.attendance_channel = ch;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, 'multi_branch_punch')) {
+    const flag = readBooleanFlag(payload.multi_branch_punch);
+    if (flag == null) {
+      errors.multi_branch_punch = 'multi_branch_punch must be true or false.';
+    } else {
+      clean.multi_branch_punch = flag;
     }
   }
 

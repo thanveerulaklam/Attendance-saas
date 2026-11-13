@@ -25,7 +25,11 @@ function buildEmployeeMapForDeviceCodes(rows, deviceCodes) {
 
   for (const row of rows || []) {
     const exact = trimCode(row.employee_code);
-    const emp = { id: Number(row.id), branch_id: Number(row.branch_id) };
+    const emp = {
+      id: Number(row.id),
+      branch_id: Number(row.branch_id),
+      multi_branch_punch: row.multi_branch_punch === true,
+    };
     if (!exact) continue;
     byExact[exact] = emp;
     const n = numericEmployeeCodeKey(exact);
@@ -86,9 +90,20 @@ function suggestNextEmployeeCode(codes) {
   return '';
 }
 
+/**
+ * Home-branch punches are always accepted. Other branches of the same company
+ * are accepted only when the employee is allowed to punch any branch device.
+ */
+function devicePunchBranchAllowed(employee, deviceBranchId) {
+  if (!employee) return false;
+  if (Number(employee.branch_id) === Number(deviceBranchId)) return true;
+  return employee.multi_branch_punch === true;
+}
+
 module.exports = {
   trimCode,
   numericEmployeeCodeKey,
   buildEmployeeMapForDeviceCodes,
   suggestNextEmployeeCode,
+  devicePunchBranchAllowed,
 };

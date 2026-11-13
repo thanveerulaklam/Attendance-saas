@@ -9,6 +9,7 @@ const {
   trimCode,
   numericEmployeeCodeKey,
   buildEmployeeMapForDeviceCodes,
+  devicePunchBranchAllowed,
 } = require('../utils/employeeCode');
 
 async function findActiveDeviceByApiKey(apiKey) {
@@ -403,7 +404,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
     `SELECT employee_code, punch_time, raw_line
      FROM adms_punch_rejections
      WHERE company_id = $1 AND device_id = $2
-       AND reason = 'unknown_code'
+       AND reason IN ('unknown_code', 'wrong_branch')
        AND punch_time IS NOT NULL
        AND created_at >= NOW() - INTERVAL '14 days'`,
     [companyId, device.id]
@@ -418,7 +419,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
   const numericKeys = [...new Set(uniqueCodes.map(numericEmployeeCodeKey).filter(Boolean))];
 
   const employeeResult = await pool.query(
-    `SELECT id, employee_code, branch_id
+    `SELECT id, employee_code, branch_id, multi_branch_punch
      FROM employees
      WHERE company_id = $1
        AND (
@@ -451,7 +452,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
   for (const row of storedRows.rows) {
     const code = trimCode(row.employee_code);
     const emp = employeeMap[code];
-    if (!emp || emp.branch_id !== deviceBranchId) continue;
+    if (!emp || !devicePunchBranchAllowed(emp, deviceBranchId)) continue;
     const key = punchKey(code, row.punch_time);
     if (seenPunchKeys.has(key)) continue;
     seenPunchKeys.add(key);
@@ -468,7 +469,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
   const unknownCodes = incomingCodes.filter((code) => !employeeMap[code]);
   const wrongBranchCodes = incomingCodes.filter((code) => {
     const e = employeeMap[code];
-    return e && e.branch_id !== deviceBranchId;
+    return e && !devicePunchBranchAllowed(e, deviceBranchId);
   });
 
   const rejections = [];
@@ -481,7 +482,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
         reason: 'unknown_code',
         rawLine: log.rawLine || null,
       });
-    } else if (e.branch_id !== deviceBranchId) {
+    } else if (!devicePunchBranchAllowed(e, deviceBranchId)) {
       rejections.push({
         employeeCode: log.employeeCode,
         punchTime: log.punchTime,
@@ -501,7 +502,7 @@ async function processDeviceLogs(deviceAuthToken, logs, authMode = 'api_key') {
 
   const validLogs = workLogs.filter((log) => {
     const e = employeeMap[log.employeeCode];
-    return e && e.branch_id === deviceBranchId;
+    return e && devicePunchBranchAllowed(e, deviceBranchId);
   });
 
   // Entire batch may be device junk (e.g. user id 0) or unknown IDs — do not 400; let connector finish other chunks.
@@ -635,6 +636,70 @@ async function replayUnknownCodePunchesForDevice(deviceId) {
   return { ...result, replayed_from: logs.length };
 }
 
+/**
+ * Import recent wrong-branch punches after an employee is allowed to punch
+ * any company device, without waiting for the next device sync.
+ */
+async function replayWrongBranchPunchesForEmployee(companyId, employeeId) {
+  const empResult = await pool.query(
+    `SELECT employee_code
+     FROM employees
+     WHERE company_id = $1 AND id = $2 AND status = 'active' AND multi_branch_punch = TRUE`,
+    [companyId, employeeId]
+  );
+  if (empResult.rowCount === 0) {
+    return { devices: 0, replayed_from: 0 };
+  }
+
+  const code = trimCode(empResult.rows[0].employee_code);
+  const numeric = numericEmployeeCodeKey(code);
+  const stored = await pool.query(
+    `SELECT r.device_id, r.employee_code, r.punch_time, r.raw_line, d.api_key
+     FROM adms_punch_rejections r
+     INNER JOIN devices d
+       ON d.id = r.device_id
+      AND d.company_id = r.company_id
+      AND d.is_active = TRUE
+     WHERE r.company_id = $1
+       AND r.reason = 'wrong_branch'
+       AND r.punch_time IS NOT NULL
+       AND r.created_at >= NOW() - INTERVAL '14 days'
+       AND d.api_key IS NOT NULL
+       AND (
+         BTRIM(r.employee_code) = $2
+         OR (
+           $3::text IS NOT NULL
+           AND BTRIM(r.employee_code) ~ '^[0-9]+$'
+           AND COALESCE(NULLIF(LTRIM(BTRIM(r.employee_code), '0'), ''), '0') = $3
+         )
+       )
+     ORDER BY r.device_id, r.punch_time ASC`,
+    [companyId, code, numeric]
+  );
+
+  const byDevice = new Map();
+  for (const row of stored.rows) {
+    const deviceId = Number(row.device_id);
+    if (!byDevice.has(deviceId)) {
+      byDevice.set(deviceId, { apiKey: row.api_key, logs: [] });
+    }
+    byDevice.get(deviceId).logs.push({
+      employeeCode: trimCode(row.employee_code),
+      punchTime: row.punch_time,
+      punchType: null,
+      deviceId: String(deviceId),
+      rawLine: row.raw_line || null,
+    });
+  }
+
+  let replayedFrom = 0;
+  for (const group of byDevice.values()) {
+    replayedFrom += group.logs.length;
+    await processDeviceLogs(group.apiKey, group.logs, 'api_key');
+  }
+  return { devices: byDevice.size, replayed_from: replayedFrom };
+}
+
 module.exports = {
   findActiveDeviceByApiKey,
   findActiveDeviceByCloudToken,
@@ -649,4 +714,5 @@ module.exports = {
   deleteDevice,
   processDeviceLogs,
   replayUnknownCodePunchesForDevice,
+  replayWrongBranchPunchesForEmployee,
 };

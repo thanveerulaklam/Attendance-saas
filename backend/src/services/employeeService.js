@@ -10,6 +10,7 @@ const {
   validateCreateEmployee,
   validateUpdateEmployee,
 } = require('../validators/employeeValidator');
+const { replayWrongBranchPunchesForEmployee } = require('./deviceService');
 
 // Employee limits per plan (aligned with landing-page pricing). Null = no default cap.
 const PLAN_EMPLOYEE_LIMITS = {
@@ -56,6 +57,7 @@ const EMPLOYEE_SELECT_FIELDS = `
         iban,
         contract_type,
         attendance_channel,
+        multi_branch_punch,
         created_at`;
 
 const EMPLOYEE_LIST_SELECT_FIELDS = `
@@ -91,6 +93,7 @@ const EMPLOYEE_LIST_SELECT_FIELDS = `
         e.iban,
         e.contract_type,
         e.attendance_channel,
+        e.multi_branch_punch,
         e.created_at`;
 
 function stripIndiaStatutoryForNonIn(payload, countryCode, { isCreate = false } = {}) {
@@ -327,9 +330,10 @@ async function createEmployee(companyId, data, branchContext = {}) {
         labour_card_number,
         iban,
         contract_type,
-        attendance_channel
+        attendance_channel,
+        multi_branch_punch
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
       RETURNING ${EMPLOYEE_SELECT_FIELDS}`,
       [
         companyId,
@@ -362,6 +366,7 @@ async function createEmployee(companyId, data, branchContext = {}) {
         iban,
         contractType,
         payload.attendance_channel || 'device',
+        payload.multi_branch_punch === true,
       ]
     );
 
@@ -629,13 +634,15 @@ async function updateEmployee(companyId, id, data, branchContext = {}) {
     await client.query('BEGIN');
 
     const locked = await client.query(
-      `SELECT basic_salary FROM employees WHERE company_id = $1 AND id = $2 FOR UPDATE`,
+      `SELECT basic_salary, multi_branch_punch
+       FROM employees WHERE company_id = $1 AND id = $2 FOR UPDATE`,
       [companyId, id]
     );
     if (locked.rowCount === 0) {
       throw new AppError('Employee not found for this company', 404);
     }
     const previousSalary = locked.rows[0].basic_salary;
+    const wasMultiBranchPunch = locked.rows[0].multi_branch_punch === true;
 
     const fields = [];
     const values = [companyId, id];
@@ -684,6 +691,17 @@ async function updateEmployee(companyId, id, data, branchContext = {}) {
 
     await client.query('COMMIT');
     const updated = result.rows[0];
+
+    if (updates.multi_branch_punch === true && !wasMultiBranchPunch) {
+      try {
+        await replayWrongBranchPunchesForEmployee(companyId, id);
+      } catch (replayErr) {
+        console.error(
+          'Failed to replay wrong-branch punches:',
+          replayErr?.message || replayErr
+        );
+      }
+    }
 
     if (
       updates.shift_id != null &&
