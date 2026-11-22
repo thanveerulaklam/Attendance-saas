@@ -71,6 +71,32 @@ function formatHours(value) {
   return Number(value).toFixed(2).replace(/\.?0+$/, '');
 }
 
+function sabariSlipTotals(breakdown, payrollRow) {
+  const lines = Array.isArray(breakdown?.sabari?.payslipLines) ? breakdown.sabari.payslipLines : null;
+  if (!lines) return null;
+  const earningRows = lines
+    .filter((line) => line.earning && Number(line.amount) > 0)
+    .map((line) => [line.label, money(line.amount)]);
+  const earningsGross = lines
+    .filter((line) => line.earning)
+    .reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  earningRows.push(['Gross', money(earningsGross)]);
+  const deductionRows = lines
+    .filter((line) => !line.earning && Number(line.amount) > 0)
+    .map((line) => [line.label, money(line.amount)]);
+  const esi = Number(breakdown.sabari?.esiDeduction || 0);
+  const pf = Number(breakdown.sabari?.pfDeduction || 0);
+  if (esi > 0) deductionRows.push(['ESI', money(esi)]);
+  if (pf > 0) deductionRows.push(['PF', money(pf)]);
+  deductionRows.push(...buildAdvanceDeductionRows(breakdown, payrollRow));
+  const { totalAdvance } = resolveAdvanceTotals(breakdown, payrollRow);
+  const lineDeductions = lines
+    .filter((line) => !line.earning)
+    .reduce((sum, line) => sum + Number(line.amount || 0), 0);
+  deductionRows.push(['Total ded.', money(lineDeductions + esi + pf + totalAdvance)]);
+  return { earningRows, deductionRows, net: earningsGross - (lineDeductions + esi + pf + totalAdvance) };
+}
+
 function rowsWithAmount(labelValuePairs) {
   return labelValuePairs
     .filter(([, amount]) => Number(amount || 0) !== 0)
@@ -365,6 +391,7 @@ function renderCompactPayslip(
       },
     }) + layout.sectionGap;
 
+  const sabariSlip = sabariSlipTotals(breakdown, payrollRow);
   const earningAmounts = [
     b.basicSalary,
     b.travelAllowance,
@@ -373,7 +400,7 @@ function renderCompactPayslip(
     b.paidLeaveEncashmentAmount,
     b.noLeaveIncentive,
   ];
-  const earningRows = rowsWithAmount([
+  let earningRows = rowsWithAmount([
     ['Earned basic', b.basicSalary],
     ['Travel', b.travelAllowance],
     ['Other allow.', b.otherAllowance],
@@ -382,7 +409,7 @@ function renderCompactPayslip(
     ['Incentive', b.noLeaveIncentive],
   ]);
   const earningsGross = earningAmounts.reduce((sum, n) => sum + Number(n || 0), 0);
-  earningRows.push(['Gross', money(earningsGross)]);
+  if (!sabariSlip) earningRows.push(['Gross', money(earningsGross)]);
 
   const extraBreakRows =
     Array.isArray(b.breakOverstayLines) &&
@@ -396,7 +423,7 @@ function renderCompactPayslip(
       : Number(b.otherBreakOverDeduction || 0) > 0
         ? [['Other breaks', b.otherBreakOverDeduction]]
         : [];
-  const deductionRows = rowsWithAmount([
+  let deductionRows = rowsWithAmount([
     ['Absent', b.absenceDeduction],
     [lateDeductionLabel(b.lateDeductionMode), b.lateDeduction],
     ['Lunch', b.lunchOverDeduction],
@@ -404,13 +431,19 @@ function renderCompactPayslip(
     ['ESI', b.esiDeduction],
     ['PF', b.pfDeduction],
   ]);
-  deductionRows.push(...buildAdvanceDeductionRows(breakdown, payrollRow));
-  const permissionOffset = Number(b.permissionOffsetAmount || 0);
-  if (permissionOffset > 0) {
-    deductionRows.push(['Perm. offset', `(Rs ${formatMoney(permissionOffset)})`]);
-  }
   const { totalAdvance } = resolveAdvanceTotals(breakdown, payrollRow);
-  deductionRows.push(['Total ded.', money(Number(b.totalDeductions || 0) + totalAdvance)]);
+  if (!sabariSlip) {
+    deductionRows.push(...buildAdvanceDeductionRows(breakdown, payrollRow));
+    const permissionOffset = Number(b.permissionOffsetAmount || 0);
+    if (permissionOffset > 0) {
+      deductionRows.push(['Perm. offset', `(Rs ${formatMoney(permissionOffset)})`]);
+    }
+    deductionRows.push(['Total ded.', money(Number(b.totalDeductions || 0) + totalAdvance)]);
+  }
+  if (sabariSlip) {
+    earningRows = sabariSlip.earningRows;
+    deductionRows = sabariSlip.deductionRows;
+  }
 
   const midX = slotX + pageWidth / 2;
   const halfWidth = pageWidth / 2 - layout.marginX - 2;
@@ -442,11 +475,12 @@ function renderCompactPayslip(
   y = Math.max(earningsEndY, deductionsEndY) + layout.sectionGap;
 
   const advanceInfoRows = buildAdvanceInfoRows(breakdown, payrollRow);
-  const resolvedNet =
-    Number(b.grossSalary || 0) -
-    Number(b.totalDeductions || 0) -
-    totalAdvance +
-    Number(b.noLeaveIncentive || 0);
+  const resolvedNet = sabariSlip
+    ? sabariSlip.net
+    : Number(b.grossSalary || 0) -
+      Number(b.totalDeductions || 0) -
+      totalAdvance +
+      Number(b.noLeaveIncentive || 0);
   const netDisplay = Number.isFinite(resolvedNet) ? resolvedNet : Number(b.netSalary || 0);
 
   if (advanceInfoRows.length > 0) {
