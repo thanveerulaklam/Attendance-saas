@@ -140,6 +140,36 @@ test('overtime is a flat amount only after the threshold, including one minute',
   assert.equal(ladyOver.otPay, 25);
 });
 
+test('punches saved as in are paired in order, the same way attendance shows them', () => {
+  const allIn = calculateSriSabari(base({
+    rangeStart: '2026-09-28',
+    rangeEnd: '2026-09-28',
+    punches: [
+      punch('2026-09-28', 10, 0, 'in'),
+      punch('2026-09-28', 14, 0, 'in'),
+      punch('2026-09-28', 15, 0, 'in'),
+      punch('2026-09-28', 21, 0, 'in'),
+    ],
+  }));
+  assert.equal(allIn.hourlyPay, 500);
+  assert.equal(allIn.shortDeduction, 100);
+  assert.equal(allIn.presentDays, 1);
+
+  const openInStaysOnThatDay = calculateSriSabari(base({
+    rangeStart: '2026-09-28',
+    rangeEnd: '2026-09-29',
+    punches: [
+      punch('2026-09-28', 10, 0, 'in'),
+      punch('2026-09-28', 14, 0, 'in'),
+      punch('2026-09-28', 22, 0, 'in'),
+      punch('2026-09-29', 10, 0, 'in'),
+      punch('2026-09-29', 21, 0, 'in'),
+    ],
+  }));
+  assert.equal(openInStaysOnThatDay.hourlyPay, 750);
+  assert.equal(openInStaysOnThatDay.presentDays, 2);
+});
+
 test('lunch punch-out is excluded, and time before 10:00 and after 22:00 still counts', () => {
   const lunch = calculateSriSabari(base({
     rangeStart: '2026-09-28',

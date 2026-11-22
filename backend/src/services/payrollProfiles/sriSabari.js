@@ -96,24 +96,29 @@ function normalizeGender(gender) {
 }
 
 /**
- * Pair IN→OUT across the punch list. Hours belong to the attendance date of the IN.
- * An OUT with no open IN is ignored. An IN left open does not invent hours.
- * @param {{ type: string, at: number, ymd: string }[]} punches
+ * Pair punches the same way the attendance page does.
+ * On each date, the first punch is In and the next is Out, then In, then Out.
+ * The machine label is ignored, because eSSL often stores every tap as In.
+ * Hours belong to that date. A last punch with no following punch adds no hours.
+ * A punch after midnight is not used to close the previous day.
+ * @param {{ type: string, at: number, ymd: string, minutes: number }[]} punches
  */
 function insideHoursByInDate(punches) {
   const sorted = [...(punches || [])].sort((a, b) => a.at - b.at);
+  const byDate = new Map();
+  for (const punch of sorted) {
+    if (!punch || !punch.ymd) continue;
+    if (!byDate.has(punch.ymd)) byDate.set(punch.ymd, []);
+    byDate.get(punch.ymd).push(punch);
+  }
   const hours = new Map();
   const firstInMinutes = new Map();
-  let open = null;
-  for (const punch of sorted) {
-    const type = String(punch.type || '').toLowerCase();
-    if (type === 'in') {
-      if (!firstInMinutes.has(punch.ymd)) firstInMinutes.set(punch.ymd, punch.minutes);
-      if (open == null) open = punch;
-    } else if (type === 'out' && open) {
-      const hrs = Math.max(0, (punch.at - open.at) / 3600000);
-      hours.set(open.ymd, (hours.get(open.ymd) || 0) + hrs);
-      open = null;
+  for (const [ymd, dayPunches] of byDate) {
+    if (dayPunches.length === 0) continue;
+    firstInMinutes.set(ymd, dayPunches[0].minutes);
+    for (let i = 0; i + 1 < dayPunches.length; i += 2) {
+      const hrs = Math.max(0, (dayPunches[i + 1].at - dayPunches[i].at) / 3600000);
+      hours.set(ymd, (hours.get(ymd) || 0) + hrs);
     }
   }
   return { hours, firstInMinutes };
