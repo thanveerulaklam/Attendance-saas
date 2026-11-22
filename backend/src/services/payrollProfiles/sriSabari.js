@@ -113,15 +113,25 @@ function insideHoursByInDate(punches) {
   }
   const hours = new Map();
   const firstInMinutes = new Map();
+  const punchCounts = new Map();
   for (const [ymd, dayPunches] of byDate) {
     if (dayPunches.length === 0) continue;
+    punchCounts.set(ymd, dayPunches.length);
     firstInMinutes.set(ymd, dayPunches[0].minutes);
     for (let i = 0; i + 1 < dayPunches.length; i += 2) {
       const hrs = Math.max(0, (dayPunches[i + 1].at - dayPunches[i].at) / 3600000);
       hours.set(ymd, (hours.get(ymd) || 0) + hrs);
     }
   }
-  return { hours, firstInMinutes };
+  return { hours, firstInMinutes, punchCounts };
+}
+
+function formatClock(minutes) {
+  if (minutes == null || Number.isNaN(Number(minutes))) return null;
+  const total = Math.round(Number(minutes));
+  const hh = Math.floor(total / 60) % 24;
+  const mm = ((total % 60) + 60) % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
 function isLate(minutes, config) {
@@ -179,11 +189,21 @@ function evaluateWeek(weekStart, factsByDate, config, gender, weekOffDay) {
     absenceKind = 'monToSat';
   }
 
+  const requiredHours = config.requiredHours[gender];
   const requiredDays = days.filter((d) => weekOffDay == null || d.weekday !== weekOffDay);
   const fullWeek =
     requiredDays.length > 0 &&
-    requiredDays.every((d) => !d.absent && !d.late && !d.short && d.inside >= config.requiredHours[gender]);
+    requiredDays.every((d) => !d.absent && !d.late && !d.short && d.inside >= requiredHours);
   const weekBonus = fullWeek ? config.fullWeekBonus[gender] : 0;
+  const missed = requiredDays
+    .filter((d) => d.absent || d.late || d.short || d.inside < requiredHours)
+    .map((d) => ({
+      date: d.date,
+      absent: d.absent,
+      late: d.late,
+      short: d.short,
+      insideHours: roundMoney(d.inside),
+    }));
   return {
     weekStart,
     saturday: addDays(weekStart, 6),
@@ -191,6 +211,7 @@ function evaluateWeek(weekStart, factsByDate, config, gender, weekOffDay) {
     absenceKind,
     weekBonus,
     fullWeek,
+    missed,
   };
 }
 
@@ -229,7 +250,7 @@ function calculateSriSabari(input) {
     throw err;
   }
   const config = mergeConfig(input.config);
-  const { hours, firstInMinutes } = insideHoursByInDate(input.punches);
+  const { hours, firstInMinutes, punchCounts } = insideHoursByInDate(input.punches);
   const rangeStart = String(input.rangeStart).slice(0, 10);
   const rangeEnd = String(input.rangeEnd).slice(0, 10);
   const asOf = input.asOfDate ? String(input.asOfDate).slice(0, 10) : null;
@@ -256,6 +277,7 @@ function calculateSriSabari(input) {
   let presentDays = 0;
   let absentDays = 0;
   const deferrable = [];
+  const explanationDays = [];
 
   for (let date = rangeStart; date <= rangeEnd; date = addDays(date, 1)) {
     if (!inDaily(date)) continue;
@@ -263,6 +285,21 @@ function calculateSriSabari(input) {
     const dayPay = roundMoney(day.inside * hourlyRate);
     hourlyPay += dayPay;
     insideHours += day.inside;
+    explanationDays.push({
+      date,
+      weekday: day.weekday,
+      weekOff: weekOffDay != null && day.weekday === weekOffDay,
+      punchCount: punchCounts.get(date) || 0,
+      firstIn: firstInMinutes.has(date) ? formatClock(firstInMinutes.get(date)) : null,
+      insideHours: roundMoney(day.inside),
+      hourlyPay: dayPay,
+      late: day.lateAmount,
+      short: day.shortAmount,
+      ot: day.otAmount,
+      sundayBonus: day.sundayBonus,
+      heldLate: false,
+      heldShort: false,
+    });
     if (day.ot) {
       otPay += day.otAmount;
       const threshold = config.ot[gender].aboveHours;
@@ -295,11 +332,22 @@ function calculateSriSabari(input) {
 
   let weekBonus = 0;
   let absenceDeduction = 0;
+  const explanationWeeks = [];
   for (let week = firstWeek; week <= lastWeek; week = addDays(week, 7)) {
     const evaluated = evaluateWeek(week, factsByDate, config, gender, weekOffDay);
     const saturdayInRange = evaluated.saturday >= rangeStart && evaluated.saturday <= rangeEnd;
     const saturdayReached = asOf == null || evaluated.saturday <= asOf;
     if (!saturdayInRange || !saturdayReached) continue;
+    explanationWeeks.push({
+      weekStart: evaluated.weekStart,
+      saturday: evaluated.saturday,
+      absenceAmount: evaluated.absenceAmount,
+      absenceKind: evaluated.absenceKind,
+      weekBonus: evaluated.weekBonus,
+      fullWeek: evaluated.fullWeek,
+      missed: evaluated.missed,
+      heldAbsence: false,
+    });
     if (evaluated.weekBonus) {
       weekBonus += evaluated.weekBonus;
     }
@@ -344,6 +392,23 @@ function calculateSriSabari(input) {
     grossSalary: roundMoney(hourlyPay + otPay + sundayBonus + weekBonus),
     ruleDeductions: roundMoney(lateDeduction + shortDeduction + absenceDeduction),
     deferrable,
+    explanation: {
+      gender,
+      hourlyRate,
+      weekOffDay,
+      shiftStart: config.shiftStart,
+      requiredHours: config.requiredHours[gender],
+      lateDeduction: config.lateDeduction,
+      shortDeduction: config.shortHoursDeduction,
+      otAboveHours: config.ot[gender].aboveHours,
+      otAmount: config.ot[gender].amount,
+      sundayBonus: config.sundayBonus[gender],
+      fullWeekBonus: config.fullWeekBonus[gender],
+      absenceSeven: config.absence.sevenDays,
+      absenceMonToSat: config.absence.monToSat,
+      days: explanationDays,
+      weeks: explanationWeeks,
+    },
     payslipLines: [
       { key: 'hourly', label: 'Hourly pay', amount: hourlyPay, earning: true },
       { key: 'ot', label: 'Overtime', amount: otPay, earning: true },
@@ -388,6 +453,20 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
   );
   const ruleDeductions = roundMoney(lateDeduction + shortDeduction + absenceDeduction + broughtForward);
   const grossSalary = result.grossSalary;
+  const explanation = result.explanation
+    ? {
+        ...result.explanation,
+        days: (result.explanation.days || []).map((day) => ({
+          ...day,
+          heldLate: defer.has(`late:${day.date}`),
+          heldShort: defer.has(`short:${day.date}`),
+        })),
+        weeks: (result.explanation.weeks || []).map((week) => ({
+          ...week,
+          heldAbsence: defer.has(`absence:${week.weekStart}`),
+        })),
+      }
+    : null;
   const payslipLines = [
     { key: 'hourly', label: 'Hourly pay', amount: result.hourlyPay, earning: true },
     { key: 'ot', label: 'Overtime', amount: result.otPay, earning: true },
@@ -407,6 +486,7 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
     broughtForward,
     ruleDeductions,
     grossSalary,
+    explanation,
     payslipLines,
     deferredLines,
     carryApplied,

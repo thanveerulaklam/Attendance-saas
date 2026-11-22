@@ -154,6 +154,10 @@ test('punches saved as in are paired in order, the same way attendance shows the
   assert.equal(allIn.hourlyPay, 500);
   assert.equal(allIn.shortDeduction, 100);
   assert.equal(allIn.presentDays, 1);
+  assert.equal(allIn.explanation.days[0].punchCount, 4);
+  assert.equal(allIn.explanation.days[0].insideHours, 10);
+  assert.equal(allIn.explanation.days[0].firstIn, '10:00');
+  assert.equal(allIn.explanation.requiredHours, 11);
 
   const openInStaysOnThatDay = calculateSriSabari(base({
     rangeStart: '2026-09-28',
@@ -328,4 +332,7 @@ test('deferred deductions and manual carry are held or brought forward', () => {
   assert.equal(settled.broughtForward, 15);
   assert.equal(settled.deferredLines.length, 1);
   assert.equal(settled.carryApplied.length, 1);
+  assert.equal(settled.explanation.days[0].heldLate, true);
+  assert.equal(settled.explanation.days[0].heldShort, false);
+  assert.equal(settled.explanation.days[0].firstIn, '10:20');
 });

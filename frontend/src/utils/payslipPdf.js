@@ -7,6 +7,7 @@ import {
   resolvePayslipAttendanceDates,
 } from './payslipAttendance';
 import { lateDeductionLabel, overtimePayLabel } from './payrollPayLabels';
+import { sabariPayslipExplanation } from './sabariPayslipExplanation';
 
 const LAYOUTS = {
   a5: {
@@ -537,6 +538,60 @@ export function buildCompactPayslipFilename({ employeeName, periodLabel, year, m
   return `PunchPay_${safeName}_${slug}.pdf`;
 }
 
+function appendSabariWorkingPages(doc, explanation) {
+  const working = sabariPayslipExplanation(explanation, money);
+  if (!working) return;
+  const margin = 28;
+  doc.addPage('a5', 'portrait');
+  let y = 28;
+  const contentWidth = () => doc.internal.pageSize.getWidth() - margin * 2;
+  const ensureRoom = (needed) => {
+    if (y + needed <= doc.internal.pageSize.getHeight() - 24) return;
+    doc.addPage('a5', 'portrait');
+    y = 28;
+  };
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('How this pay was worked out', margin, y);
+  y += 14;
+  doc.setFontSize(7);
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(71, 85, 105);
+  for (const rule of working.rules) {
+    const lines = doc.splitTextToSize(rule, contentWidth());
+    ensureRoom(lines.length * 9 + 2);
+    doc.text(lines, margin, y);
+    y += lines.length * 9 + 2;
+  }
+  y += 4;
+  autoTable(doc, {
+    head: [['Date', 'First punch', 'Hours', 'Hourly pay', 'What applied']],
+    body: working.dayRows,
+    startY: y,
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+    headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
+    columnStyles: {
+      0: { cellWidth: 52 },
+      1: { cellWidth: 36 },
+      2: { cellWidth: 28, halign: 'right' },
+      3: { cellWidth: 42, halign: 'right' },
+    },
+    theme: 'striped',
+  });
+  y = doc.lastAutoTable.finalY + 8;
+  doc.setFontSize(7);
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(71, 85, 105);
+  for (const note of working.weekNotes) {
+    const lines = doc.splitTextToSize(note, contentWidth());
+    ensureRoom(lines.length * 9 + 3);
+    doc.text(lines, margin, y);
+    y += lines.length * 9 + 3;
+  }
+}
+
 export function downloadCompactPayslipPdf({
   company,
   employeeName,
@@ -557,6 +612,7 @@ export function downloadCompactPayslipPdf({
     payrollRow,
     isFirstPage: true,
   });
+  appendSabariWorkingPages(doc, breakdown?.sabari?.explanation);
   const filename = buildCompactPayslipFilename({
     employeeName,
     periodLabel,

@@ -128,6 +128,7 @@ async function settleSriSabari(client, {
       deferrable: calculated.deferrable,
       deferredLines: settled.deferredLines,
       broughtForward: settled.broughtForward,
+      explanation: settled.explanation,
       hourlyPay: settled.hourlyPay,
       otPay: settled.otPay,
       sundayBonus: settled.sundayBonus,

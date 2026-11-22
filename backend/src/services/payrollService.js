@@ -2402,6 +2402,28 @@ async function listWeeklyPayrollRecords(
 }
 
 /**
+ * Older Sri Sabari payslips stored the totals without the day-by-day working.
+ * Attach that working for display. Saved salary amounts stay as they were.
+ */
+async function withSabariExplanation(companyId, employee, sabari, range) {
+  if (!sabari || sabari.error || sabari.explanation) return sabari;
+  try {
+    const live = await settleSriSabari(pool, {
+      companyId,
+      employee,
+      rangeStart: range.rangeStart,
+      rangeEnd: range.rangeEnd,
+      asOfDate: range.asOfDate ?? null,
+      deferKeys: [],
+    });
+    if (!live?.breakdown?.explanation) return sabari;
+    return { ...sabari, explanation: live.breakdown.explanation };
+  } catch {
+    return sabari;
+  }
+}
+
+/**
  * Get weekly payroll breakdown for one employee for one week.
  * Used by weekly breakdown modal (no DB writes).
  */
@@ -2444,7 +2466,7 @@ async function getWeeklyPayrollBreakdown(
   const employeeResult = await pool.query(
     `SELECT id, name, employee_code, basic_salary, status, daily_travel_allowance, other_allowance,
             esi_amount, esi_mode, esi_percent, pf_amount, pf_mode, pf_percent, salary_type,
-            join_date, contract_type
+            join_date, contract_type, gender, week_off_day
      FROM employees
      WHERE company_id = $1 AND id = $2`,
     [companyId, employeeId]
@@ -2580,7 +2602,11 @@ async function getWeeklyPayrollBreakdown(
   const salaryAdvance = Number(weekPayrollRow.salary_advance || 0);
   const netSalary = Number(weekPayrollRow.net_salary || 0);
   const companyProfile = await getCompanyProfileForPayslip(companyId);
-  const sabari = weekPayrollRow.rule_breakdown || null;
+  const sabari = await withSabariExplanation(companyId, employee, weekPayrollRow.rule_breakdown || null, {
+    rangeStart: weekStart,
+    rangeEnd: weekEnd,
+    asOfDate,
+  });
 
   return {
     sabari,
@@ -3378,6 +3404,15 @@ async function getPayrollBreakdown(companyId, employeeId, year, month, options =
     } catch (err) {
       if (err.statusCode) sabari = { error: err.message };
     }
+  }
+  if (sabari && !sabari.error) {
+    const monthStartStr = `${year}-${String(month).padStart(2, '0')}-01`;
+    const monthEndStr = `${year}-${String(month).padStart(2, '0')}-${String(summary.daysInMonth || lastDayOfMonth).padStart(2, '0')}`;
+    sabari = await withSabariExplanation(companyId, employee, sabari, {
+      rangeStart: monthStartStr,
+      rangeEnd: monthEndStr,
+      asOfDate,
+    });
   }
 
   /** Attendance numbers shown on payslip: match payroll run when snapshot exists. */

@@ -6,6 +6,7 @@ import { formatMoneyAmount, formatMoneyWithSymbol } from '../../utils/formatMone
 import { regionFeaturesForCountry, companyCurrency } from '../../utils/regionFeatures';
 import RecordPaymentModal, { paymentModeLabel } from './RecordPaymentModal';
 import { lateDeductionLabel, overtimePayLabel, overtimeWindowLabel } from '../../utils/payrollPayLabels';
+import { sabariPayslipExplanation } from '../../utils/sabariPayslipExplanation';
 
 const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const MONTH_LONG = [
@@ -263,6 +264,7 @@ export default function PayslipModal({
   const showGratuity = !!regionFeatures.wps;
   const fmtSym = (n) => formatMoneyWithSymbol(n, currency);
   const fmtAmt = (n) => formatMoneyAmount(n, currency);
+  const sabariWorking = sabariPayslipExplanation(breakdown?.sabari?.explanation, fmtSym);
 
   const rawAbsentDates = useMemo(() => {
     if (hasDayDetails && fallbackAbsentDates.length > 0) {
@@ -594,6 +596,7 @@ export default function PayslipModal({
                 </span>
               </div>
             </div>
+            {!sabariLines && (
             <p className="payslip-print-hidden mt-2 text-[10px] text-slate-500">
               {isFlexibleHoursPayroll
                 ? 'Salary is based on monthly hours worked vs monthly contract hours (working days × daily minimum).'
@@ -601,6 +604,7 @@ export default function PayslipModal({
                 ? 'Salary deduction absence is computed from worked-hours shortfall against required hours.'
                 : 'Salary deduction absence = full absent days + (half days x 0.5).'}
             </p>
+            )}
             {showAbsenceMismatchNote && (
               <p className="payslip-print-hidden mt-1 text-[10px] text-amber-600">
                 Attendance buckets and payroll absence differ slightly due to payroll rules (leave/rounding/policy overrides).
@@ -859,6 +863,50 @@ export default function PayslipModal({
               </div>
             )}
           </section>
+
+          {sabariWorking && (
+            <section className="rounded-xl border border-slate-100 bg-white px-4 py-3 text-[11px] text-slate-700">
+              <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-slate-600">
+                HOW THIS PAY WAS WORKED OUT
+              </h3>
+              <ul className="space-y-1 text-[10px] leading-relaxed text-slate-600">
+                {sabariWorking.rules.map((rule) => (
+                  <li key={rule}>{rule}</li>
+                ))}
+              </ul>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[520px] text-[10px]">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-left text-slate-500">
+                      <th className="pb-1 pr-2 font-medium">Date</th>
+                      <th className="pb-1 pr-2 font-medium">First punch</th>
+                      <th className="pb-1 pr-2 font-medium text-right">Hours</th>
+                      <th className="pb-1 pr-2 font-medium text-right">Hourly pay</th>
+                      <th className="pb-1 font-medium">What applied</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sabariWorking.dayRows.map((row) => (
+                      <tr key={row[0]} className="border-b border-slate-50 align-top">
+                        <td className="py-1 pr-2 whitespace-nowrap">{row[0]}</td>
+                        <td className="py-1 pr-2">{row[1]}</td>
+                        <td className="py-1 pr-2 text-right">{row[2]}</td>
+                        <td className="py-1 pr-2 text-right">{row[3]}</td>
+                        <td className="py-1">{row[4]}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {sabariWorking.weekNotes.length > 0 && (
+                <ul className="mt-3 space-y-1 text-[10px] leading-relaxed text-slate-600">
+                  {sabariWorking.weekNotes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           <section className="payslip-print-hidden rounded-xl border border-emerald-100 bg-emerald-50/40 px-4 py-3 text-[11px] text-slate-800">
             <div className="flex flex-wrap items-start justify-between gap-3">
