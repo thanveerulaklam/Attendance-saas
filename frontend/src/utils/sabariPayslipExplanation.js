@@ -33,6 +33,29 @@ export function formatSabariPunchLine(text) {
   return String(text || '').replace(/\b(\d{1,2}:\d{2})\b/g, (clock) => formatSabariClock(clock));
 }
 
+/**
+ * Calendar day in the company timezone.
+ * A database date often arrives as the previous UTC evening, so slicing the
+ * timestamp would show Saturday for a Sunday week.
+ */
+export function calendarYmd(value, timeZone = 'Asia/Kolkata') {
+  if (value == null || value === '') return '';
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = value instanceof Date ? value : new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    const match = raw.match(/\d{4}-\d{2}-\d{2}/);
+    return match ? match[0] : '';
+  }
+  const formatted = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timeZone || 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+  return formatted.slice(0, 10);
+}
+
 export function formatSabariDate(ymd) {
   const [y, m, d] = String(ymd || '').slice(0, 10).split('-').map(Number);
   if (!y || !m || !d) return String(ymd || '');

@@ -6,7 +6,7 @@ import { formatMoneyAmount, formatMoneyWithSymbol } from '../../utils/formatMone
 import { regionFeaturesForCountry, companyCurrency } from '../../utils/regionFeatures';
 import RecordPaymentModal, { paymentModeLabel } from './RecordPaymentModal';
 import { lateDeductionLabel, overtimePayLabel, overtimeWindowLabel } from '../../utils/payrollPayLabels';
-import { formatSabariDuration, sabariPayslipExplanation } from '../../utils/sabariPayslipExplanation';
+import { calendarYmd, formatSabariDuration, sabariPayslipExplanation } from '../../utils/sabariPayslipExplanation';
 
 const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const MONTH_LONG = [
@@ -330,14 +330,17 @@ export default function PayslipModal({
   const periodLabel = useMemo(() => {
     if (!payrollRow) return '';
     if (payrollRow.week_start_date && payrollRow.week_end_date) {
-      const s = new Date(`${payrollRow.week_start_date}T00:00:00`);
-      const e = new Date(`${payrollRow.week_end_date}T00:00:00`);
-      if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return '—';
+      const zone = company?.timezone || 'Asia/Kolkata';
+      const startYmd = calendarYmd(payrollRow.week_start_date, zone);
+      const endYmd = calendarYmd(payrollRow.week_end_date, zone);
+      const s = new Date(`${startYmd}T12:00:00Z`);
+      const e = new Date(`${endYmd}T12:00:00Z`);
+      if (!startYmd || !endYmd || Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return '—';
 
-      const sLabel = s.toLocaleString('default', { day: '2-digit', month: 'short' });
-      const eLabel = e.toLocaleString('default', { day: '2-digit', month: 'short' });
-      const sYear = s.getFullYear();
-      const eYear = e.getFullYear();
+      const sLabel = s.toLocaleString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+      const eLabel = e.toLocaleString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' });
+      const sYear = s.getUTCFullYear();
+      const eYear = e.getUTCFullYear();
       if (sYear !== eYear) {
         return `${sLabel} ${sYear} — ${eLabel} ${eYear}`;
       }
@@ -346,7 +349,7 @@ export default function PayslipModal({
 
     const d = new Date(payrollRow.year, payrollRow.month - 1, 1);
     return d.toLocaleString('default', { month: 'long', year: 'numeric' });
-  }, [payrollRow]);
+  }, [company?.timezone, payrollRow]);
 
   const employeePhone =
     attendanceDetails?.phone || attendanceDetails?.phone_number || null;

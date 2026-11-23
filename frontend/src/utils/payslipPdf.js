@@ -7,7 +7,7 @@ import {
   resolvePayslipAttendanceDates,
 } from './payslipAttendance';
 import { lateDeductionLabel, overtimePayLabel } from './payrollPayLabels';
-import { formatSabariDate, formatSabariDuration, formatSabariPunchLine, sabariPayslipExplanation } from './sabariPayslipExplanation';
+import { calendarYmd, formatSabariDate, formatSabariDuration, formatSabariPunchLine, sabariPayslipExplanation } from './sabariPayslipExplanation';
 
 const LAYOUTS = {
   a5: {
@@ -51,9 +51,8 @@ function money(n) {
   return `Rs ${formatMoney(n)}`;
 }
 
-function ymdToken(value) {
-  const match = String(value || '').match(/\d{4}-\d{2}-\d{2}/);
-  return match ? match[0] : '';
+function ymdToken(value, timeZone) {
+  return calendarYmd(value, timeZone);
 }
 
 function resolvePayslipCompany(company, breakdown) {
@@ -577,9 +576,10 @@ export function buildCompactPayslipFilename({ employeeName, periodLabel, year, m
   return `PunchPay_${safeName}_${slug}.pdf`;
 }
 
-function sabariPeriodLabel({ periodLabel, payrollRow, breakdown }) {
-  const start = ymdToken(payrollRow?.week_start_date || breakdown?.period?.week_start_date);
-  const end = ymdToken(payrollRow?.week_end_date || breakdown?.period?.week_end_date);
+function sabariPeriodLabel({ periodLabel, payrollRow, breakdown, company }) {
+  const timeZone = company?.timezone || 'Asia/Kolkata';
+  const start = ymdToken(payrollRow?.week_start_date || breakdown?.period?.week_start_date, timeZone);
+  const end = ymdToken(payrollRow?.week_end_date || breakdown?.period?.week_end_date, timeZone);
   if (start && end) {
     const year = start.slice(0, 4) === end.slice(0, 4) ? start.slice(0, 4) : `${start.slice(0, 4)} – ${end.slice(0, 4)}`;
     return `${formatSabariDate(start)} – ${formatSabariDate(end)} ${year}`;
