@@ -2411,8 +2411,17 @@ function sabariExplanationNeedsRefresh(sabari) {
   return days.some((day) => day.lastPunch === undefined || day.insideMinutes == null);
 }
 
+function sabariExplanationNeedsPunchLines(sabari) {
+  const days = sabari?.explanation?.days;
+  if (!Array.isArray(days) || days.length === 0) return false;
+  return days.some((day) => !Array.isArray(day.punches));
+}
+
 async function withSabariExplanation(companyId, employee, sabari, range) {
-  if (!sabari || sabari.error || !sabariExplanationNeedsRefresh(sabari)) return sabari;
+  if (!sabari || sabari.error) return sabari;
+  const refresh = sabariExplanationNeedsRefresh(sabari);
+  const punches = sabariExplanationNeedsPunchLines(sabari);
+  if (!refresh && !punches) return sabari;
   try {
     const live = await settleSriSabari(pool, {
       companyId,
@@ -2423,7 +2432,18 @@ async function withSabariExplanation(companyId, employee, sabari, range) {
       deferKeys: [],
     });
     if (!live?.breakdown?.explanation) return sabari;
-    return { ...sabari, explanation: live.breakdown.explanation };
+    if (refresh) return { ...sabari, explanation: live.breakdown.explanation };
+    const byDate = new Map((live.breakdown.explanation.days || []).map((day) => [day.date, day.punches || []]));
+    return {
+      ...sabari,
+      explanation: {
+        ...sabari.explanation,
+        days: sabari.explanation.days.map((day) => ({
+          ...day,
+          punches: byDate.get(day.date) || [],
+        })),
+      },
+    };
   } catch {
     return sabari;
   }

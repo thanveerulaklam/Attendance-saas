@@ -7,7 +7,7 @@ import {
   resolvePayslipAttendanceDates,
 } from './payslipAttendance';
 import { lateDeductionLabel, overtimePayLabel } from './payrollPayLabels';
-import { formatSabariDate, sabariPayslipExplanation } from './sabariPayslipExplanation';
+import { formatSabariDate, formatSabariDuration, sabariPayslipExplanation } from './sabariPayslipExplanation';
 
 const LAYOUTS = {
   a5: {
@@ -49,16 +49,6 @@ function formatMoney(n) {
 
 function money(n) {
   return `Rs ${formatMoney(n)}`;
-}
-
-function moneyExact(n) {
-  const num = Number(n);
-  if (!Number.isFinite(num)) return '—';
-  const digits = Number.isInteger(num) ? 0 : 2;
-  return `Rs ${new Intl.NumberFormat('en-IN', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: 2,
-  }).format(num)}`;
 }
 
 function ymdToken(value) {
@@ -604,21 +594,34 @@ function sabariPeriodLabel({ periodLabel, payrollRow, breakdown }) {
   return '';
 }
 
-function sabariAttendanceLine(explanation, breakdown) {
-  const days = Array.isArray(explanation?.days) ? explanation.days : [];
-  if (days.length === 0) {
-    const att = breakdown?.attendance || {};
-    return `Present ${formatDayCount(att.presentDays)} · Absent ${formatDayCount(att.absenceDays)}`;
-  }
-  const worked = days.filter((day) => Number(day.insideHours) > 0 || Number(day.insideMinutes) > 0);
-  const off = days.filter((day) => day.weekOff);
-  const missed = days.filter(
-    (day) => !day.weekOff && !(Number(day.insideHours) > 0 || Number(day.insideMinutes) > 0)
-  );
-  const parts = [`Worked ${worked.length} of ${days.length} days`];
-  if (off.length) parts.push(`Week-off ${off.map((day) => formatSabariDate(day.date)).join(', ')}`);
-  if (missed.length) parts.push(`No punches ${missed.map((day) => formatSabariDate(day.date)).join(', ')}`);
-  return parts.join('   ·   ');
+function sheetDate(ymd) {
+  const [year, month, day] = String(ymd || '').slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return String(ymd || '—');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${String(day).padStart(2, '0')}-${months[month - 1]}-${year}`;
+}
+
+function moneyPlain(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '0.00';
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
+}
+
+function clockToMinutes(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+/** Time between the first and last punch that was not paid, such as lunch. */
+function outHoursLabel(day) {
+  const first = clockToMinutes(day?.firstIn);
+  const last = clockToMinutes(day?.lastPunch);
+  const inside = Number(day?.insideMinutes);
+  if (first == null || last == null || !Number.isFinite(inside)) return '00:00';
+  const gap = last - first - inside;
+  if (!Number.isFinite(gap) || gap <= 0) return '00:00';
+  return formatSabariDuration(gap);
 }
 
 function renderSabariPayslipPage(doc, params) {
@@ -658,81 +661,137 @@ function renderSabariPayslipPage(doc, params) {
   doc.text(period ? `PAYSLIP    ${period}` : 'PAYSLIP', pageWidth / 2, y, { align: 'center' });
   y += 20;
 
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(margin, y, contentWidth, 32, 6, 6, 'F');
+  const days = Array.isArray(explanation?.days) ? explanation.days : [];
+  const department = attendanceDetails?.department && attendanceDetails.department !== '—'
+    ? attendanceDetails.department
+    : explanation?.gender === 'female'
+      ? 'Female'
+      : explanation?.gender === 'male'
+        ? 'Male'
+        : '—';
+  const displayName = String(employeeName || '—');
+  const displayCode = String(employeeCode || '—');
+  const dayBody = [];
+  for (const day of days) {
+    const punchText = Array.isArray(day.punches) && day.punches.length
+      ? day.punches.join(', ')
+      : Number(day.punchCount) > 0 && day.firstIn
+        ? [day.firstIn && `${day.firstIn} in`, day.lastPunch && day.lastPunch !== day.firstIn ? `${day.lastPunch} out` : '']
+            .filter(Boolean)
+            .join(', ')
+        : '0';
+    dayBody.push([
+      sheetDate(day.date),
+      displayCode,
+      displayName,
+      formatSabariDuration(day.insideMinutes, day.insideHours),
+      outHoursLabel(day),
+      moneyPlain(rate),
+      moneyPlain(day.hourlyPay),
+    ]);
+    dayBody.push([
+      { content: 'Punch Records', styles: { fontStyle: 'bold', textColor: [71, 85, 105] } },
+      { content: punchText, colSpan: 6 },
+    ]);
+  }
+  if (dayBody.length === 0) {
+    dayBody.push([sheetDate(''), displayCode, displayName, '00:00', '00:00', moneyPlain(rate), '0.00']);
+    dayBody.push([{ content: 'Punch Records', styles: { fontStyle: 'bold' } }, { content: '0', colSpan: 6 }]);
+  }
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Department', margin, y);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
   doc.setTextColor(15, 23, 42);
-  const name = doc.splitTextToSize(String(employeeName || '—'), contentWidth * 0.4)[0];
-  doc.text(name, margin + 14, y + 21);
+  doc.text(String(department), margin + 68, y);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  doc.setTextColor(51, 65, 85);
-  doc.text(`Code  ${employeeCode || '—'}`, margin + contentWidth * 0.46, y + 21);
-  doc.text(`Basic salary  ${moneyExact(rate)}`, margin + contentWidth - 14, y + 21, { align: 'right' });
-  y += 48;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.setTextColor(51, 65, 85);
-  const attendance = doc.splitTextToSize(sabariAttendanceLine(explanation, breakdown), contentWidth);
-  doc.text(attendance, margin, y);
-  y += attendance.length * 13 + 8;
-
-  const deductionBody = slip && slip.deductionRows.some((row) => !String(row[0]).startsWith('Total'))
-    ? slip.deductionRows
-    : [['No deductions', '']];
-  const earningBody = slip?.earningRows?.length ? slip.earningRows : [['—', '']];
-  const moneyRows = Math.max(earningBody.length, deductionBody.length);
-  const moneyBody = Array.from({ length: moneyRows }, (_, index) => [
-    earningBody[index]?.[0] || '',
-    earningBody[index]?.[1] || '',
-    deductionBody[index]?.[0] || '',
-    deductionBody[index]?.[1] || '',
-  ]);
-  const earnLabelW = 148;
-  const earnAmountW = 96;
-  const dedLabelW = 150;
-  const dedAmountW = 96;
-
+  doc.setTextColor(71, 85, 105);
+  doc.text('Employee code', margin + 250, y);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(5, 122, 85);
-  doc.text('Earnings', margin, y);
-  doc.setTextColor(180, 83, 9);
-  doc.text('Deductions', margin + earnLabelW + earnAmountW + 36, y);
-  y += 6;
+  doc.setTextColor(15, 23, 42);
+  doc.text(displayCode, margin + 330, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(displayName, margin + contentWidth, y, { align: 'right' });
+  y += 8;
 
   autoTable(doc, {
-    body: moneyBody,
+    head: [['Date', 'Emp', 'Name', 'In(Hrs)', 'Out(Hrs)', '1 Hrs Salary', 'Day Payment']],
+    body: dayBody,
     startY: y,
     margin: { left: margin, right: margin },
-    tableWidth: earnLabelW + earnAmountW + dedLabelW + dedAmountW,
-    theme: 'plain',
-    styles: { fontSize: 10, cellPadding: { top: 3.5, bottom: 3.5, left: 0, right: 8 }, textColor: [15, 23, 42] },
+    tableWidth: contentWidth,
+    theme: 'grid',
+    styles: {
+      fontSize: 8,
+      cellPadding: 3,
+      textColor: [15, 23, 42],
+      lineColor: [203, 213, 225],
+      lineWidth: 0.4,
+      overflow: 'linebreak',
+    },
+    headStyles: {
+      fillColor: [248, 250, 252],
+      textColor: [51, 65, 85],
+      fontStyle: 'bold',
+      fontSize: 8,
+    },
     columnStyles: {
-      0: { cellWidth: earnLabelW },
-      1: { cellWidth: earnAmountW, halign: 'right' },
-      2: { cellWidth: dedLabelW, cellPadding: { top: 3.5, bottom: 3.5, left: 36, right: 4 } },
-      3: { cellWidth: dedAmountW, halign: 'right' },
+      0: { cellWidth: 78 },
+      1: { cellWidth: 36 },
+      2: { cellWidth: 110 },
+      3: { cellWidth: 58, halign: 'right' },
+      4: { cellWidth: 58, halign: 'right' },
+      5: { cellWidth: 78, halign: 'right' },
+      6: { cellWidth: 94, halign: 'right' },
     },
     didParseCell: (data) => {
-      const earnTotal = /^(Gross|Total)/.test(String(data.row.raw?.[0] || ''));
-      const dedTotal = /^(Gross|Total)/.test(String(data.row.raw?.[2] || ''));
-      if ((earnTotal && data.column.index < 2) || (dedTotal && data.column.index >= 2)) {
-        data.cell.styles.fontStyle = 'bold';
+      if (data.section !== 'body') return;
+      const raw = data.row.raw?.[0];
+      const isPunch = raw && typeof raw === 'object' && raw.content === 'Punch Records';
+      if (isPunch) {
+        data.cell.styles.fillColor = [248, 250, 252];
+        data.cell.styles.fontSize = 7.5;
       }
     },
   });
-  y = doc.lastAutoTable.finalY + 12;
+  y = doc.lastAutoTable.finalY + 8;
 
-  doc.setFillColor(236, 253, 245);
-  doc.roundedRect(margin, y, contentWidth, 32, 6, 6, 'F');
+  const totalMinutes = days.reduce((sum, day) => sum + Number(day.insideMinutes || 0), 0);
+  const weekHours = (totalMinutes / 60).toFixed(2);
+  const weekSalary = days.reduce((sum, day) => sum + Number(day.hourlyPay || 0), 0);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`This week total work hours :  ${weekHours}`, margin, y + 4);
+  doc.text(`This week salary :  ${moneyPlain(weekSalary)}`, margin + contentWidth, y + 4, { align: 'right' });
+  y += 16;
+
+  const extraEarnings = (slip?.earningRows || []).filter((row) => row[0] !== 'Hourly pay' && row[0] !== 'Gross');
+  if (extraEarnings.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(5, 122, 85);
+    doc.text(extraEarnings.map((row) => `${row[0]} ${row[1]}`).join('    '), margin, y);
+    y += 12;
+  }
+  const deductionBits = (slip?.deductionRows || []).filter((row) => !String(row[0]).startsWith('Total') && row[1] && row[1] !== '—');
+  if (deductionBits.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(180, 83, 9);
+    doc.text(deductionBits.map((row) => `${row[0]} ${row[1]}`).join('    '), margin, y);
+    y += 12;
+  }
+  doc.setFillColor(236, 253, 245);
+  doc.roundedRect(margin, y, contentWidth, 26, 4, 4, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(12);
   doc.setTextColor(5, 122, 85);
-  doc.text(`Net salary    ${money(slip?.net || 0)}`, margin + contentWidth - 14, y + 21, { align: 'right' });
-  y += 50;
+  doc.text(`Net salary    ${money(slip?.net || 0)}`, margin + contentWidth - 10, y + 17, { align: 'right' });
+  y += 38;
 
   if (working?.dayRows?.length) {
     doc.setFont('helvetica', 'bold');

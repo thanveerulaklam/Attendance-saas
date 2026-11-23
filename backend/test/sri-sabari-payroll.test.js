@@ -159,6 +159,7 @@ test('punches saved as in are paired in order, the same way attendance shows the
   assert.equal(allIn.explanation.days[0].firstIn, '10:00');
   assert.equal(allIn.explanation.days[0].lastPunch, '21:00');
   assert.equal(allIn.explanation.days[0].insideMinutes, 600);
+  assert.deepEqual(allIn.explanation.days[0].punches, ['10:00 in', '14:00 out', '15:00 in', '21:00 out']);
   assert.equal(allIn.explanation.requiredHours, 11);
 
   const openInStaysOnThatDay = calculateSriSabari(base({
