@@ -662,13 +662,6 @@ function renderSabariPayslipPage(doc, params) {
   y += 20;
 
   const days = Array.isArray(explanation?.days) ? explanation.days : [];
-  const department = attendanceDetails?.department && attendanceDetails.department !== '—'
-    ? attendanceDetails.department
-    : explanation?.gender === 'female'
-      ? 'Female'
-      : explanation?.gender === 'male'
-        ? 'Male'
-        : '—';
   const displayName = String(employeeName || '—');
   const displayCode = String(employeeCode || '—');
   const dayBody = [];
@@ -682,43 +675,32 @@ function renderSabariPayslipPage(doc, params) {
         : '0';
     dayBody.push([
       sheetDate(day.date),
-      displayCode,
-      displayName,
+      punchText,
       formatSabariDuration(day.insideMinutes, day.insideHours),
       outHoursLabel(day),
       moneyPlain(rate),
       moneyPlain(day.hourlyPay),
     ]);
-    dayBody.push([
-      { content: 'Punch Records', styles: { fontStyle: 'bold', textColor: [71, 85, 105] } },
-      { content: punchText, colSpan: 6 },
-    ]);
   }
   if (dayBody.length === 0) {
-    dayBody.push([sheetDate(''), displayCode, displayName, '00:00', '00:00', moneyPlain(rate), '0.00']);
-    dayBody.push([{ content: 'Punch Records', styles: { fontStyle: 'bold' } }, { content: '0', colSpan: 6 }]);
+    dayBody.push([sheetDate(''), '0', '00:00', '00:00', moneyPlain(rate), '0.00']);
   }
 
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(15, 23, 42);
+  doc.text(displayName, margin, y);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.setTextColor(71, 85, 105);
-  doc.text('Department', margin, y);
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42);
-  doc.text(String(department), margin + 68, y);
-  doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
   doc.text('Employee code', margin + 250, y);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
   doc.text(displayCode, margin + 330, y);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(71, 85, 105);
-  doc.text(displayName, margin + contentWidth, y, { align: 'right' });
   y += 8;
 
   autoTable(doc, {
-    head: [['Date', 'Emp', 'Name', 'In(Hrs)', 'Out(Hrs)', '1 Hrs Salary', 'Day Payment']],
+    head: [['Date', 'Punch Records', 'In(Hrs)', 'Out(Hrs)', '1 Hrs Salary', 'Day Payment']],
     body: dayBody,
     startY: y,
     margin: { left: margin, right: margin },
@@ -739,22 +721,12 @@ function renderSabariPayslipPage(doc, params) {
       fontSize: 8,
     },
     columnStyles: {
-      0: { cellWidth: 78 },
-      1: { cellWidth: 36 },
-      2: { cellWidth: 110 },
-      3: { cellWidth: 58, halign: 'right' },
-      4: { cellWidth: 58, halign: 'right' },
-      5: { cellWidth: 78, halign: 'right' },
-      6: { cellWidth: 94, halign: 'right' },
-    },
-    didParseCell: (data) => {
-      if (data.section !== 'body') return;
-      const raw = data.row.raw?.[0];
-      const isPunch = raw && typeof raw === 'object' && raw.content === 'Punch Records';
-      if (isPunch) {
-        data.cell.styles.fillColor = [248, 250, 252];
-        data.cell.styles.fontSize = 7.5;
-      }
+      0: { cellWidth: 72 },
+      1: { cellWidth: 187, fontSize: 7.5 },
+      2: { cellWidth: 54, halign: 'right' },
+      3: { cellWidth: 54, halign: 'right' },
+      4: { cellWidth: 72, halign: 'right' },
+      5: { cellWidth: 76, halign: 'right' },
     },
   });
   y = doc.lastAutoTable.finalY + 8;
