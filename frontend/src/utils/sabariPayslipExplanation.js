@@ -17,6 +17,22 @@ export function formatSabariDuration(minutes, decimalHours) {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+/** 24-hour clock "21:42" as "09:42 PM". Leaves durations and other text alone. */
+export function formatSabariClock(value) {
+  const match = String(value ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return value == null || value === '' ? '' : String(value);
+  const hours24 = Number(match[1]);
+  if (hours24 > 23) return String(value);
+  const suffix = hours24 >= 12 ? 'PM' : 'AM';
+  const hours12 = hours24 % 12 || 12;
+  return `${String(hours12).padStart(2, '0')}:${match[2]} ${suffix}`;
+}
+
+/** "09:33 in, 21:42 out" → "09:33 AM in, 09:42 PM out". */
+export function formatSabariPunchLine(text) {
+  return String(text || '').replace(/\b(\d{1,2}:\d{2})\b/g, (clock) => formatSabariClock(clock));
+}
+
 export function formatSabariDate(ymd) {
   const [y, m, d] = String(ymd || '').slice(0, 10).split('-').map(Number);
   if (!y || !m || !d) return String(ymd || '');
@@ -82,8 +98,8 @@ export function sabariPayslipExplanation(explanation, money) {
     if (applied.length === 0 && Number(day.insideHours) > 0) applied.push('Meets the day rule');
     return [
       formatSabariDate(day.date),
-      day.firstIn || '—',
-      day.lastPunch || '—',
+      day.firstIn ? formatSabariClock(day.firstIn) : '—',
+      day.lastPunch ? formatSabariClock(day.lastPunch) : '—',
       formatSabariDuration(day.insideMinutes, day.insideHours),
       money(day.hourlyPay),
       applied.join('. '),

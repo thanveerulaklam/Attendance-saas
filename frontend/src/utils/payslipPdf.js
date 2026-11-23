@@ -7,7 +7,7 @@ import {
   resolvePayslipAttendanceDates,
 } from './payslipAttendance';
 import { lateDeductionLabel, overtimePayLabel } from './payrollPayLabels';
-import { formatSabariDate, formatSabariDuration, sabariPayslipExplanation } from './sabariPayslipExplanation';
+import { formatSabariDate, formatSabariDuration, formatSabariPunchLine, sabariPayslipExplanation } from './sabariPayslipExplanation';
 
 const LAYOUTS = {
   a5: {
@@ -666,13 +666,15 @@ function renderSabariPayslipPage(doc, params) {
   const displayCode = String(employeeCode || '—');
   const dayBody = [];
   for (const day of days) {
-    const punchText = Array.isArray(day.punches) && day.punches.length
-      ? day.punches.join(', ')
-      : Number(day.punchCount) > 0 && day.firstIn
-        ? [day.firstIn && `${day.firstIn} in`, day.lastPunch && day.lastPunch !== day.firstIn ? `${day.lastPunch} out` : '']
-            .filter(Boolean)
-            .join(', ')
-        : '0';
+    const punchText = formatSabariPunchLine(
+      Array.isArray(day.punches) && day.punches.length
+        ? day.punches.join(', ')
+        : Number(day.punchCount) > 0 && day.firstIn
+          ? [day.firstIn && `${day.firstIn} in`, day.lastPunch && day.lastPunch !== day.firstIn ? `${day.lastPunch} out` : '']
+              .filter(Boolean)
+              .join(', ')
+          : '0'
+    );
     dayBody.push([
       sheetDate(day.date),
       punchText,
