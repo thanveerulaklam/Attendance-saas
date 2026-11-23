@@ -2405,8 +2405,14 @@ async function listWeeklyPayrollRecords(
  * Older Sri Sabari payslips stored the totals without the day-by-day working.
  * Attach that working for display. Saved salary amounts stay as they were.
  */
+function sabariExplanationNeedsRefresh(sabari) {
+  const days = sabari?.explanation?.days;
+  if (!Array.isArray(days)) return true;
+  return days.some((day) => day.lastPunch === undefined || day.insideMinutes == null);
+}
+
 async function withSabariExplanation(companyId, employee, sabari, range) {
-  if (!sabari || sabari.error || sabari.explanation) return sabari;
+  if (!sabari || sabari.error || !sabariExplanationNeedsRefresh(sabari)) return sabari;
   try {
     const live = await settleSriSabari(pool, {
       companyId,

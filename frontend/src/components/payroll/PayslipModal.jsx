@@ -6,7 +6,7 @@ import { formatMoneyAmount, formatMoneyWithSymbol } from '../../utils/formatMone
 import { regionFeaturesForCountry, companyCurrency } from '../../utils/regionFeatures';
 import RecordPaymentModal, { paymentModeLabel } from './RecordPaymentModal';
 import { lateDeductionLabel, overtimePayLabel, overtimeWindowLabel } from '../../utils/payrollPayLabels';
-import { sabariPayslipExplanation } from '../../utils/sabariPayslipExplanation';
+import { formatSabariDuration, sabariPayslipExplanation } from '../../utils/sabariPayslipExplanation';
 
 const MONTH_SHORT = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 const MONTH_LONG = [
@@ -684,7 +684,13 @@ export default function PayslipModal({
                   ))}
                   {breakdown.sabari?.insideHours != null && (
                     <p className="pt-1 text-[10px] text-slate-500">
-                      Inside hours {breakdown.sabari.insideHours}
+                      Inside hours {formatSabariDuration(
+                        (breakdown.sabari.explanation?.days || []).reduce(
+                          (sum, day) => sum + Number(day.insideMinutes || 0),
+                          0
+                        ) || null,
+                        breakdown.sabari.insideHours
+                      )}
                     </p>
                   )}
                 </div>
@@ -914,6 +920,7 @@ export default function PayslipModal({
                     <tr className="border-b border-slate-200 text-left text-slate-500">
                       <th className="pb-1 pr-2 font-medium">Date</th>
                       <th className="pb-1 pr-2 font-medium">First punch</th>
+                      <th className="pb-1 pr-2 font-medium">Last punch</th>
                       <th className="pb-1 pr-2 font-medium text-right">Hours</th>
                       <th className="pb-1 pr-2 font-medium text-right">Hourly pay</th>
                       <th className="pb-1 font-medium">What applied</th>
@@ -924,9 +931,10 @@ export default function PayslipModal({
                       <tr key={row[0]} className="border-b border-slate-50 align-top">
                         <td className="py-1 pr-2 whitespace-nowrap">{row[0]}</td>
                         <td className="py-1 pr-2">{row[1]}</td>
-                        <td className="py-1 pr-2 text-right">{row[2]}</td>
-                        <td className="py-1 pr-2 text-right">{row[3]}</td>
-                        <td className="py-1">{row[4]}</td>
+                        <td className="py-1 pr-2">{row[2]}</td>
+                        <td className="py-1 pr-2 text-right whitespace-nowrap">{row[3]}</td>
+                        <td className="py-1 pr-2 text-right">{row[4]}</td>
+                        <td className="py-1">{row[5]}</td>
                       </tr>
                     ))}
                   </tbody>

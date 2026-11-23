@@ -600,17 +600,18 @@ function appendSabariWorkingPages(doc, explanation) {
   }
   y += 4;
   autoTable(doc, {
-    head: [['Date', 'First punch', 'Hours', 'Hourly pay', 'What applied']],
+    head: [['Date', 'First punch', 'Last punch', 'Hours', 'Hourly pay', 'What applied']],
     body: working.dayRows,
     startY: y,
     margin: { left: margin, right: margin },
     styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
     headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' },
     columnStyles: {
-      0: { cellWidth: 52 },
-      1: { cellWidth: 36 },
-      2: { cellWidth: 28, halign: 'right' },
-      3: { cellWidth: 42, halign: 'right' },
+      0: { cellWidth: 42 },
+      1: { cellWidth: 32 },
+      2: { cellWidth: 32 },
+      3: { cellWidth: 26, halign: 'right' },
+      4: { cellWidth: 36, halign: 'right' },
     },
     theme: 'striped',
   });

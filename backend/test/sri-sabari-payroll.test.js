@@ -157,6 +157,8 @@ test('punches saved as in are paired in order, the same way attendance shows the
   assert.equal(allIn.explanation.days[0].punchCount, 4);
   assert.equal(allIn.explanation.days[0].insideHours, 10);
   assert.equal(allIn.explanation.days[0].firstIn, '10:00');
+  assert.equal(allIn.explanation.days[0].lastPunch, '21:00');
+  assert.equal(allIn.explanation.days[0].insideMinutes, 600);
   assert.equal(allIn.explanation.requiredHours, 11);
 
   const openInStaysOnThatDay = calculateSriSabari(base({

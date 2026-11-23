@@ -112,18 +112,22 @@ function insideHoursByInDate(punches) {
     byDate.get(punch.ymd).push(punch);
   }
   const hours = new Map();
+  const insideMinutes = new Map();
   const firstInMinutes = new Map();
+  const lastPunchMinutes = new Map();
   const punchCounts = new Map();
   for (const [ymd, dayPunches] of byDate) {
     if (dayPunches.length === 0) continue;
     punchCounts.set(ymd, dayPunches.length);
     firstInMinutes.set(ymd, dayPunches[0].minutes);
+    lastPunchMinutes.set(ymd, dayPunches[dayPunches.length - 1].minutes);
     for (let i = 0; i + 1 < dayPunches.length; i += 2) {
-      const hrs = Math.max(0, (dayPunches[i + 1].at - dayPunches[i].at) / 3600000);
-      hours.set(ymd, (hours.get(ymd) || 0) + hrs);
+      const ms = Math.max(0, dayPunches[i + 1].at - dayPunches[i].at);
+      hours.set(ymd, (hours.get(ymd) || 0) + ms / 3600000);
+      insideMinutes.set(ymd, (insideMinutes.get(ymd) || 0) + Math.round(ms / 60000));
     }
   }
-  return { hours, firstInMinutes, punchCounts };
+  return { hours, insideMinutes, firstInMinutes, lastPunchMinutes, punchCounts };
 }
 
 function formatClock(minutes) {
@@ -250,7 +254,7 @@ function calculateSriSabari(input) {
     throw err;
   }
   const config = mergeConfig(input.config);
-  const { hours, firstInMinutes, punchCounts } = insideHoursByInDate(input.punches);
+  const { hours, insideMinutes, firstInMinutes, lastPunchMinutes, punchCounts } = insideHoursByInDate(input.punches);
   const rangeStart = String(input.rangeStart).slice(0, 10);
   const rangeEnd = String(input.rangeEnd).slice(0, 10);
   const asOf = input.asOfDate ? String(input.asOfDate).slice(0, 10) : null;
@@ -291,7 +295,9 @@ function calculateSriSabari(input) {
       weekOff: weekOffDay != null && day.weekday === weekOffDay,
       punchCount: punchCounts.get(date) || 0,
       firstIn: firstInMinutes.has(date) ? formatClock(firstInMinutes.get(date)) : null,
+      lastPunch: lastPunchMinutes.has(date) ? formatClock(lastPunchMinutes.get(date)) : null,
       insideHours: roundMoney(day.inside),
+      insideMinutes: insideMinutes.get(date) || 0,
       hourlyPay: dayPay,
       late: day.lateAmount,
       short: day.shortAmount,

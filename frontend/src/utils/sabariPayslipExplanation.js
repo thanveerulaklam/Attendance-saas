@@ -6,6 +6,17 @@ export function formatSabariHours(value) {
   return num.toFixed(2).replace(/\.?0+$/, '');
 }
 
+/** Worked time as hh:mm. Uses exact minutes when the payslip stored them. */
+export function formatSabariDuration(minutes, decimalHours) {
+  const fromMinutes = minutes != null && minutes !== '' && Number.isFinite(Number(minutes));
+  const total = fromMinutes
+    ? Math.max(0, Math.round(Number(minutes)))
+    : Math.max(0, Math.round(Number(decimalHours || 0) * 60));
+  const hh = Math.floor(total / 60);
+  const mm = total % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
 export function formatSabariDate(ymd) {
   const [y, m, d] = String(ymd || '').slice(0, 10).split('-').map(Number);
   if (!y || !m || !d) return String(ymd || '');
@@ -64,7 +75,8 @@ export function sabariPayslipExplanation(explanation, money) {
     return [
       formatSabariDate(day.date),
       day.firstIn || '—',
-      formatSabariHours(day.insideHours),
+      day.lastPunch || '—',
+      formatSabariDuration(day.insideMinutes, day.insideHours),
       money(day.hourlyPay),
       applied.join('. '),
     ];
