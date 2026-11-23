@@ -9,6 +9,7 @@ import {
   downloadDayWiseReportCsv,
   generateDayWiseReportPdf,
 } from '../components/reports/DayWiseReportPDF';
+import { downloadDayWiseReportExcel } from '../components/reports/dayWiseRegisterExcel';
 import { createPdf, addAutoTable, addReportHeader, savePdf } from '../utils/pdfGenerator';
 import { formatMoneyAmount, formatMoneyWithSymbol } from '../utils/formatMoney';
 import {
@@ -499,6 +500,25 @@ export default function ReportsPage() {
       setToast({ type: 'success', message: 'Day report PDF downloaded' });
     } catch (err) {
       setToast({ type: 'error', message: err.message || 'PDF generation failed' });
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleDayReportExcel = async () => {
+    try {
+      setLoading('daily-xlsx');
+      setToast(null);
+      const payload = getDayReportExportPayload();
+      const isToday = dayReportDate === todayYmdInTimezone(companyTz);
+      await downloadDayWiseReportExcel({
+        ...payload,
+        filename: `daily-attendance-${dayReportDate}.xlsx`,
+        countOpenInUntil: isToday ? Date.now() : null,
+      });
+      setToast({ type: 'success', message: 'Day report Excel downloaded' });
+    } catch (err) {
+      setToast({ type: 'error', message: err.message || 'Excel generation failed' });
     } finally {
       setLoading(null);
     }
@@ -1159,6 +1179,16 @@ export default function ReportsPage() {
                   type="radio"
                   name="day-report-fmt"
                   className="border-slate-300 text-blue-600"
+                  checked={dayReportFormat === 'excel'}
+                  onChange={() => setDayReportFormat('excel')}
+                />
+                Excel
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-700">
+                <input
+                  type="radio"
+                  name="day-report-fmt"
+                  className="border-slate-300 text-blue-600"
                   checked={dayReportFormat === 'pdf'}
                   onChange={() => setDayReportFormat('pdf')}
                 />
@@ -1170,16 +1200,18 @@ export default function ReportsPage() {
                 onClick={() => {
                   if (dayReportFormat === 'csv') {
                     void handleDayReportDownload();
+                  } else if (dayReportFormat === 'excel') {
+                    void handleDayReportExcel();
                   } else {
                     void handleDayReportPdf();
                   }
                 }}
                 className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm hover:border-primary-200 hover:bg-primary-50 hover:text-primary-800 disabled:opacity-50"
               >
-                {loading === 'daily' || loading === 'daily-pdf'
-                  ? dayReportFormat === 'pdf'
-                    ? 'Generating...'
-                    : 'Downloading...'
+                {loading === 'daily' || loading === 'daily-pdf' || loading === 'daily-xlsx'
+                  ? dayReportFormat === 'csv'
+                    ? 'Downloading...'
+                    : 'Generating...'
                   : 'Download day report'}
               </button>
               <button
@@ -1205,7 +1237,7 @@ export default function ReportsPage() {
                   : 'Send yesterday on WhatsApp'}
               </button>
               <p className="w-full text-[10px] text-slate-500">
-                Export includes summary stats, absentees list, late comers list, and all employees.
+                CSV and PDF include summary stats, absentees, late comers, and all employees. Excel is the attendance register: employee code, name, total in hours, total out hours, punch timings, and status.
               </p>
             </div>
           </>
