@@ -235,6 +235,7 @@ export default function CompanySettingsPage() {
                   female: { aboveHours: 11.5, amount: 25 },
                 },
                 sundayBonus: { male: 300, female: 200 },
+                sundayAbsence: { male: 300, female: 200 },
                 fullWeekBonus: { male: 300, female: 200 },
                 absence: { sevenDays: 600, monToSat: 300 },
               }
@@ -887,11 +888,14 @@ export default function CompanySettingsPage() {
               ['ot', 'female', 'amount', 'Overtime amount, ladies'],
               ['sundayBonus', 'male', 'Sunday bonus, gents'],
               ['sundayBonus', 'female', 'Sunday bonus, ladies'],
+              ['sundayAbsence', 'male', 'Sunday absent, gents'],
+              ['sundayAbsence', 'female', 'Sunday absent, ladies'],
               ['fullWeekBonus', 'male', 'Full-week bonus, gents'],
               ['fullWeekBonus', 'female', 'Full-week bonus, ladies'],
             ].map((field) => {
               const [group, gender, leaf, label] = field.length === 4 ? field : [field[0], field[1], null, field[2]];
-              const value = leaf ? sabariConfig[group]?.[gender]?.[leaf] : sabariConfig[group]?.[gender];
+              const stored = leaf ? sabariConfig[group]?.[gender]?.[leaf] : sabariConfig[group]?.[gender];
+              const value = stored ?? (group === 'sundayAbsence' ? (gender === 'female' ? 200 : 300) : '');
               return (
                 <label key={label} className="text-xs font-medium text-slate-700">
                   {label}

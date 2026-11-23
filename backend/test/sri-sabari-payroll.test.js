@@ -214,6 +214,7 @@ test('Sunday bonus needs the minimum hours and no late punch', () => {
     punches: shift('2026-09-27', 10, 0, 21, 0),
   }));
   assert.equal(ok.sundayBonus, 300);
+  assert.equal(ok.sundayAbsentDeduction, 0);
 
   const late = calculateSriSabari(base({
     rangeStart: '2026-09-27',
@@ -230,6 +231,41 @@ test('Sunday bonus needs the minimum hours and no late punch', () => {
     punches: shift('2026-09-27', 10, 0, 20, 0),
   }));
   assert.equal(lady.sundayBonus, 200);
+});
+
+test('an absent Sunday deducts 300 for a man and 200 for a woman', () => {
+  const man = calculateSriSabari(base({
+    rangeStart: '2026-09-27',
+    rangeEnd: '2026-09-27',
+    punches: [],
+  }));
+  assert.equal(man.sundayAbsentDeduction, 300);
+  assert.equal(man.sundayBonus, 0);
+
+  const woman = calculateSriSabari(base({
+    gender: 'female',
+    rangeStart: '2026-09-27',
+    rangeEnd: '2026-09-27',
+    punches: [],
+  }));
+  assert.equal(woman.sundayAbsentDeduction, 200);
+
+  const weekOff = calculateSriSabari(base({
+    weekOffDay: 0,
+    rangeStart: '2026-09-27',
+    rangeEnd: '2026-09-27',
+    punches: [],
+  }));
+  assert.equal(weekOff.sundayAbsentDeduction, 0);
+
+  const short = calculateSriSabari(base({
+    rangeStart: '2026-09-27',
+    rangeEnd: '2026-09-27',
+    punches: shift('2026-09-27', 10, 0, 18, 0),
+  }));
+  assert.equal(short.sundayBonus, 0);
+  assert.equal(short.sundayAbsentDeduction, 0);
+  assert.equal(short.shortDeduction, 100);
 });
 
 test('full week pays once in the Saturday month, and a late October day cancels it', () => {

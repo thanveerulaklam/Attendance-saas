@@ -52,6 +52,7 @@ export function sabariPayslipExplanation(explanation, money) {
     `Required hours are ${required}. A day with punches under that is a short day, and the short fine is ${money(explanation.shortDeduction)}. The hours worked are still paid.`,
     `Overtime is a flat ${money(explanation.otAmount)}, only when inside hours are above ${formatSabariHours(explanation.otAboveHours)}. Those extra hours are still included in the hourly pay.`,
     `Sunday bonus is ${money(explanation.sundayBonus)}, only when Sunday meets ${required} hours and is not late.`,
+    `A Sunday with no punches is fined ${money(explanation.sundayAbsence ?? explanation.sundayBonus)}. A Sunday that is the week-off is not fined. A Sunday with any punches is not this fine.`,
     `${weekOffSentence(explanation)} Full-week bonus is ${money(explanation.fullWeekBonus)}, only when every required day meets ${required} hours and is not late.`,
     `If all 7 days have no punches, the absence fine is ${money(explanation.absenceSeven)}. If Sunday was worked and Monday to Saturday had no punches, the absence fine is ${money(explanation.absenceMonToSat)}. Only one of those two fines applies. A week-off does not remove the ${money(explanation.absenceSeven)} fine when all seven days have no punches.`,
   ];
@@ -71,6 +72,13 @@ export function sabariPayslipExplanation(explanation, money) {
     }
     if (Number(day.ot) > 0) applied.push(`Overtime ${money(day.ot)}`);
     if (Number(day.sundayBonus) > 0) applied.push(`Sunday bonus ${money(day.sundayBonus)}`);
+    if (Number(day.sundayAbsent) > 0) {
+      applied.push(
+        day.heldSunday
+          ? `Sunday absent ${money(day.sundayAbsent)}, held for the next salary`
+          : `Sunday absent ${money(day.sundayAbsent)}`
+      );
+    }
     if (applied.length === 0 && Number(day.insideHours) > 0) applied.push('Meets the day rule');
     return [
       formatSabariDate(day.date),

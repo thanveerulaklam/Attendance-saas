@@ -17,6 +17,7 @@ const DEFAULT_CONFIG = {
     female: { aboveHours: 11.5, amount: 25 },
   },
   sundayBonus: { male: 300, female: 200 },
+  sundayAbsence: { male: 300, female: 200 },
   fullWeekBonus: { male: 300, female: 200 },
   absence: { sevenDays: 600, monToSat: 300 },
 };
@@ -77,6 +78,10 @@ function mergeConfig(raw) {
     sundayBonus: {
       male: Number(src.sundayBonus?.male ?? DEFAULT_CONFIG.sundayBonus.male),
       female: Number(src.sundayBonus?.female ?? DEFAULT_CONFIG.sundayBonus.female),
+    },
+    sundayAbsence: {
+      male: Number(src.sundayAbsence?.male ?? DEFAULT_CONFIG.sundayAbsence.male),
+      female: Number(src.sundayAbsence?.female ?? DEFAULT_CONFIG.sundayAbsence.female),
     },
     fullWeekBonus: {
       male: Number(src.fullWeekBonus?.male ?? DEFAULT_CONFIG.fullWeekBonus.male),
@@ -274,6 +279,7 @@ function calculateSriSabari(input) {
   let hourlyPay = 0;
   let otPay = 0;
   let sundayBonus = 0;
+  let sundayAbsentDeduction = 0;
   let lateDeduction = 0;
   let shortDeduction = 0;
   let insideHours = 0;
@@ -287,6 +293,9 @@ function calculateSriSabari(input) {
     if (!inDaily(date)) continue;
     const day = factsByDate.get(date);
     const dayPay = roundMoney(day.inside * hourlyRate);
+    const sundayOff = weekOffDay === 0;
+    const sundayAbsentAmount =
+      day.sunday && day.absent && !sundayOff ? Number(config.sundayAbsence[gender] || 0) : 0;
     hourlyPay += dayPay;
     insideHours += day.inside;
     explanationDays.push({
@@ -303,8 +312,10 @@ function calculateSriSabari(input) {
       short: day.shortAmount,
       ot: day.otAmount,
       sundayBonus: day.sundayBonus,
+      sundayAbsent: sundayAbsentAmount,
       heldLate: false,
       heldShort: false,
+      heldSunday: false,
     });
     if (day.ot) {
       otPay += day.otAmount;
@@ -312,6 +323,16 @@ function calculateSriSabari(input) {
       overtimeHours += Math.max(0, day.inside - threshold);
     }
     if (day.sundayBonus) sundayBonus += day.sundayBonus;
+    if (sundayAbsentAmount) {
+      sundayAbsentDeduction += sundayAbsentAmount;
+      deferrable.push({
+        key: `sunday:${date}`,
+        kind: 'sunday',
+        date,
+        amount: sundayAbsentAmount,
+        label: `Sunday absent ${date}`,
+      });
+    }
     if (day.lateAmount) {
       lateDeduction += day.lateAmount;
       deferrable.push({
@@ -376,6 +397,7 @@ function calculateSriSabari(input) {
   hourlyPay = roundMoney(hourlyPay);
   otPay = roundMoney(otPay);
   sundayBonus = roundMoney(sundayBonus);
+  sundayAbsentDeduction = roundMoney(sundayAbsentDeduction);
   weekBonus = roundMoney(weekBonus);
   lateDeduction = roundMoney(lateDeduction);
   shortDeduction = roundMoney(shortDeduction);
@@ -387,6 +409,7 @@ function calculateSriSabari(input) {
     hourlyPay,
     otPay,
     sundayBonus,
+    sundayAbsentDeduction,
     weekBonus,
     lateDeduction,
     shortDeduction,
@@ -396,7 +419,7 @@ function calculateSriSabari(input) {
     presentDays,
     absentDays,
     grossSalary: roundMoney(hourlyPay + otPay + sundayBonus + weekBonus),
-    ruleDeductions: roundMoney(lateDeduction + shortDeduction + absenceDeduction),
+    ruleDeductions: roundMoney(lateDeduction + shortDeduction + absenceDeduction + sundayAbsentDeduction),
     deferrable,
     explanation: {
       gender,
@@ -409,6 +432,7 @@ function calculateSriSabari(input) {
       otAboveHours: config.ot[gender].aboveHours,
       otAmount: config.ot[gender].amount,
       sundayBonus: config.sundayBonus[gender],
+      sundayAbsence: config.sundayAbsence[gender],
       fullWeekBonus: config.fullWeekBonus[gender],
       absenceSeven: config.absence.sevenDays,
       absenceMonToSat: config.absence.monToSat,
@@ -420,6 +444,7 @@ function calculateSriSabari(input) {
       { key: 'ot', label: 'Overtime', amount: otPay, earning: true },
       { key: 'sunday', label: 'Sunday bonus', amount: sundayBonus, earning: true },
       { key: 'week', label: 'Full-week bonus', amount: weekBonus, earning: true },
+      { key: 'sundayAbsent', label: 'Sunday absent', amount: sundayAbsentDeduction, earning: false },
       { key: 'late', label: 'Late', amount: lateDeduction, earning: false },
       { key: 'short', label: 'Short day', amount: shortDeduction, earning: false },
       { key: 'absence', label: 'Absence penalty', amount: absenceDeduction, earning: false },
@@ -437,16 +462,19 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
   let lateDeduction = result.lateDeduction;
   let shortDeduction = result.shortDeduction;
   let absenceDeduction = result.absenceDeduction;
+  let sundayAbsentDeduction = result.sundayAbsentDeduction;
   for (const line of result.deferrable) {
     if (!defer.has(line.key)) continue;
     deferredLines.push(line);
     if (line.kind === 'late') lateDeduction -= line.amount;
     else if (line.kind === 'short') shortDeduction -= line.amount;
     else if (line.kind === 'absence') absenceDeduction -= line.amount;
+    else if (line.kind === 'sunday') sundayAbsentDeduction -= line.amount;
   }
   lateDeduction = roundMoney(Math.max(0, lateDeduction));
   shortDeduction = roundMoney(Math.max(0, shortDeduction));
   absenceDeduction = roundMoney(Math.max(0, absenceDeduction));
+  sundayAbsentDeduction = roundMoney(Math.max(0, sundayAbsentDeduction));
 
   const carryApplied = [];
   for (const item of pendingCarry || []) {
@@ -457,7 +485,9 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
   const broughtForward = roundMoney(
     carryApplied.reduce((sum, item) => sum + Number(item.amount || 0), 0)
   );
-  const ruleDeductions = roundMoney(lateDeduction + shortDeduction + absenceDeduction + broughtForward);
+  const ruleDeductions = roundMoney(
+    lateDeduction + shortDeduction + absenceDeduction + sundayAbsentDeduction + broughtForward
+  );
   const grossSalary = result.grossSalary;
   const explanation = result.explanation
     ? {
@@ -466,6 +496,7 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
           ...day,
           heldLate: defer.has(`late:${day.date}`),
           heldShort: defer.has(`short:${day.date}`),
+          heldSunday: defer.has(`sunday:${day.date}`),
         })),
         weeks: (result.explanation.weeks || []).map((week) => ({
           ...week,
@@ -478,6 +509,7 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
     { key: 'ot', label: 'Overtime', amount: result.otPay, earning: true },
     { key: 'sunday', label: 'Sunday bonus', amount: result.sundayBonus, earning: true },
     { key: 'week', label: 'Full-week bonus', amount: result.weekBonus, earning: true },
+    { key: 'sundayAbsent', label: 'Sunday absent', amount: sundayAbsentDeduction, earning: false },
     { key: 'late', label: 'Late', amount: lateDeduction, earning: false },
     { key: 'short', label: 'Short day', amount: shortDeduction, earning: false },
     { key: 'absence', label: 'Absence penalty', amount: absenceDeduction, earning: false },
@@ -489,6 +521,7 @@ function applyDeferAndCarry(result, { deferKeys = [], pendingCarry = [] } = {}) 
     lateDeduction,
     shortDeduction,
     absenceDeduction,
+    sundayAbsentDeduction,
     broughtForward,
     ruleDeductions,
     grossSalary,
