@@ -665,7 +665,7 @@ function renderSabariPayslipPage(doc, params) {
   const displayName = String(employeeName || '—');
   const displayCode = String(employeeCode || '—');
   const dayBody = [];
-  for (const day of days) {
+  days.forEach((day, index) => {
     const punchText = formatSabariPunchLine(
       Array.isArray(day.punches) && day.punches.length
         ? day.punches.join(', ')
@@ -680,29 +680,34 @@ function renderSabariPayslipPage(doc, params) {
       punchText,
       formatSabariDuration(day.insideMinutes, day.insideHours),
       outHoursLabel(day),
-      moneyPlain(rate),
       moneyPlain(day.hourlyPay),
+      working?.dayRows?.[index]?.[5] || '',
     ]);
-  }
+  });
   if (dayBody.length === 0) {
-    dayBody.push([sheetDate(''), '0', '00:00', '00:00', moneyPlain(rate), '0.00']);
+    dayBody.push([sheetDate(''), '0', '00:00', '00:00', '0.00', '']);
   }
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(displayName, margin, y);
+  const name = doc.splitTextToSize(displayName, 180)[0];
+  doc.text(name, margin, y);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
-  doc.text('Employee code', margin + 250, y);
+  doc.text('Employee code', margin + 190, y);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(15, 23, 42);
-  doc.text(displayCode, margin + 330, y);
+  doc.text(displayCode, margin + 268, y);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(71, 85, 105);
+  doc.text(`Per hour  Rs ${moneyPlain(rate)}`, margin + contentWidth, y, { align: 'right' });
   y += 8;
 
   autoTable(doc, {
-    head: [['Date', 'Punch Records', 'In(Hrs)', 'Out(Hrs)', '1 Hrs Salary', 'Day Payment']],
+    head: [['Date', 'Punch Records', 'In(Hrs)', 'Out(Hrs)', 'Day Payment', 'What applied']],
     body: dayBody,
     startY: y,
     margin: { left: margin, right: margin },
@@ -723,87 +728,61 @@ function renderSabariPayslipPage(doc, params) {
       fontSize: 8,
     },
     columnStyles: {
-      0: { cellWidth: 72 },
-      1: { cellWidth: 187, fontSize: 7.5 },
-      2: { cellWidth: 54, halign: 'right' },
-      3: { cellWidth: 54, halign: 'right' },
-      4: { cellWidth: 72, halign: 'right' },
-      5: { cellWidth: 76, halign: 'right' },
+      0: { cellWidth: 68 },
+      1: { cellWidth: 168, fontSize: 7.5 },
+      2: { cellWidth: 46, halign: 'right' },
+      3: { cellWidth: 46, halign: 'right' },
+      4: { cellWidth: 62, halign: 'right' },
+      5: { cellWidth: 125, fontSize: 7.5 },
     },
   });
-  y = doc.lastAutoTable.finalY + 8;
+  y = doc.lastAutoTable.finalY + 12;
 
   const totalMinutes = days.reduce((sum, day) => sum + Number(day.insideMinutes || 0), 0);
   const weekHours = (totalMinutes / 60).toFixed(2);
-  const weekSalary = days.reduce((sum, day) => sum + Number(day.hourlyPay || 0), 0);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
-  doc.text(`This week total work hours :  ${weekHours}`, margin, y + 4);
-  doc.text(`This week salary :  ${moneyPlain(weekSalary)}`, margin + contentWidth, y + 4, { align: 'right' });
-  y += 16;
+  doc.text(`This week total work hours :  ${weekHours}`, margin, y);
+  y += 14;
 
-  const extraEarnings = (slip?.earningRows || []).filter((row) => row[0] !== 'Hourly pay' && row[0] !== 'Gross');
-  if (extraEarnings.length) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(5, 122, 85);
-    doc.text(extraEarnings.map((row) => `${row[0]} ${row[1]}`).join('    '), margin, y);
-    y += 12;
-  }
-  const deductionBits = (slip?.deductionRows || []).filter((row) => !String(row[0]).startsWith('Total') && row[1] && row[1] !== '—');
-  if (deductionBits.length) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(180, 83, 9);
-    doc.text(deductionBits.map((row) => `${row[0]} ${row[1]}`).join('    '), margin, y);
-    y += 12;
-  }
-  doc.setFillColor(236, 253, 245);
-  doc.roundedRect(margin, y, contentWidth, 26, 4, 4, 'F');
+  const earningBody = slip?.earningRows?.length ? slip.earningRows : [['—', '']];
+  const deductionBody = slip?.deductionRows?.length ? slip.deductionRows : [['Total ded.', money(0)]];
+  const moneyRows = Math.max(earningBody.length, deductionBody.length);
+  const moneyBody = Array.from({ length: moneyRows }, (_, index) => [
+    earningBody[index]?.[0] || '',
+    earningBody[index]?.[1] || '',
+    deductionBody[index]?.[0] || '',
+    deductionBody[index]?.[1] || '',
+  ]);
+  autoTable(doc, {
+    head: [['Earnings', 'Rs', 'Deductions', 'Rs']],
+    body: moneyBody,
+    startY: y,
+    margin: { left: margin, right: margin },
+    tableWidth: contentWidth,
+    theme: 'plain',
+    styles: { fontSize: 10, cellPadding: { top: 3, bottom: 3, left: 0, right: 6 }, textColor: [15, 23, 42] },
+    headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], fontSize: 10, fillColor: [255, 255, 255] },
+    columnStyles: {
+      0: { cellWidth: 150 },
+      1: { cellWidth: 100, halign: 'right' },
+      2: { cellWidth: 155, cellPadding: { top: 3, bottom: 3, left: 28, right: 4 } },
+      3: { cellWidth: 110, halign: 'right' },
+    },
+    didParseCell: (data) => {
+      const earnTotal = /^(Gross|Total)/.test(String(data.row.raw?.[0] || ''));
+      const dedTotal = /^(Gross|Total)/.test(String(data.row.raw?.[2] || ''));
+      if (data.section === 'head' || (earnTotal && data.column.index < 2) || (dedTotal && data.column.index >= 2)) {
+        data.cell.styles.fontStyle = 'bold';
+      }
+    },
+  });
+  y = doc.lastAutoTable.finalY + 16;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
-  doc.setTextColor(5, 122, 85);
-  doc.text(`Net salary    ${money(slip?.net || 0)}`, margin + contentWidth - 10, y + 17, { align: 'right' });
-  y += 38;
-
-  if (working?.dayRows?.length) {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(15, 23, 42);
-    doc.text('How this pay was worked out', margin, y);
-    y += 8;
-    autoTable(doc, {
-      head: [['Date', 'First punch', 'Last punch', 'Hours', 'Pay', 'What applied']],
-      body: working.dayRows,
-      startY: y,
-      margin: { left: margin, right: margin },
-      theme: 'plain',
-      styles: {
-        fontSize: 9,
-        cellPadding: 5,
-        textColor: [15, 23, 42],
-        lineColor: [226, 232, 240],
-        lineWidth: 0.4,
-        overflow: 'linebreak',
-      },
-      headStyles: {
-        fillColor: [241, 245, 249],
-        textColor: [51, 65, 85],
-        fontStyle: 'bold',
-        fontSize: 8,
-      },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      columnStyles: {
-        0: { cellWidth: 78 },
-        1: { cellWidth: 58 },
-        2: { cellWidth: 58 },
-        3: { cellWidth: 46, halign: 'right' },
-        4: { cellWidth: 62, halign: 'right' },
-      },
-    });
-    y = doc.lastAutoTable.finalY;
-  }
+  doc.setTextColor(15, 23, 42);
+  doc.text(`NET SALARY:  ${money(slip?.net || 0)}`, margin + contentWidth, y, { align: 'right' });
 
   const footerY = doc.internal.pageSize.getHeight() - 28;
   doc.setDrawColor(226, 232, 240);
