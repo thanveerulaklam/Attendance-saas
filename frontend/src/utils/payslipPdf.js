@@ -739,7 +739,7 @@ function renderSabariPayslipPage(doc, params) {
       5: { cellWidth: 113, fontSize: 7.5 },
     },
   });
-  y = doc.lastAutoTable.finalY + 8;
+  y = doc.lastAutoTable.finalY + 16;
 
   const earningBody = slip?.earningRows?.length ? slip.earningRows : [['—', '']];
   const deductionBody = slip?.deductionRows?.length ? slip.deductionRows : [['Total ded.', money(0)]];
@@ -758,7 +758,7 @@ function renderSabariPayslipPage(doc, params) {
     tableWidth: contentWidth,
     theme: 'plain',
     styles: { fontSize: 9, fontStyle: 'bold', cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 4 }, textColor: [15, 23, 42] },
-    headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], fontSize: 9 },
+    headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], fontSize: 10, cellPadding: { top: 3.5, bottom: 3.5, left: 2, right: 4 } },
     columnStyles: {
       0: { cellWidth: 156 },
       1: { cellWidth: 112, halign: 'right' },
@@ -767,7 +767,10 @@ function renderSabariPayslipPage(doc, params) {
     },
     didParseCell: (data) => {
       const earnSide = data.column.index < 2;
-      data.cell.styles.fillColor = earnSide ? [220, 252, 231] : [255, 237, 213];
+      const heading = data.section === 'head';
+      data.cell.styles.fillColor = heading
+        ? (earnSide ? [134, 239, 172] : [253, 186, 116])
+        : (earnSide ? [220, 252, 231] : [255, 237, 213]);
       data.cell.styles.fontStyle = 'bold';
     },
   });
