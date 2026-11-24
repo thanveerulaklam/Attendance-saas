@@ -530,6 +530,9 @@ export function addCompactPayslipPage(doc, params) {
  * Bulk payslips: two per A4 portrait page.
  */
 export function addBulkCompactPayslipsToDoc(doc, items) {
+  const useSabari = items.length > 0 && items.every((item) => Array.isArray(item.breakdown?.sabari?.payslipLines));
+  if (useSabari) return addBulkSabariPayslipsToDoc(doc, items);
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const halfH = pageHeight / 2;
@@ -633,8 +636,33 @@ function outHoursLabel(day) {
   return formatSabariDuration(gap);
 }
 
+function addBulkSabariPayslipsToDoc(doc, items) {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const halfH = doc.internal.pageSize.getHeight() / 2;
+
+  for (let i = 0; i < items.length; i += 2) {
+    if (i > 0) doc.addPage('a4', 'portrait');
+    const anchorPage = doc.getNumberOfPages();
+    renderSabariPayslipPage(doc, { ...items[i], originY: 0 });
+    trimPagesAfter(doc, anchorPage);
+
+    if (items[i + 1]) {
+      doc.setDrawColor(148, 163, 184);
+      doc.setLineWidth(0.6);
+      doc.setLineDashPattern([2, 2], 0);
+      doc.line(18, halfH, pageWidth - 18, halfH);
+      doc.setLineDashPattern([], 0);
+      renderSabariPayslipPage(doc, { ...items[i + 1], originY: halfH });
+      trimPagesAfter(doc, anchorPage);
+    }
+  }
+
+  return doc;
+}
+
 function renderSabariPayslipPage(doc, params) {
   const { employeeName, employeeCode, breakdown, attendanceDetails, payrollRow } = params;
+  const originY = Number(params.originY) || 0;
   const explanation = breakdown?.sabari?.explanation;
   const working = sabariPayslipExplanation(explanation, money);
   const slip = sabariSlipTotals(breakdown, payrollRow);
@@ -644,9 +672,9 @@ function renderSabariPayslipPage(doc, params) {
   const rate = explanation?.hourlyRate ?? attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary;
 
   doc.setFillColor(30, 64, 175);
-  doc.rect(0, 0, pageWidth, 5, 'F');
+  doc.rect(0, originY, pageWidth, 5, 'F');
 
-  let y = 22;
+  let y = originY + 22;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(30, 64, 175);
@@ -712,8 +740,10 @@ function renderSabariPayslipPage(doc, params) {
     head: [['Date', 'Punch Records', 'In(Hrs)', 'Out(Hrs)', 'Day Payment', 'What applied']],
     body: dayBody,
     startY: y,
-    margin: { left: margin, right: margin },
+    margin: { left: margin, right: margin, bottom: 8 },
     tableWidth: contentWidth,
+    pageBreak: 'avoid',
+    rowPageBreak: 'avoid',
     theme: 'grid',
     styles: {
       fontSize: 7.5,
@@ -754,8 +784,10 @@ function renderSabariPayslipPage(doc, params) {
     head: [['Earnings', 'Rs', 'Deductions', 'Rs']],
     body: moneyBody,
     startY: y,
-    margin: { left: margin, right: margin },
+    margin: { left: margin, right: margin, bottom: 8 },
     tableWidth: contentWidth,
+    pageBreak: 'avoid',
+    rowPageBreak: 'avoid',
     theme: 'plain',
     styles: { fontSize: 9, fontStyle: 'bold', cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 4 }, textColor: [15, 23, 42] },
     headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], fontSize: 10, cellPadding: { top: 3.5, bottom: 3.5, left: 2, right: 4 } },
@@ -791,7 +823,7 @@ export function createCompactPayslipDoc({
   payrollRow,
 }) {
   const sabariPage = Array.isArray(breakdown?.sabari?.payslipLines);
-  const doc = createPdf({ orientation: sabariPage ? 'l' : 'p', format: 'a5' });
+  const doc = createPdf({ orientation: 'p', format: sabariPage ? 'a4' : 'a5' });
   if (sabariPage) {
     renderSabariPayslipPage(doc, {
       company,
