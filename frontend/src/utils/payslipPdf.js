@@ -634,45 +634,31 @@ function outHoursLabel(day) {
 }
 
 function renderSabariPayslipPage(doc, params) {
-  const { company, employeeName, employeeCode, breakdown, attendanceDetails, payrollRow } = params;
-  const payslipCompany = resolvePayslipCompany(company, breakdown);
+  const { employeeName, employeeCode, breakdown, attendanceDetails, payrollRow } = params;
   const explanation = breakdown?.sabari?.explanation;
   const working = sabariPayslipExplanation(explanation, money);
   const slip = sabariSlipTotals(breakdown, payrollRow);
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 40;
+  const margin = 28;
   const contentWidth = pageWidth - margin * 2;
   const rate = explanation?.hourlyRate ?? attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary;
 
   doc.setFillColor(30, 64, 175);
-  doc.rect(0, 0, pageWidth, 8, 'F');
+  doc.rect(0, 0, pageWidth, 5, 'F');
 
-  let y = 36;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  doc.setTextColor(15, 23, 42);
-  doc.text(String(payslipCompany.name || 'Payslip'), pageWidth / 2, y, { align: 'center' });
-  y += 16;
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(100, 116, 139);
-  const place = [payslipCompany.address, payslipCompany.phone].filter(Boolean).join('   ·   ');
-  if (place) {
-    doc.text(place, pageWidth / 2, y, { align: 'center' });
-    y += 14;
-  }
-
+  let y = 22;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
   doc.setTextColor(30, 64, 175);
   const period = sabariPeriodLabel(params);
   doc.text(period ? `PAYSLIP    ${period}` : 'PAYSLIP', pageWidth / 2, y, { align: 'center' });
-  y += 20;
+  y += 16;
 
   const days = Array.isArray(explanation?.days) ? explanation.days : [];
   const displayName = String(employeeName || '—');
   const displayCode = String(employeeCode || '—');
+  const totalMinutes = days.reduce((sum, day) => sum + Number(day.insideMinutes || 0), 0);
+  const weekHours = formatSabariDuration(totalMinutes);
   const dayBody = [];
   days.forEach((day, index) => {
     const punchText = formatSabariPunchLine(
@@ -696,6 +682,13 @@ function renderSabariPayslipPage(doc, params) {
   if (dayBody.length === 0) {
     dayBody.push([sheetDate(''), '0', '00:00', '00:00', '0.00', '']);
   }
+  dayBody.push([
+    { content: 'This week total work hours', colSpan: 2, styles: { halign: 'right' } },
+    weekHours,
+    '',
+    '',
+    '',
+  ]);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(11);
@@ -723,37 +716,30 @@ function renderSabariPayslipPage(doc, params) {
     tableWidth: contentWidth,
     theme: 'grid',
     styles: {
-      fontSize: 8,
-      cellPadding: 3,
+      fontSize: 7.5,
+      fontStyle: 'bold',
+      cellPadding: 2.2,
       textColor: [15, 23, 42],
-      lineColor: [203, 213, 225],
+      lineColor: [148, 163, 184],
       lineWidth: 0.4,
       overflow: 'linebreak',
     },
     headStyles: {
-      fillColor: [248, 250, 252],
-      textColor: [51, 65, 85],
+      fillColor: [226, 232, 240],
+      textColor: [15, 23, 42],
       fontStyle: 'bold',
-      fontSize: 8,
+      fontSize: 7.5,
     },
     columnStyles: {
-      0: { cellWidth: 68 },
-      1: { cellWidth: 168, fontSize: 7.5 },
-      2: { cellWidth: 46, halign: 'right' },
-      3: { cellWidth: 46, halign: 'right' },
-      4: { cellWidth: 62, halign: 'right' },
-      5: { cellWidth: 125, fontSize: 7.5 },
+      0: { cellWidth: 64 },
+      1: { cellWidth: 188, fontSize: 7.5 },
+      2: { cellWidth: 62, halign: 'right' },
+      3: { cellWidth: 48, halign: 'right' },
+      4: { cellWidth: 64, halign: 'right' },
+      5: { cellWidth: 113, fontSize: 7.5 },
     },
   });
-  y = doc.lastAutoTable.finalY + 12;
-
-  const totalMinutes = days.reduce((sum, day) => sum + Number(day.insideMinutes || 0), 0);
-  const weekHours = formatSabariDuration(totalMinutes);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42);
-  doc.text(`This week total work hours :  ${weekHours}`, margin, y);
-  y += 14;
+  y = doc.lastAutoTable.finalY + 8;
 
   const earningBody = slip?.earningRows?.length ? slip.earningRows : [['—', '']];
   const deductionBody = slip?.deductionRows?.length ? slip.deductionRows : [['Total ded.', money(0)]];
@@ -771,35 +757,25 @@ function renderSabariPayslipPage(doc, params) {
     margin: { left: margin, right: margin },
     tableWidth: contentWidth,
     theme: 'plain',
-    styles: { fontSize: 10, cellPadding: { top: 3, bottom: 3, left: 0, right: 6 }, textColor: [15, 23, 42] },
-    headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], fontSize: 10, fillColor: [255, 255, 255] },
+    styles: { fontSize: 9, fontStyle: 'bold', cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 4 }, textColor: [15, 23, 42] },
+    headStyles: { fontStyle: 'bold', textColor: [15, 23, 42], fontSize: 9 },
     columnStyles: {
-      0: { cellWidth: 150 },
-      1: { cellWidth: 100, halign: 'right' },
-      2: { cellWidth: 155, cellPadding: { top: 3, bottom: 3, left: 28, right: 4 } },
-      3: { cellWidth: 110, halign: 'right' },
+      0: { cellWidth: 156 },
+      1: { cellWidth: 112, halign: 'right' },
+      2: { cellWidth: 155, cellPadding: { top: 2.5, bottom: 2.5, left: 18, right: 4 } },
+      3: { cellWidth: 116, halign: 'right' },
     },
     didParseCell: (data) => {
-      const earnTotal = /^(Gross|Total)/.test(String(data.row.raw?.[0] || ''));
-      const dedTotal = /^(Gross|Total)/.test(String(data.row.raw?.[2] || ''));
-      if (data.section === 'head' || (earnTotal && data.column.index < 2) || (dedTotal && data.column.index >= 2)) {
-        data.cell.styles.fontStyle = 'bold';
-      }
+      const earnSide = data.column.index < 2;
+      data.cell.styles.fillColor = earnSide ? [220, 252, 231] : [255, 237, 213];
+      data.cell.styles.fontStyle = 'bold';
     },
   });
-  y = doc.lastAutoTable.finalY + 16;
+  y = doc.lastAutoTable.finalY + 12;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
+  doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
   doc.text(`NET SALARY:  ${money(slip?.net || 0)}`, margin + contentWidth, y, { align: 'right' });
-
-  const footerY = doc.internal.pageSize.getHeight() - 28;
-  doc.setDrawColor(226, 232, 240);
-  doc.line(margin, footerY - 8, pageWidth - margin, footerY - 8);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text('Generated by PunchPay  ·  punchpay.in', pageWidth / 2, footerY, { align: 'center' });
 }
 
 export function createCompactPayslipDoc({
@@ -812,7 +788,7 @@ export function createCompactPayslipDoc({
   payrollRow,
 }) {
   const sabariPage = Array.isArray(breakdown?.sabari?.payslipLines);
-  const doc = createPdf({ orientation: 'p', format: sabariPage ? 'a4' : 'a5' });
+  const doc = createPdf({ orientation: sabariPage ? 'l' : 'p', format: 'a5' });
   if (sabariPage) {
     renderSabariPayslipPage(doc, {
       company,
