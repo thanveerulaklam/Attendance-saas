@@ -748,7 +748,7 @@ function renderSabariPayslipPage(doc, params) {
   y = doc.lastAutoTable.finalY + 12;
 
   const totalMinutes = days.reduce((sum, day) => sum + Number(day.insideMinutes || 0), 0);
-  const weekHours = (totalMinutes / 60).toFixed(2);
+  const weekHours = formatSabariDuration(totalMinutes);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
   doc.setTextColor(15, 23, 42);
