@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { downloadCompactPayslipPdf } from '../../utils/payslipPdf';
 import { normalizeWhatsAppNumber, openWhatsAppChat } from '../../utils/whatsapp';
 import { authFetch } from '../../utils/api';
-import { formatMoneyAmount, formatMoneyWithSymbol } from '../../utils/formatMoney';
+import { formatMoneyAmount, formatMoneyWithSymbol, formatMoneyWithSymbolExact } from '../../utils/formatMoney';
 import { regionFeaturesForCountry, companyCurrency } from '../../utils/regionFeatures';
 import RecordPaymentModal, { paymentModeLabel } from './RecordPaymentModal';
 import { lateDeductionLabel, overtimePayLabel, overtimeWindowLabel } from '../../utils/payrollPayLabels';
@@ -503,7 +503,7 @@ export default function PayslipModal({
               </div>
               <div className="flex justify-between">
                 <span className="font-medium text-slate-600">Basic Salary</span>
-                <span>{fmtSym(attendanceDetails?.basic_salary)}</span>
+                <span>{formatMoneyWithSymbolExact(attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary, currency)}</span>
               </div>
             </div>
             <div className="space-y-1.5">
@@ -736,7 +736,7 @@ export default function PayslipModal({
                 {isCompletePeriod && (
                   <div className="flex justify-between">
                     <span>Basic Salary</span>
-                    <span className="font-medium">{fmtSym(breakdown.employee?.basic_salary)}</span>
+                    <span className="font-medium">{formatMoneyWithSymbolExact(breakdown.employee?.basic_salary, currency)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">

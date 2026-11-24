@@ -49,6 +49,22 @@ export function formatMoneyWithSymbol(value, currency = 'INR') {
   }
 }
 
+/** Saved salary rates can include paise. Whole amounts stay without .00. */
+export function formatMoneyWithSymbolExact(value, currency = 'INR') {
+  if (value == null || value === '' || Number.isNaN(Number(value))) return '—';
+  const code = String(currency || 'INR').toUpperCase();
+  try {
+    return new Intl.NumberFormat(currencyLocale(code), {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(Number(value));
+  } catch {
+    return `${FALLBACK_SYMBOL[code] || code} ${Number(value)}`;
+  }
+}
+
 /** Short symbol for form labels (₹, AED, …). */
 export function currencySymbol(currency = 'INR') {
   const code = String(currency || 'INR').toUpperCase();

@@ -374,7 +374,7 @@ function renderCompactPayslip(
         ['Shift', attendanceDetails?.shift_name || '—'],
         [
           'Basic salary',
-          money(attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary ?? 0),
+          moneyRate(attendanceDetails?.basic_salary ?? breakdown?.employee?.basic_salary ?? 0),
         ],
       ],
     }) + layout.sectionGap;
@@ -601,6 +601,15 @@ function sheetDate(ymd) {
   return `${String(day).padStart(2, '0')}-${months[month - 1]}-${year}`;
 }
 
+function moneyRate(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return '—';
+  return `Rs ${new Intl.NumberFormat('en-IN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(num)}`;
+}
+
 function moneyPlain(n) {
   const num = Number(n);
   if (!Number.isFinite(num)) return '0.00';
@@ -703,7 +712,7 @@ function renderSabariPayslipPage(doc, params) {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Per hour  Rs ${moneyPlain(rate)}`, margin + contentWidth, y, { align: 'right' });
+  doc.text(`Per hour  ${moneyRate(rate)}`, margin + contentWidth, y, { align: 'right' });
   y += 8;
 
   autoTable(doc, {

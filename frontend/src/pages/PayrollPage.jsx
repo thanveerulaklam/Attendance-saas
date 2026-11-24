@@ -53,6 +53,18 @@ function currentYear() {
   return new Date().getFullYear();
 }
 
+/** Payroll is reviewed after the period ends, so the page opens on the last finished month. */
+function previousMonthState(date = new Date()) {
+  const previous = new Date(date.getFullYear(), date.getMonth() - 1, 1);
+  return { year: previous.getFullYear(), month: String(previous.getMonth() + 1) };
+}
+
+function previousWeekSundayYmd(date = new Date()) {
+  const previous = new Date(date);
+  previous.setDate(previous.getDate() - 7);
+  return getSundayYmd(previous);
+}
+
 function normalizeBranchesPayload(payload) {
   if (Array.isArray(payload)) return payload;
   if (payload && Array.isArray(payload.branches)) return payload.branches;
@@ -564,9 +576,9 @@ export default function PayrollPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [payrollMode, setPayrollMode] = useState('monthly'); // 'monthly' | 'weekly'
-  const [year, setYear] = useState(currentYear());
-  const [month, setMonth] = useState(String(new Date().getMonth() + 1));
-  const [weekStartDate, setWeekStartDate] = useState(getSundayYmd(new Date()));
+  const [year, setYear] = useState(() => previousMonthState().year);
+  const [month, setMonth] = useState(() => previousMonthState().month);
+  const [weekStartDate, setWeekStartDate] = useState(() => previousWeekSundayYmd());
   const [employeeId, setEmployeeId] = useState('');
   const [employees, setEmployees] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -576,9 +588,11 @@ export default function PayrollPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [sabariPreview, setSabariPreview] = useState({ deferrable: [], pending: [] });
   const [sabariHoldKeys, setSabariHoldKeys] = useState([]);
-  const [generateForm, setGenerateForm] = useState({
-    year: currentYear(),
-    month: String(new Date().getMonth() + 1),
+  const [generateForm, setGenerateForm] = useState(() => {
+    const opening = previousMonthState();
+    return {
+    year: opening.year,
+    month: opening.month,
     branch_id: '',
     employee_id: '',
     includeOvertime: false,
@@ -586,6 +600,7 @@ export default function PayrollPage() {
     applyAdvanceRepayments: false,
     encashUnusedPaidLeave: false,
     noLeaveIncentive: '',
+    };
   });
   const [weeklyGenerateForm, setWeeklyGenerateForm] = useState({
     branch_id: '',
